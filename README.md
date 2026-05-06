@@ -37,37 +37,61 @@ _reference/
   old-build/            Original compiled assets
 ```
 
-## First-time setup
+## First-time setup (minimum to log in)
 
 1. **Pull env from Vercel** (after the project is linked):
    ```sh
    npx vercel link
    npx vercel env pull .env.local
    ```
-   That populates `POSTGRES_URL` and `BLOB_READ_WRITE_TOKEN` from the
-   already-deployed Vercel project.
+   That populates `POSTGRES_URL` (and `BLOB_READ_WRITE_TOKEN` if a Blob store
+   is set up) from the already-deployed Vercel project.
 
-2. **Fill in the auth env vars** in `.env.local` (see `.env.example`):
-   - `AUTH_SECRET` — `openssl rand -base64 32`
-   - Microsoft Entra app registration values (tenant ID, client ID, secret)
-   - SMTP credentials for the magic-link provider
+2. **Set `AUTH_SECRET`** in `.env.local`:
+   ```sh
+   echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.local
+   ```
 
 3. **Push the schema to Postgres**:
    ```sh
    npm run db:push
    ```
 
-4. **Pre-provision admin users** (one-time, until we build the admin UI):
+4. **Create your first admin user**:
    ```sh
-   npm run db:studio
+   npm run user:create -- --email you@chiefspursuitsurplus.com --role admin --name "Your Name"
    ```
-   In Drizzle Studio, insert a row in `users` with your email and
-   `role = 'admin'`. Auth rejects anyone not in the table.
+   The script prompts for a password (8+ chars). Repeat for each employee
+   (use `--role sales | warehouse | tech | accountant | manager`).
 
-5. **Run dev server**:
+   Reset a password later with `npm run user:set-password -- --email …`.
+
+5. **Run dev server** and sign in at http://localhost:3000:
    ```sh
    npm run dev
    ```
+
+That's it for local + Vercel deploy. **Microsoft SSO and email magic-link are
+optional and disabled until configured** — see below to enable.
+
+### Add Microsoft SSO (optional, later)
+
+1. portal.azure.com → Microsoft Entra ID → App registrations → New
+2. Redirect URI (Web): `https://<your-domain>/api/auth/callback/microsoft-entra-id`
+3. Issue a client secret; copy the *Value*.
+4. Set `AUTH_MICROSOFT_ENTRA_ID_ID`, `_SECRET`, and `_ISSUER`
+   (`https://login.microsoftonline.com/<tenant-id>/v2.0`) in Vercel env
+   vars and locally.
+5. The Microsoft button automatically appears on the sign-in page once
+   those env vars are present. Users still need to be pre-provisioned in
+   the `users` table (email match, `active = true`).
+
+### Add email magic-link (optional, later)
+
+1. Sign up for Resend (or any SMTP).
+2. Set `EMAIL_SERVER_HOST`, `_PORT`, `_USER`, `_PASSWORD`, and
+   `EMAIL_FROM` in env.
+3. The "send magic link" form auto-appears on the sign-in page.
 
 ## Auth model
 
