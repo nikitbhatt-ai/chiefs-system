@@ -52,9 +52,11 @@ export const authConfig: NextAuthConfig = {
     authorized({ auth, request }) {
       const isLoggedIn = !!auth?.user;
       const path = request.nextUrl.pathname;
-      const isAuthRoute =
-        path.startsWith("/signin") || path.startsWith("/api/auth");
-      if (isAuthRoute) return true;
+      const isPublicRoute =
+        path.startsWith("/signin") ||
+        path.startsWith("/setup") ||
+        path.startsWith("/api/auth");
+      if (isPublicRoute) return true;
       return isLoggedIn;
     },
   },

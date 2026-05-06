@@ -6,11 +6,12 @@ import { AuthError } from "next-auth";
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ callbackUrl?: string; error?: string }>;
+  searchParams: Promise<{ callbackUrl?: string; error?: string; setup?: string }>;
 }) {
   const params = await searchParams;
   const callbackUrl = params.callbackUrl ?? "/";
   const error = params.error;
+  const justSetUp = params.setup === "ok";
 
   async function passwordSignIn(formData: FormData) {
     "use server";
@@ -52,6 +53,12 @@ export default async function SignInPage({
             Internal workflow platform
           </p>
         </div>
+
+        {justSetUp ? (
+          <div className="text-xs font-body text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-3 py-2">
+            Admin account created. Sign in below.
+          </div>
+        ) : null}
 
         {error ? (
           <div className="text-xs font-body text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">

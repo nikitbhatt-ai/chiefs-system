@@ -37,42 +37,60 @@ _reference/
   old-build/            Original compiled assets
 ```
 
-## First-time setup (minimum to log in)
+## First-time setup (no terminal needed)
 
-1. **Pull env from Vercel** (after the project is linked):
-   ```sh
-   npx vercel link
-   npx vercel env pull .env.local
-   ```
-   That populates `POSTGRES_URL` (and `BLOB_READ_WRITE_TOKEN` if a Blob store
-   is set up) from the already-deployed Vercel project.
+You can bootstrap the whole platform from the Vercel dashboard + your
+browser. No local install required.
 
-2. **Set `AUTH_SECRET`** in `.env.local`:
-   ```sh
-   echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env.local
-   ```
+1. **In Vercel, set two env vars** on this project (Settings → Environment
+   Variables):
+   - `POSTGRES_URL` — auto-populated when you create a Postgres store under
+     Storage → Create Database. Pick Postgres / Neon, attach to the project.
+   - `AUTH_SECRET` — paste any long random string. From your terminal you
+     can generate one with `openssl rand -base64 32`, or use any password
+     manager's "Generate" button (32+ chars).
 
-3. **Push the schema to Postgres**:
-   ```sh
-   npm run db:push
-   ```
+2. **Create the database tables.** Open the Vercel dashboard → your
+   Postgres store → **Query** tab. Open
+   `_reference/initial-schema.sql` from this repo on GitHub, copy the
+   entire file, paste it into the Query box, and click **Run**. You should
+   see "CREATE TABLE" messages and no errors.
 
-4. **Create your first admin user**:
-   ```sh
-   npm run user:create -- --email you@chiefspursuitsurplus.com --role admin --name "Your Name"
-   ```
-   The script prompts for a password (8+ chars). Repeat for each employee
-   (use `--role sales | warehouse | tech | accountant | manager`).
+3. **Redeploy** the project so it picks up the env vars. Vercel →
+   Deployments → latest → Redeploy.
 
-   Reset a password later with `npm run user:set-password -- --email …`.
+4. **Visit `/setup` on your deployed app**, e.g.
+   `https://<your-project>.vercel.app/setup`. Fill in your name, email,
+   and a password (8+ chars). Click **Create admin and continue**. That
+   creates your first admin user.
 
-5. **Run dev server** and sign in at http://localhost:3000:
-   ```sh
-   npm run dev
-   ```
+5. **Sign in** at `/signin` with the email + password you just set.
 
-That's it for local + Vercel deploy. **Microsoft SSO and email magic-link are
-optional and disabled until configured** — see below to enable.
+That's it — you're in. **Microsoft SSO and email magic-link are
+optional** and only appear on the sign-in page when their env vars are
+set. Add them later (see below).
+
+### Inviting more employees
+
+Until the in-app admin UI lands, more users can be added two ways:
+
+- **Easiest:** in the Vercel Postgres Query console, run
+  `INSERT INTO users (email, name, display_name, role, active) VALUES
+  ('them@example.com', 'Their Name', 'Their Name', 'sales', true);`
+  Then sign them in via Microsoft SSO (if configured) or have an admin
+  set their password using the local CLI below.
+
+- **Local CLI** (requires Node + git + cloning the repo on your machine):
+  ```sh
+  git clone https://github.com/nikitbhatt-ai/chiefs-system.git
+  cd chiefs-system
+  npm install
+  npx vercel link              # connect to your Vercel project
+  npx vercel env pull .env.local
+  npm run user:create -- --email new@example.com --role sales --name "Their Name"
+  npm run user:set-password -- --email new@example.com
+  ```
+  Roles: `admin | manager | sales | warehouse | tech | accountant`.
 
 ### Add Microsoft SSO (optional, later)
 
