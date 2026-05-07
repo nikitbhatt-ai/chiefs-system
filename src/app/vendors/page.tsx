@@ -8,6 +8,8 @@ async function createVendor(formData: FormData) {
   "use server";
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
+  const discountRaw = String(formData.get("discountPct") ?? "").trim();
+  const discountPct = discountRaw ? discountRaw : null;
   await db.insert(vendors).values({
     name,
     contactName: String(formData.get("contactName") ?? "").trim() || null,
@@ -15,6 +17,7 @@ async function createVendor(formData: FormData) {
     phone: String(formData.get("phone") ?? "").trim() || null,
     address: String(formData.get("address") ?? "").trim() || null,
     notes: String(formData.get("notes") ?? "").trim() || null,
+    discountPct,
   });
   revalidatePath("/vendors");
 }
@@ -60,9 +63,18 @@ export default async function VendorsPage() {
             className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
           />
           <input
+            name="discountPct"
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            placeholder="Distributor discount %"
+            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+          <input
             name="address"
             placeholder="Address"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2"
+            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
           />
           <textarea
             name="notes"
@@ -89,13 +101,14 @@ export default async function VendorsPage() {
               <th className="px-4 py-2.5">Contact</th>
               <th className="px-4 py-2.5">Email</th>
               <th className="px-4 py-2.5">Phone</th>
+              <th className="px-4 py-2.5">Discount</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-xs text-zinc-500">
+                <td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">
                   No vendors yet — add your first one above.
                 </td>
               </tr>
@@ -106,6 +119,9 @@ export default async function VendorsPage() {
                   <td className="px-4 py-2.5 text-xs">{v.contactName ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs">{v.email ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs">{v.phone ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-xs">
+                    {v.discountPct != null ? `${v.discountPct}%` : "—"}
+                  </td>
                   <td className="px-4 py-2.5 text-right">
                     <form action={deleteVendor}>
                       <input type="hidden" name="id" value={v.id} />

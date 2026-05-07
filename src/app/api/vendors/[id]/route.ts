@@ -27,6 +27,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       ...("phone" in body ? { phone: body.phone } : {}),
       ...("address" in body ? { address: body.address } : {}),
       ...("notes" in body ? { notes: body.notes } : {}),
+      ...("discountPct" in body
+        ? { discountPct: body.discountPct != null ? String(body.discountPct) : null }
+        : {}),
       updatedAt: new Date(),
     })
     .where(eq(vendors.id, id))

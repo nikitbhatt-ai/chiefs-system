@@ -27,6 +27,7 @@ export async function POST(req: Request) {
       phone: body.phone ?? null,
       address: body.address ?? null,
       notes: body.notes ?? null,
+      discountPct: body.discountPct != null ? String(body.discountPct) : null,
     })
     .returning();
   return NextResponse.json(row, { status: 201 });

@@ -151,6 +151,7 @@ export const vendors = pgTable("vendors", {
   phone: text("phone"),
   address: text("address"),
   notes: text("notes"),
+  discountPct: numeric("discount_pct", { precision: 5, scale: 2 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
