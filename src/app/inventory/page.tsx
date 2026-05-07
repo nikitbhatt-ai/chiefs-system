@@ -194,6 +194,12 @@ export default async function InventoryPage({
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <a
+                        href={`/inventory/${p.id}`}
+                        className="text-[11px] text-blue-400 hover:text-blue-300 mr-3"
+                      >
+                        Cost history
+                      </a>
+                      <a
                         href={`/inventory/${p.id}/edit`}
                         className="text-[11px] text-amber-400 hover:text-amber-300 mr-3"
                       >

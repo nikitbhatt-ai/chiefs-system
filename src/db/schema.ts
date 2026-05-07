@@ -273,6 +273,32 @@ export const parts = pgTable(
   (t) => [index("parts_sku_idx").on(t.sku)],
 );
 
+// One row per discrete receipt of a part from a PO. Drives FIFO + weighted
+// avg costing. quantityRemaining decrements as the part is consumed
+// (work-order parts or sales). On creation, quantityRemaining === quantityReceived.
+export const partReceipts = pgTable(
+  "part_receipts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    partId: uuid("part_id")
+      .notNull()
+      .references(() => parts.id, { onDelete: "cascade" }),
+    purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, {
+      onDelete: "set null",
+    }),
+    vendorId: uuid("vendor_id").references(() => vendors.id),
+    quantityReceived: integer("quantity_received").notNull(),
+    quantityRemaining: integer("quantity_remaining").notNull(),
+    unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
+    receivedAt: timestamp("received_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("part_receipts_part_idx").on(t.partId),
+    index("part_receipts_received_at_idx").on(t.receivedAt),
+  ],
+);
+
 export const partCostHistory = pgTable("part_cost_history", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id")

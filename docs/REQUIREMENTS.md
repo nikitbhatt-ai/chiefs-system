@@ -110,10 +110,37 @@ are pending and should be addressed when their owning module is built.
       a build.
 - [ ] Intake checklist with photo upload + generate external PDF.
 
-## Purchase Orders (not yet built)
+## Purchase Orders
 
-- [ ] List + filters.
-- [ ] PO history per part (powers the Inventory PO history button).
+- [x] List + create draft + delete.
+- [x] PO editor with vendor, expected date, line items (parts dropdown
+      auto-fills description + cost), notes, total computed live.
+- [x] **Receive shipment** flow — per-line qty entry. Each receipt:
+      - Creates a `part_receipts` ledger row (qty + unit cost + date).
+      - Increments `parts.quantity_on_hand`.
+      - Logs `part_cost_history` entry.
+      - Updates PO status to `partially_received` or `received`.
+- [x] Status badges (pending/pending_review/po_received/partially_received/received).
+- [ ] Filters by vendor / status / date range.
+- [ ] Per-part PO history button on the part detail page (currently
+      shown as the FIFO layers table, which IS the PO history).
+
+## Costing (FIFO + weighted average)
+
+- [x] **`part_receipts` ledger table** — one row per receipt, tracks
+      qty_received, qty_remaining, unit_cost, vendor, PO link.
+- [x] Per-part **`/inventory/[id]` cost-history page**:
+      - Weighted-average cost across remaining FIFO layers (what the
+        on-hand stock is actually worth right now).
+      - Lifetime weighted average across all receipts ever.
+      - Last received cost.
+      - FIFO cost preview for sample qty (1, 5, 10, 25 units).
+      - Full FIFO layers table, oldest first, depleted layers dimmed.
+- [ ] **Consumption** depletes FIFO layers (decrement qty_remaining
+      oldest first). Wire this in when work-orders consume parts and
+      when invoices ship parts.
+- [ ] Optional moving-weighted-average cache on `parts` for fast lookup
+      (currently computed at read time — fine until we have heavy load).
 
 ## Time Clock (not yet built)
 
