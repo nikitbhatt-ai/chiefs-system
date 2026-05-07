@@ -77,22 +77,20 @@ are pending and should be addressed when their owning module is built.
 - [ ] VIN history of all work completed on the vehicle (depends on
       Work Orders module).
 
-## Inventory / Parts (not yet built)
+## Inventory / Parts
 
+- [x] List, add, edit, archive, unarchive, delete.
+- [x] Pricing labels: **Internal Cost** + **Price** (single price column).
+- [x] Per-part margin AND markup % live calculation in form.
+- [x] Quick "set price by N% margin/markup" buttons.
+- [x] Manufacturer + Supplier dropdowns sourced from Vendors.
+- [x] Filters on category, vendor, archived.
+- [x] Edit pencil opens correct row (uses `/inventory/[id]/edit` pattern).
 - [ ] Mass import via CSV/Excel.
-- [ ] Pricing per part:
-  - Rename "Cost Price" → **"Internal Cost"** everywhere (parts UI,
-    invoices, estimates).
-  - Rename "Retail Price" → **"Price"** everywhere.
-  - Remove Government Price + Commercial Price (use one Price).
-  - Per-part margin and markup % selectors so MSRP can be set per
-    vendor's margins.
-- [ ] Manufacturer + Supplier fields are dropdowns sourced from the
-      Vendors table; dropdown has an inline "Add new vendor" option.
-- [ ] Per-part PO history button → shows avg cost + FIFO costing.
-- [ ] Pencil/edit icon must edit the correct row (was buggy in old build —
-      we will avoid this by using `/inventory/[id]/edit` pattern).
-- [ ] Filters on every column.
+- [ ] Per-part PO history button → shows avg cost + FIFO costing
+      (depends on Purchase Orders module).
+- [ ] Inline "Add new vendor" inside the dropdown (currently links
+      out to /vendors).
 
 ## Vendors
 

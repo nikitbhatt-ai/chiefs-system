@@ -265,6 +265,7 @@ export const parts = pgTable(
     cost: numeric("cost", { precision: 12, scale: 2 }),
     price: numeric("price", { precision: 12, scale: 2 }),
     vendorId: uuid("vendor_id").references(() => vendors.id),
+    manufacturerId: uuid("manufacturer_id").references(() => vendors.id),
     archived: boolean("archived").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
