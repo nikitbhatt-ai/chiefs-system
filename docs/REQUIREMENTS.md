@@ -160,9 +160,19 @@ These need answers before the related feature can be built:
    radius (meters)?
 5. **Accounting reports** — who receives the weekly/monthly emails?
    What's in them?
-6. **Workflow page**: kanban will live inside Work Orders and Deals
-   (per backlog). User to confirm whether a separate top-level
-   "Workflow" page is needed in addition.
+6. **Workflow page**: ✅ confirmed. Top-level `/workflow` page with
+   8 columns mirroring Shopmonkey style:
+   1. Estimates (sourced from quotes status sent/approved, before promotion)
+   2. Confirmed Builds
+   3. Awaiting Parts
+   4. Next In Line
+   5. In Progress
+   6. QC Check
+   7. Completed
+   8. Delivered
+   Phase 1 (current): cards with stage-change dropdown.
+   Phase 2: drag-and-drop, search/filter, tags on cards, photo
+   thumbnails, bulk actions.
 
 ## Notes on building order
 
