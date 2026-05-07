@@ -123,7 +123,13 @@ export default async function VendorsPage() {
                     {v.discountPct != null ? `${v.discountPct}%` : "—"}
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    <form action={deleteVendor}>
+                    <a
+                      href={`/vendors/${v.id}/edit`}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3"
+                    >
+                      Edit
+                    </a>
+                    <form action={deleteVendor} className="inline">
                       <input type="hidden" name="id" value={v.id} />
                       <button
                         type="submit"

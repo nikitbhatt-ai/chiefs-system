@@ -123,7 +123,13 @@ export default async function CrmPage() {
                     {c.taxExempt ? "Exempt" : "—"}
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    <form action={deleteCustomer}>
+                    <a
+                      href={`/crm/${c.id}/edit`}
+                      className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3"
+                    >
+                      Edit
+                    </a>
+                    <form action={deleteCustomer} className="inline">
                       <input type="hidden" name="id" value={c.id} />
                       <button
                         type="submit"
