@@ -65,10 +65,13 @@ are pending and should be addressed when their owning module is built.
 
 ## Vehicles
 
-- [ ] **Multi-lot support**: on-site, dealership, upfitting, Sames drop-off.
-      Each vehicle is assigned to one lot at a time.
-- [ ] VIN decoder button → "add as asset" creates a vehicle record.
-- [ ] VIN history of all work completed on the vehicle.
+- [x] **Multi-lot support**: on-site, dealership, upfitting, Sames drop-off.
+      Implemented as `lotLocation` dropdown on the vehicle form.
+- [x] VIN decoder via NHTSA vPIC API at `/api/vin/decode/[vin]`. Form
+      auto-fills year/make/model/trim. "Save vehicle" creates the asset.
+- [x] List, add, edit, delete.
+- [ ] VIN history of all work completed on the vehicle (depends on
+      Work Orders module).
 
 ## Inventory / Parts (not yet built)
 
@@ -157,6 +160,9 @@ These need answers before the related feature can be built:
    radius (meters)?
 5. **Accounting reports** — who receives the weekly/monthly emails?
    What's in them?
+6. **Workflow page**: kanban will live inside Work Orders and Deals
+   (per backlog). User to confirm whether a separate top-level
+   "Workflow" page is needed in addition.
 
 ## Notes on building order
 
