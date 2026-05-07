@@ -1,7 +1,21 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { workOrders, quotes, customers, vehicles } from "@/db/schema";
+import {
+  workOrders,
+  quotes,
+  customers,
+  vehicles,
+  parts,
+  partReceipts,
+} from "@/db/schema";
+import { asc } from "drizzle-orm";
+
+type StockLine = {
+  kind?: string;
+  partId?: string;
+  quantity?: number;
+};
 import { AppShell } from "@/components/AppShell";
 
 const STAGES: { key: string; label: string; index: number }[] = [
@@ -22,11 +36,61 @@ async function moveWorkOrder(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const stage = String(formData.get("stage") ?? "");
   if (!id || !WO_STAGES.includes(stage)) return;
-  await db
-    .update(workOrders)
-    .set({ status: stage, updatedAt: new Date() })
-    .where(eq(workOrders.id, id));
+
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, id));
+  if (!wo) return;
+
+  // First time entering "in_progress" → consume linked quote's stock parts
+  // FIFO-style across part_receipts layers.
+  if (stage === "in_progress" && !wo.partsConsumed && wo.quoteId) {
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, wo.quoteId));
+    if (q) {
+      const lines = (q.lineItems as unknown as StockLine[]) ?? [];
+      for (const line of lines) {
+        if (line.kind !== "item" || !line.partId) continue;
+        const qty = Number(line.quantity || 0);
+        if (qty <= 0) continue;
+        // Pull oldest active layers and deplete.
+        const layers = await db
+          .select()
+          .from(partReceipts)
+          .where(eq(partReceipts.partId, line.partId))
+          .orderBy(asc(partReceipts.receivedAt));
+        let need = qty;
+        for (const layer of layers) {
+          if (need <= 0) break;
+          if (layer.quantityRemaining <= 0) continue;
+          const take = Math.min(need, layer.quantityRemaining);
+          await db
+            .update(partReceipts)
+            .set({ quantityRemaining: layer.quantityRemaining - take })
+            .where(eq(partReceipts.id, layer.id));
+          need -= take;
+        }
+        // Decrement on-hand. (Allows it to go negative if you ran out of
+        // received stock — that's a real signal you need to reorder.)
+        await db
+          .update(parts)
+          .set({
+            quantityOnHand: sql`${parts.quantityOnHand} - ${qty}`,
+            updatedAt: new Date(),
+          })
+          .where(eq(parts.id, line.partId));
+      }
+    }
+    await db
+      .update(workOrders)
+      .set({ status: stage, partsConsumed: true, updatedAt: new Date() })
+      .where(eq(workOrders.id, id));
+  } else {
+    await db
+      .update(workOrders)
+      .set({ status: stage, updatedAt: new Date() })
+      .where(eq(workOrders.id, id));
+  }
+
   revalidatePath("/workflow");
+  revalidatePath("/inventory");
 }
 
 async function promoteEstimate(formData: FormData) {

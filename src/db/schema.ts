@@ -344,6 +344,7 @@ export const workOrders = pgTable("work_orders", {
   completedAt: timestamp("completed_at"),
   buildSpec: jsonb("build_spec"),
   notes: text("notes"),
+  partsConsumed: boolean("parts_consumed").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

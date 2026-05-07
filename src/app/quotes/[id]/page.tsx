@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers } from "@/db/schema";
+import { quotes, customers, parts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 
@@ -73,6 +73,18 @@ export default async function QuotePage({
     .from(customers)
     .orderBy(customers.name);
 
+  const partRows = await db
+    .select({
+      id: parts.id,
+      sku: parts.sku,
+      name: parts.name,
+      price: parts.price,
+      cost: parts.cost,
+    })
+    .from(parts)
+    .where(eq(parts.archived, false))
+    .orderBy(parts.sku);
+
   const initial = (q.lineItems as unknown as QuoteLine[]) ?? [];
 
   return (
@@ -87,6 +99,7 @@ export default async function QuotePage({
         notes={q.notes ?? ""}
         initialLines={initial}
         customers={customerRows}
+        parts={partRows}
         action={saveQuote}
       />
     </AppShell>

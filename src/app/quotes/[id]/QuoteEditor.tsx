@@ -10,6 +10,7 @@ export type QuoteLine =
       unitPrice: number;
       discount: number;
       discountKind: "pct" | "amt";
+      partId?: string;
     }
   | {
       kind: "fee";
@@ -29,6 +30,7 @@ export function QuoteEditor({
   notes,
   initialLines,
   customers,
+  parts,
   action,
 }: {
   id: string;
@@ -37,6 +39,7 @@ export function QuoteEditor({
   notes: string;
   initialLines: QuoteLine[];
   customers: { id: string; name: string }[];
+  parts: { id: string; sku: string; name: string; price: string | null; cost: string | null }[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
@@ -83,6 +86,23 @@ export function QuoteEditor({
         unitPrice: 0,
         discount: 0,
         discountKind: "pct",
+      },
+    ]);
+  }
+  function addPart(partId: string) {
+    if (!partId) return;
+    const part = parts.find((p) => p.id === partId);
+    if (!part) return;
+    setLines((p) => [
+      ...p,
+      {
+        kind: "item",
+        description: `${part.sku} — ${part.name}`,
+        quantity: 1,
+        unitPrice: part.price ? Number(part.price) : 0,
+        discount: 0,
+        discountKind: "pct",
+        partId: part.id,
       },
     ]);
   }
@@ -138,13 +158,28 @@ export function QuoteEditor({
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Line items
           </h3>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <select
+              defaultValue=""
+              onChange={(e) => {
+                addPart(e.target.value);
+                e.target.value = "";
+              }}
+              className="bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px] text-white max-w-[200px]"
+            >
+              <option value="">+ Add from inventory…</option>
+              {parts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.sku} — {p.name}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
               onClick={addItem}
               className="text-[11px] font-body text-amber-400 hover:text-amber-300"
             >
-              + Add item
+              + Custom item
             </button>
             <button
               type="button"

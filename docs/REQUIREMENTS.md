@@ -59,7 +59,10 @@ are pending and should be addressed when their owning module is built.
 - [x] Status workflow: draft → sent → approved → converted.
 - [x] Customer dropdown.
 - [x] Tax rate input per quote.
-- [ ] Add parts from inventory to a quote (depends on Inventory module).
+- [x] Add parts from inventory to a quote via "+ Add from inventory…"
+      dropdown. Adds line with sku/name/price/partId; stock NOT deducted
+      at quote time (deducted when the linked work order moves to
+      "In Progress" on the Workflow board).
 - [ ] Partial payment tracking, down-payment tracking.
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
 - [ ] PDF export for quotes/estimates/invoices (branded, see cross-cutting).
@@ -136,9 +139,12 @@ are pending and should be addressed when their owning module is built.
       - Last received cost.
       - FIFO cost preview for sample qty (1, 5, 10, 25 units).
       - Full FIFO layers table, oldest first, depleted layers dimmed.
-- [ ] **Consumption** depletes FIFO layers (decrement qty_remaining
-      oldest first). Wire this in when work-orders consume parts and
-      when invoices ship parts.
+- [x] **Consumption depletes FIFO layers**: when a work order linked
+      to a quote with stock parts moves to "In Progress" on the
+      Workflow board, oldest receipt layers are decremented oldest-first
+      and `parts.quantity_on_hand` is reduced. Idempotent via the
+      `work_orders.parts_consumed` flag.
+- [ ] Restock action (manual reverse if a build is canceled).
 - [ ] Optional moving-weighted-average cache on `parts` for fast lookup
       (currently computed at read time — fine until we have heavy load).
 
