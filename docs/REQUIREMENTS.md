@@ -48,20 +48,24 @@ are pending and should be addressed when their owning module is built.
 - [ ] Quote builder lives inside the deal.
 - [ ] Upfit builder lives inside the deal.
 
-## Quotes / Estimates / Invoices (not yet built)
+## Quotes / Estimates / Invoices
 
-- [ ] Add parts to a quote when clicking into it (was broken in old build).
-- [ ] **Line items** with these per-row controls:
-  - Discount % OR $ amount toggle.
-  - Discount % uses a built-in calculator that recomputes Price in real time
-    based on the customer.
-  - Discount total computed at the bottom of the invoice.
-- [ ] Custom fees + fixed fees, with the ability to remove fixed fees per quote.
+- [x] List, create draft, open editor, delete.
+- [x] **Line items** with description, qty, unit price.
+- [x] Per-row discount with % OR $ toggle (live recalculation).
+- [x] Custom + fixed fees; both can be removed per quote.
+- [x] Live totals: subtotal, discount, fees, tax, grand total.
+- [x] Internal notes per quote.
+- [x] Status workflow: draft → sent → approved → converted.
+- [x] Customer dropdown.
+- [x] Tax rate input per quote.
+- [ ] Add parts from inventory to a quote (depends on Inventory module).
 - [ ] Partial payment tracking, down-payment tracking.
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
 - [ ] PDF export for quotes/estimates/invoices (branded, see cross-cutting).
 - [ ] Print and Send-to-customer are separate (see cross-cutting).
-- [ ] Internal notes per quote.
+- [ ] Per-customer discount calculator that pre-fills line discounts
+      based on the customer's negotiated rate.
 
 ## Vehicles
 
