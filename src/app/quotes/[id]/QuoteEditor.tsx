@@ -297,6 +297,14 @@ export function QuoteEditor({
           </div>
         </div>
         <div className="divide-y divide-white/5">
+          <div className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
+            <span className="col-span-4">Description</span>
+            <span className="col-span-1 text-right">Qty</span>
+            <span className="col-span-2 text-right">Unit price</span>
+            <span className="col-span-2 text-right">Discount</span>
+            <span className="col-span-2">Discount type</span>
+            <span className="col-span-1"></span>
+          </div>
           {lines.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-zinc-500 font-body">
               No line items yet. Add items or fees above.
@@ -402,24 +410,13 @@ export function QuoteEditor({
                   <span className="col-span-1 text-[10px] uppercase text-amber-400 tracking-wider">
                     {l.fixed ? "Fixed" : "Custom"}
                   </span>
-                  {!l.fixed ? (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(i)}
-                      className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
-                    >
-                      Remove
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => removeLine(i)}
-                      className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
-                      title="Fixed fees can still be removed per quote"
-                    >
-                      Remove
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeLine(i)}
+                    className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
                 </div>
               ),
             )
@@ -455,19 +452,30 @@ export function QuoteEditor({
         </div>
       </div>
 
-      <div className="flex justify-end gap-2">
-        <a
-          href="/quotes"
-          className="text-xs font-body text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors"
-        >
-          Back
-        </a>
-        <button
-          type="submit"
-          className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
-        >
-          Save quote
-        </button>
+      <div className="flex justify-between items-center gap-2">
+        <div className="flex gap-2">
+          <a
+            href={`/quotes/${id}/print`}
+            target="_blank"
+            className="text-xs font-body text-zinc-300 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors"
+          >
+            Print / Save as PDF
+          </a>
+        </div>
+        <div className="flex gap-2">
+          <a
+            href="/quotes"
+            className="text-xs font-body text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors"
+          >
+            Back
+          </a>
+          <button
+            type="submit"
+            className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
+          >
+            Save quote
+          </button>
+        </div>
       </div>
     </form>
   );
