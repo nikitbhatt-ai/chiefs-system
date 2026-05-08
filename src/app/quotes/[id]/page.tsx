@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, asc, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, parts } from "@/db/schema";
+import { quotes, customers, parts, workOrders, partReceipts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 
@@ -59,6 +59,94 @@ async function saveQuote(formData: FormData) {
   revalidatePath("/workflow");
 }
 
+const WORKFLOW_STAGES = [
+  "estimate",
+  "confirmed",
+  "awaiting_parts",
+  "next_in_line",
+  "in_progress",
+  "qc_check",
+  "completed",
+  "delivered",
+] as const;
+
+async function moveStage(formData: FormData) {
+  "use server";
+  const id = String(formData.get("id") ?? "");
+  const stage = String(formData.get("stage") ?? "");
+  if (!id || !WORKFLOW_STAGES.includes(stage as (typeof WORKFLOW_STAGES)[number])) return;
+
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) return;
+
+  let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
+  if (!wo && stage !== "estimate") {
+    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+    const inserted = await db
+      .insert(workOrders)
+      .values({
+        woNumber,
+        customerId: q.customerId ?? null,
+        quoteId: id,
+        status: stage,
+      })
+      .returning();
+    wo = inserted[0];
+  } else if (wo) {
+    await db
+      .update(workOrders)
+      .set({ status: stage, updatedAt: new Date() })
+      .where(eq(workOrders.id, wo.id));
+  }
+
+  if (stage === "in_progress" && wo && !wo.partsConsumed) {
+    const lines = (q.lineItems as unknown as QuoteLine[]) ?? [];
+    for (const line of lines) {
+      if (line.kind !== "item" || !line.partId) continue;
+      const qty = Number(line.quantity || 0);
+      if (qty <= 0) continue;
+      const layers = await db
+        .select()
+        .from(partReceipts)
+        .where(eq(partReceipts.partId, line.partId))
+        .orderBy(asc(partReceipts.receivedAt));
+      let need = qty;
+      for (const layer of layers) {
+        if (need <= 0) break;
+        if (layer.quantityRemaining <= 0) continue;
+        const take = Math.min(need, layer.quantityRemaining);
+        await db
+          .update(partReceipts)
+          .set({ quantityRemaining: layer.quantityRemaining - take })
+          .where(eq(partReceipts.id, layer.id));
+        need -= take;
+      }
+      await db
+        .update(parts)
+        .set({
+          quantityOnHand: sql`${parts.quantityOnHand} - ${qty}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(parts.id, line.partId));
+    }
+    await db
+      .update(workOrders)
+      .set({ partsConsumed: true, updatedAt: new Date() })
+      .where(eq(workOrders.id, wo.id));
+  }
+
+  await db
+    .update(quotes)
+    .set({ workflowStage: stage, updatedAt: new Date() })
+    .where(eq(quotes.id, id));
+
+  revalidatePath("/workflow");
+  revalidatePath("/quotes");
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/inventory");
+  revalidatePath("/work-orders");
+}
+
 export default async function QuotePage({
   params,
 }: {
@@ -90,8 +178,35 @@ export default async function QuotePage({
   return (
     <AppShell
       title={q.quoteNumber ?? "Quote"}
-      subtitle={`Status: ${q.status}`}
+      subtitle={`Status: ${q.status} · Stage: ${q.workflowStage.replace(/_/g, " ")}`}
     >
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
+          Workflow stage
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {WORKFLOW_STAGES.map((s, i) => {
+            const active = q.workflowStage === s;
+            return (
+              <form key={s} action={moveStage}>
+                <input type="hidden" name="id" value={q.id} />
+                <input type="hidden" name="stage" value={s} />
+                <button
+                  type="submit"
+                  className={`text-[11px] font-body px-3 py-1.5 rounded border transition-colors ${
+                    active
+                      ? "bg-amber-500 text-black border-amber-400 font-semibold"
+                      : "bg-black/40 text-zinc-300 border-white/10 hover:border-amber-500/50 hover:text-white"
+                  }`}
+                >
+                  {i + 1}. {s.replace(/_/g, " ")}
+                </button>
+              </form>
+            );
+          })}
+        </div>
+      </div>
+
       <QuoteEditor
         id={q.id}
         customerId={q.customerId}

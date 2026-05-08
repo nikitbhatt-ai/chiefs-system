@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { desc, eq, inArray, asc, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   workOrders,
@@ -9,14 +9,13 @@ import {
   parts,
   partReceipts,
 } from "@/db/schema";
-import { asc } from "drizzle-orm";
+import { AppShell } from "@/components/AppShell";
 
 type StockLine = {
   kind?: string;
   partId?: string;
   quantity?: number;
 };
-import { AppShell } from "@/components/AppShell";
 
 const STAGES: { key: string; label: string; index: number }[] = [
   { key: "estimate", label: "Estimates", index: 1 },
@@ -28,85 +27,83 @@ const STAGES: { key: string; label: string; index: number }[] = [
   { key: "completed", label: "Completed", index: 7 },
   { key: "delivered", label: "Delivered", index: 8 },
 ];
+const STAGE_KEYS = STAGES.map((s) => s.key);
 
-const WO_STAGES = STAGES.filter((s) => s.key !== "estimate").map((s) => s.key);
-
-async function moveWorkOrder(formData: FormData) {
+async function moveQuoteStage(formData: FormData) {
   "use server";
   const id = String(formData.get("id") ?? "");
   const stage = String(formData.get("stage") ?? "");
-  if (!id || !WO_STAGES.includes(stage)) return;
+  if (!id || !STAGE_KEYS.includes(stage)) return;
 
-  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, id));
-  if (!wo) return;
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) return;
 
-  // First time entering "in_progress" → consume linked quote's stock parts
-  // FIFO-style across part_receipts layers.
-  if (stage === "in_progress" && !wo.partsConsumed && wo.quoteId) {
-    const [q] = await db.select().from(quotes).where(eq(quotes.id, wo.quoteId));
-    if (q) {
-      const lines = (q.lineItems as unknown as StockLine[]) ?? [];
-      for (const line of lines) {
-        if (line.kind !== "item" || !line.partId) continue;
-        const qty = Number(line.quantity || 0);
-        if (qty <= 0) continue;
-        // Pull oldest active layers and deplete.
-        const layers = await db
-          .select()
-          .from(partReceipts)
-          .where(eq(partReceipts.partId, line.partId))
-          .orderBy(asc(partReceipts.receivedAt));
-        let need = qty;
-        for (const layer of layers) {
-          if (need <= 0) break;
-          if (layer.quantityRemaining <= 0) continue;
-          const take = Math.min(need, layer.quantityRemaining);
-          await db
-            .update(partReceipts)
-            .set({ quantityRemaining: layer.quantityRemaining - take })
-            .where(eq(partReceipts.id, layer.id));
-          need -= take;
-        }
-        // Decrement on-hand. (Allows it to go negative if you ran out of
-        // received stock — that's a real signal you need to reorder.)
-        await db
-          .update(parts)
-          .set({
-            quantityOnHand: sql`${parts.quantityOnHand} - ${qty}`,
-            updatedAt: new Date(),
-          })
-          .where(eq(parts.id, line.partId));
-      }
-    }
-    await db
-      .update(workOrders)
-      .set({ status: stage, partsConsumed: true, updatedAt: new Date() })
-      .where(eq(workOrders.id, id));
-  } else {
+  let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
+  if (!wo && stage !== "estimate") {
+    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+    const inserted = await db
+      .insert(workOrders)
+      .values({
+        woNumber,
+        customerId: q.customerId ?? null,
+        quoteId: id,
+        status: stage,
+      })
+      .returning();
+    wo = inserted[0];
+  } else if (wo) {
     await db
       .update(workOrders)
       .set({ status: stage, updatedAt: new Date() })
-      .where(eq(workOrders.id, id));
+      .where(eq(workOrders.id, wo.id));
   }
 
-  revalidatePath("/workflow");
-  revalidatePath("/inventory");
-}
+  if (stage === "in_progress" && wo && !wo.partsConsumed) {
+    const lines = (q.lineItems as unknown as StockLine[]) ?? [];
+    for (const line of lines) {
+      if (line.kind !== "item" || !line.partId) continue;
+      const qty = Number(line.quantity || 0);
+      if (qty <= 0) continue;
+      const layers = await db
+        .select()
+        .from(partReceipts)
+        .where(eq(partReceipts.partId, line.partId))
+        .orderBy(asc(partReceipts.receivedAt));
+      let need = qty;
+      for (const layer of layers) {
+        if (need <= 0) break;
+        if (layer.quantityRemaining <= 0) continue;
+        const take = Math.min(need, layer.quantityRemaining);
+        await db
+          .update(partReceipts)
+          .set({ quantityRemaining: layer.quantityRemaining - take })
+          .where(eq(partReceipts.id, layer.id));
+        need -= take;
+      }
+      await db
+        .update(parts)
+        .set({
+          quantityOnHand: sql`${parts.quantityOnHand} - ${qty}`,
+          updatedAt: new Date(),
+        })
+        .where(eq(parts.id, line.partId));
+    }
+    await db
+      .update(workOrders)
+      .set({ partsConsumed: true, updatedAt: new Date() })
+      .where(eq(workOrders.id, wo.id));
+  }
 
-async function promoteEstimate(formData: FormData) {
-  "use server";
-  const quoteId = String(formData.get("quoteId") ?? "");
-  if (!quoteId) return;
-  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
-  if (!q) return;
-  const woNumber = `WO-${Date.now().toString().slice(-7)}`;
-  await db.insert(workOrders).values({
-    woNumber,
-    customerId: q.customerId ?? null,
-    quoteId: q.id,
-    status: "confirmed",
-  });
+  await db
+    .update(quotes)
+    .set({ workflowStage: stage, updatedAt: new Date() })
+    .where(eq(quotes.id, id));
+
   revalidatePath("/workflow");
+  revalidatePath("/quotes");
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/inventory");
+  revalidatePath("/work-orders");
 }
 
 function fmtMoney(v: string | null | undefined) {
@@ -117,61 +114,32 @@ function fmtMoney(v: string | null | undefined) {
 }
 
 export default async function WorkflowPage() {
-  // Estimates = quotes that are sent/approved AND have no linked work order yet.
-  const promotedQuoteIds = await db
-    .select({ id: workOrders.quoteId })
-    .from(workOrders)
-    .where(sql`${workOrders.quoteId} is not null`);
-  const promoted = new Set(promotedQuoteIds.map((r) => r.id).filter(Boolean) as string[]);
+  const quoteRows = await db.select().from(quotes).orderBy(desc(quotes.createdAt));
 
-  const estimateRows = await db
-    .select({
-      id: quotes.id,
-      quoteNumber: quotes.quoteNumber,
-      customerId: quotes.customerId,
-      grandTotal: quotes.grandTotal,
-      status: quotes.status,
-      notes: quotes.notes,
-      createdAt: quotes.createdAt,
-    })
-    .from(quotes)
-    .where(or(eq(quotes.status, "sent"), eq(quotes.status, "approved")))
-    .orderBy(desc(quotes.createdAt));
-  const estimates = estimateRows.filter((q) => !promoted.has(q.id));
+  const customerIds = Array.from(
+    new Set(quoteRows.map((r) => r.customerId).filter(Boolean) as string[]),
+  );
 
-  // Work orders for the build columns.
-  const woRows = await db
+  const linkedWOs = await db
     .select({
       id: workOrders.id,
-      woNumber: workOrders.woNumber,
-      status: workOrders.status,
-      customerId: workOrders.customerId,
-      vehicleId: workOrders.vehicleId,
       quoteId: workOrders.quoteId,
-      notes: workOrders.notes,
-      createdAt: workOrders.createdAt,
+      vehicleId: workOrders.vehicleId,
     })
-    .from(workOrders)
-    .orderBy(desc(workOrders.createdAt));
-
-  // Fetch customer + vehicle + quote-total lookups in one go.
-  const customerIds = Array.from(
-    new Set(
-      [...estimates, ...woRows]
-        .map((r) => ("customerId" in r ? r.customerId : null))
-        .filter(Boolean) as string[],
-    ),
+    .from(workOrders);
+  const woByQuote = new Map(
+    linkedWOs.filter((w) => w.quoteId).map((w) => [w.quoteId as string, w]),
   );
   const vehicleIds = Array.from(
-    new Set(woRows.map((r) => r.vehicleId).filter(Boolean) as string[]),
-  );
-  const quoteIds = Array.from(
-    new Set(woRows.map((r) => r.quoteId).filter(Boolean) as string[]),
+    new Set(linkedWOs.map((w) => w.vehicleId).filter(Boolean) as string[]),
   );
 
-  const [customerRows, vehicleRows, quoteTotalsRows] = await Promise.all([
+  const [customerRows, vehicleRows] = await Promise.all([
     customerIds.length
-      ? db.select({ id: customers.id, name: customers.name }).from(customers).where(inArray(customers.id, customerIds))
+      ? db
+          .select({ id: customers.id, name: customers.name })
+          .from(customers)
+          .where(inArray(customers.id, customerIds))
       : Promise.resolve([] as { id: string; name: string }[]),
     vehicleIds.length
       ? db
@@ -184,32 +152,31 @@ export default async function WorkflowPage() {
           })
           .from(vehicles)
           .where(inArray(vehicles.id, vehicleIds))
-      : Promise.resolve([] as { id: string; year: number | null; make: string | null; model: string | null; vin: string | null }[]),
-    quoteIds.length
-      ? db
-          .select({ id: quotes.id, grandTotal: quotes.grandTotal })
-          .from(quotes)
-          .where(inArray(quotes.id, quoteIds))
-      : Promise.resolve([] as { id: string; grandTotal: string | null }[]),
+      : Promise.resolve(
+          [] as {
+            id: string;
+            year: number | null;
+            make: string | null;
+            model: string | null;
+            vin: string | null;
+          }[],
+        ),
   ]);
-
   const customerMap = new Map(customerRows.map((r) => [r.id, r.name]));
   const vehicleMap = new Map(vehicleRows.map((r) => [r.id, r]));
-  const quoteTotalMap = new Map(quoteTotalsRows.map((r) => [r.id, r.grandTotal]));
 
-  const wosByStage: Record<string, typeof woRows> = {};
-  for (const s of WO_STAGES) wosByStage[s] = [];
-  for (const wo of woRows) {
-    if (wosByStage[wo.status]) wosByStage[wo.status].push(wo);
-    else (wosByStage["confirmed"] ||= []).push(wo); // fallback bucket for unknown statuses
+  const byStage: Record<string, typeof quoteRows> = {};
+  for (const s of STAGE_KEYS) byStage[s] = [];
+  for (const q of quoteRows) {
+    const key = STAGE_KEYS.includes(q.workflowStage) ? q.workflowStage : "estimate";
+    byStage[key].push(q);
   }
 
   return (
-    <AppShell title="Workflow" subtitle="Build pipeline — Estimates through Delivered">
+    <AppShell title="Workflow" subtitle="Build pipeline — every quote, by stage">
       <div className="flex gap-3 overflow-x-auto pb-4">
         {STAGES.map((stage) => {
-          const items =
-            stage.key === "estimate" ? estimates : wosByStage[stage.key] ?? [];
+          const items = byStage[stage.key] ?? [];
           return (
             <div
               key={stage.key}
@@ -229,10 +196,14 @@ export default async function WorkflowPage() {
                   <div className="text-[11px] text-zinc-600 text-center py-6 font-body">
                     Empty
                   </div>
-                ) : stage.key === "estimate" ? (
-                  estimates.map((q) => {
+                ) : (
+                  items.map((q) => {
                     const customerName = q.customerId
                       ? customerMap.get(q.customerId)
+                      : null;
+                    const wo = woByQuote.get(q.id);
+                    const vehicle = wo?.vehicleId
+                      ? vehicleMap.get(wo.vehicleId)
                       : null;
                     return (
                       <div
@@ -240,59 +211,18 @@ export default async function WorkflowPage() {
                         className="bg-[#161624] border border-white/10 rounded-md p-2.5 space-y-1.5"
                       >
                         <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono text-zinc-500">
-                            {q.quoteNumber ?? `EST-${q.id.slice(0, 6)}`}
-                          </span>
-                          <span className="text-[9px] uppercase tracking-wider text-amber-300 bg-amber-500/10 rounded px-1.5">
+                          <a
+                            href={`/quotes/${q.id}`}
+                            className="text-[10px] font-mono text-amber-400 hover:text-amber-300"
+                          >
+                            {q.quoteNumber ?? `Q-${q.id.slice(0, 6)}`}
+                          </a>
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-400 bg-white/5 rounded px-1.5">
                             {q.status}
                           </span>
                         </div>
                         <div className="text-xs text-white font-body line-clamp-2">
-                          {q.notes ?? "Estimate"}
-                        </div>
-                        {customerName ? (
-                          <div className="text-[11px] text-zinc-400 font-body">
-                            {customerName}
-                          </div>
-                        ) : null}
-                        <div className="flex items-center justify-between pt-1">
-                          <span className="text-[11px] font-body font-semibold text-green-400">
-                            {fmtMoney(q.grandTotal) ?? "—"}
-                          </span>
-                          <form action={promoteEstimate}>
-                            <input type="hidden" name="quoteId" value={q.id} />
-                            <button
-                              type="submit"
-                              className="text-[10px] font-body text-amber-400 hover:text-amber-300"
-                            >
-                              Promote →
-                            </button>
-                          </form>
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  (wosByStage[stage.key] ?? []).map((wo) => {
-                    const customerName = wo.customerId
-                      ? customerMap.get(wo.customerId)
-                      : null;
-                    const vehicle = wo.vehicleId
-                      ? vehicleMap.get(wo.vehicleId)
-                      : null;
-                    const total = wo.quoteId ? quoteTotalMap.get(wo.quoteId) : null;
-                    return (
-                      <div
-                        key={wo.id}
-                        className="bg-[#161624] border border-white/10 rounded-md p-2.5 space-y-1.5"
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="text-[10px] font-mono text-zinc-500">
-                            {wo.woNumber ?? `WO-${wo.id.slice(0, 6)}`}
-                          </span>
-                        </div>
-                        <div className="text-xs text-white font-body line-clamp-2">
-                          {wo.notes ?? "Work order"}
+                          {q.notes ?? "Quote"}
                         </div>
                         {customerName ? (
                           <div className="text-[11px] text-zinc-400 font-body">
@@ -308,23 +238,19 @@ export default async function WorkflowPage() {
                           </div>
                         ) : null}
                         <div className="flex items-center justify-between pt-1 gap-2">
-                          {total ? (
-                            <span className="text-[11px] font-body font-semibold text-green-400">
-                              {fmtMoney(total)}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-zinc-600">—</span>
-                          )}
-                          <form action={moveWorkOrder} className="flex items-center gap-1">
-                            <input type="hidden" name="id" value={wo.id} />
+                          <span className="text-[11px] font-body font-semibold text-green-400">
+                            {fmtMoney(q.grandTotal) ?? "—"}
+                          </span>
+                          <form action={moveQuoteStage} className="flex items-center gap-1">
+                            <input type="hidden" name="id" value={q.id} />
                             <select
                               name="stage"
-                              defaultValue={wo.status}
+                              defaultValue={q.workflowStage}
                               className="bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[10px] text-zinc-300"
                             >
-                              {WO_STAGES.map((s) => (
-                                <option key={s} value={s}>
-                                  {STAGES.find((st) => st.key === s)?.label ?? s}
+                              {STAGES.map((s) => (
+                                <option key={s.key} value={s.key}>
+                                  {s.label}
                                 </option>
                               ))}
                             </select>
