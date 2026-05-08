@@ -74,8 +74,6 @@ export const commType = pgEnum("comm_type", [
   "note",
 ]);
 
-// ── Auth.js core tables ───────────────────────────────────────────
-
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
   email: text("email").notNull().unique(),
@@ -94,9 +92,7 @@ export const users = pgTable("users", {
 export const accounts = pgTable(
   "accounts",
   {
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     type: text("type").notNull(),
     provider: text("provider").notNull(),
     providerAccountId: text("provider_account_id").notNull(),
@@ -113,9 +109,7 @@ export const accounts = pgTable(
 
 export const sessions = pgTable("sessions", {
   sessionToken: text("session_token").primaryKey(),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   expires: timestamp("expires", { mode: "date" }).notNull(),
 });
 
@@ -128,8 +122,6 @@ export const verificationTokens = pgTable(
   },
   (t) => [primaryKey({ columns: [t.identifier, t.token] })],
 );
-
-// ── Domain tables ─────────────────────────────────────────────────
 
 export const customers = pgTable("customers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -207,6 +199,8 @@ export const deals = pgTable(
     vehicleModel: text("vehicle_model"),
     vin: text("vin"),
     stage: dealStage("stage").notNull().default("prospect"),
+    referralSource: text("referral_source"),
+    notes: text("notes"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
@@ -218,9 +212,7 @@ export const deals = pgTable(
 
 export const dealComms = pgTable("deal_comms", {
   id: uuid("id").defaultRandom().primaryKey(),
-  dealId: uuid("deal_id")
-    .notNull()
-    .references(() => deals.id, { onDelete: "cascade" }),
+  dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
   agentName: text("agent_name").notNull(),
   type: commType("type").notNull(),
   lastContactDate: timestamp("last_contact_date").notNull(),
@@ -274,19 +266,12 @@ export const parts = pgTable(
   (t) => [index("parts_sku_idx").on(t.sku)],
 );
 
-// One row per discrete receipt of a part from a PO. Drives FIFO + weighted
-// avg costing. quantityRemaining decrements as the part is consumed
-// (work-order parts or sales). On creation, quantityRemaining === quantityReceived.
 export const partReceipts = pgTable(
   "part_receipts",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    partId: uuid("part_id")
-      .notNull()
-      .references(() => parts.id, { onDelete: "cascade" }),
-    purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, {
-      onDelete: "set null",
-    }),
+    partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+    purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
     vendorId: uuid("vendor_id").references(() => vendors.id),
     quantityReceived: integer("quantity_received").notNull(),
     quantityRemaining: integer("quantity_remaining").notNull(),
@@ -302,9 +287,7 @@ export const partReceipts = pgTable(
 
 export const partCostHistory = pgTable("part_cost_history", {
   id: uuid("id").defaultRandom().primaryKey(),
-  partId: uuid("part_id")
-    .notNull()
-    .references(() => parts.id, { onDelete: "cascade" }),
+  partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
   cost: numeric("cost", { precision: 12, scale: 2 }).notNull(),
   recordedAt: timestamp("recorded_at").notNull().defaultNow(),
   source: text("source"),
@@ -352,9 +335,7 @@ export const workOrders = pgTable("work_orders", {
 
 export const qcChecklists = pgTable("qc_checklists", {
   id: uuid("id").defaultRandom().primaryKey(),
-  workOrderId: uuid("work_order_id")
-    .notNull()
-    .references(() => workOrders.id, { onDelete: "cascade" }),
+  workOrderId: uuid("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
   items: jsonb("items").$type<QCItem[]>().default([]),
   completedBy: uuid("completed_by").references(() => users.id),
   completedAt: timestamp("completed_at"),
@@ -372,9 +353,7 @@ export const timeEntries = pgTable(
   "time_entries",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     workOrderId: uuid("work_order_id").references(() => workOrders.id),
     clockedInAt: timestamp("clocked_in_at").notNull().defaultNow(),
     clockedOutAt: timestamp("clocked_out_at"),
@@ -429,8 +408,6 @@ export const agentLogs = pgTable("agent_logs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// ── Relations ───────────────────────────────────────────────────────
-
 export const usersRelations = relations(users, ({ many }) => ({
   deals: many(deals),
   timeEntries: many(timeEntries),
@@ -444,26 +421,14 @@ export const customersRelations = relations(customers, ({ many }) => ({
 }));
 
 export const dealsRelations = relations(deals, ({ one, many }) => ({
-  customer: one(customers, {
-    fields: [deals.customerId],
-    references: [customers.id],
-  }),
-  assignee: one(users, {
-    fields: [deals.assignedTo],
-    references: [users.id],
-  }),
+  customer: one(customers, { fields: [deals.customerId], references: [customers.id] }),
+  assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }),
   comms: many(dealComms),
 }));
 
 export const workOrdersRelations = relations(workOrders, ({ one, many }) => ({
-  customer: one(customers, {
-    fields: [workOrders.customerId],
-    references: [customers.id],
-  }),
-  vehicle: one(vehicles, {
-    fields: [workOrders.vehicleId],
-    references: [vehicles.id],
-  }),
+  customer: one(customers, { fields: [workOrders.customerId], references: [customers.id] }),
+  vehicle: one(vehicles, { fields: [workOrders.vehicleId], references: [vehicles.id] }),
   qcChecklists: many(qcChecklists),
   timeEntries: many(timeEntries),
 }));
