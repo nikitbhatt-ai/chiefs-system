@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { deals, customers, users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 
+export const dynamic = "force-dynamic";
+
 const STAGES = ["prospect", "quote_sent", "po_received", "in_production", "delivered", "lost"] as const;
 type Stage = (typeof STAGES)[number];
 
@@ -52,32 +54,23 @@ async function changeStage(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   const stage = String(formData.get("stage") ?? "") as Stage;
   if (!id || !STAGES.includes(stage)) return;
-  await db
-    .update(deals)
-    .set({ stage, updatedAt: new Date() })
-    .where(eq(deals.id, id));
+  await db.update(deals).set({ stage, updatedAt: new Date() }).where(eq(deals.id, id));
   revalidatePath("/deals");
 }
 
 export default async function DealsPage() {
   const [customerRows, userRows, dealRows] = await Promise.all([
     db.select({ id: customers.id, name: customers.name }).from(customers).orderBy(customers.name),
-    db
-      .select({ id: users.id, email: users.email, name: users.name })
-      .from(users)
-      .where(eq(users.active, true)),
+    db.select({ id: users.id, email: users.email, name: users.name }).from(users).where(eq(users.active, true)),
     db.select().from(deals).orderBy(desc(deals.createdAt)),
   ]);
-
   const customerMap = new Map(customerRows.map((c) => [c.id, c.name]));
   const userMap = new Map(userRows.map((u) => [u.id, u.name ?? u.email]));
 
   return (
     <AppShell title="Deals" subtitle="Sales opportunities">
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
-        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
-          New deal
-        </h3>
+        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">New deal</h3>
         <form action={createDeal} className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <select name="customerId" defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
             <option value="">— Customer —</option>
@@ -98,24 +91,12 @@ export default async function DealsPage() {
           <input name="vehicleMake" placeholder="Make" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
           <input name="vehicleModel" placeholder="Model" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
           <textarea name="notes" rows={2} placeholder="Internal notes" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3" />
-          <div className="md:col-span-3 flex justify-end">
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save deal</button>
-          </div>
+          <div className="md:col-span-3 flex justify-end"><button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save deal</button></div>
         </form>
       </div>
-
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-white/5">
-            <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
-              <th className="px-3 py-2.5">Customer</th>
-              <th className="px-3 py-2.5">Vehicle</th>
-              <th className="px-3 py-2.5">Stage</th>
-              <th className="px-3 py-2.5">Assigned</th>
-              <th className="px-3 py-2.5">Referral</th>
-              <th className="px-3 py-2.5"></th>
-            </tr>
-          </thead>
+          <thead className="bg-white/5"><tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body"><th className="px-3 py-2.5">Customer</th><th className="px-3 py-2.5">Vehicle</th><th className="px-3 py-2.5">Stage</th><th className="px-3 py-2.5">Assigned</th><th className="px-3 py-2.5">Referral</th><th className="px-3 py-2.5"></th></tr></thead>
           <tbody className="font-body text-zinc-200">
             {dealRows.length === 0 ? (
               <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">No deals yet — create your first one above.</td></tr>
@@ -136,11 +117,9 @@ export default async function DealsPage() {
                   <td className="px-3 py-2 text-xs">{d.assignedTo ? userMap.get(d.assignedTo) ?? "—" : (d.salesRep ?? "—")}</td>
                   <td className="px-3 py-2 text-xs">{d.referralSource ?? "—"}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <a href={`/deals/${d.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 mr-3">Open</a>
                     <a href={`/deals/${d.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 mr-3">Edit</a>
-                    <form action={deleteDeal} className="inline">
-                      <input type="hidden" name="id" value={d.id} />
-                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button>
-                    </form>
+                    <form action={deleteDeal} className="inline"><input type="hidden" name="id" value={d.id} /><button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button></form>
                   </td>
                 </tr>
               ))
