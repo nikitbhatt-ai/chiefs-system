@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { workOrders, customers, quotes, vehicles } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 
+export const dynamic = "force-dynamic";
+
 const STATUS_COLORS: Record<string, string> = {
   open: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
   estimate: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
