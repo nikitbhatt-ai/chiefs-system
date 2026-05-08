@@ -32,60 +32,28 @@ async function deleteCustomer(formData: FormData) {
 }
 
 export default async function CrmPage() {
-  const rows = await db
-    .select()
-    .from(customers)
-    .orderBy(desc(customers.createdAt));
+  const rows = await db.select().from(customers).orderBy(desc(customers.createdAt));
 
   return (
     <AppShell title="Customers" subtitle="CRM directory">
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
-        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
-          Add customer
-        </h3>
+        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add customer</h3>
         <form action={createCustomer} className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <input
-            name="name"
-            required
-            placeholder="Name *"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-          />
-          <select
-            name="type"
-            defaultValue="commercial"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-          >
+          <input name="name" required placeholder="Name *" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
+          <select name="type" defaultValue="commercial" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
             <option value="commercial">Commercial</option>
             <option value="government">Government</option>
             <option value="retail">Retail</option>
           </select>
-          <input
-            name="email"
-            type="email"
-            placeholder="Email"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-          />
-          <input
-            name="phone"
-            placeholder="Phone"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-          />
-          <input
-            name="address"
-            placeholder="Address"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2"
-          />
+          <input name="email" type="email" placeholder="Email" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
+          <input name="phone" placeholder="Phone" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
+          <input name="address" placeholder="Address" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2" />
           <label className="flex items-center gap-2 text-xs text-zinc-300 font-body">
             <input type="checkbox" name="taxExempt" />
             Tax exempt
           </label>
           <div className="md:col-span-2 flex justify-end">
-            <button
-              type="submit"
-              className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
-            >
-              Save customer
-            </button>
+            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save customer</button>
           </div>
         </form>
       </div>
@@ -104,14 +72,7 @@ export default async function CrmPage() {
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="px-4 py-8 text-center text-xs text-zinc-500"
-                >
-                  No customers yet — add your first one above.
-                </td>
-              </tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">No customers yet — add your first one above.</td></tr>
             ) : (
               rows.map((c) => (
                 <tr key={c.id} className="border-t border-white/5">
@@ -119,24 +80,13 @@ export default async function CrmPage() {
                   <td className="px-4 py-2.5 capitalize text-xs">{c.type}</td>
                   <td className="px-4 py-2.5 text-xs">{c.email ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs">{c.phone ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-xs">
-                    {c.taxExempt ? "Exempt" : "—"}
-                  </td>
+                  <td className="px-4 py-2.5 text-xs">{c.taxExempt ? "Exempt" : "—"}</td>
                   <td className="px-4 py-2.5 text-right">
-                    <a
-                      href={`/crm/${c.id}/edit`}
-                      className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3"
-                    >
-                      Edit
-                    </a>
+                    <a href={`/crm/${c.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 font-body mr-3">Open</a>
+                    <a href={`/crm/${c.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3">Edit</a>
                     <form action={deleteCustomer} className="inline">
                       <input type="hidden" name="id" value={c.id} />
-                      <button
-                        type="submit"
-                        className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
-                      >
-                        Delete
-                      </button>
+                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</button>
                     </form>
                   </td>
                 </tr>
