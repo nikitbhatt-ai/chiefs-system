@@ -12,11 +12,15 @@ are pending and should be addressed when their owning module is built.
       inventory, purchase orders, quotes, vehicles). Common filters: customer,
       brand/manufacturer, most recent date, status, tags.
 - [ ] **Tags + archive + delete** on every list.
-- [ ] **Branded PDF export** (logo, Times New Roman 12pt) — for quotes,
-      estimates, upfit configs, work orders, inventory exports, invoices,
-      CRM lists.
-- [ ] **Print and Send-to-customer are separate buttons.** Send takes an
-      email input and sends for approval; Print just opens the PDF.
+- [x] **Print / Save as PDF** for quotes — `/quotes/[id]/print` renders
+      a clean Times New Roman 12pt document; browser handles print +
+      Save-as-PDF. Pattern to be reused for invoices, work orders,
+      reports, inventory exports.
+- [ ] **Logo on branded PDFs** — pending logo file upload to `public/`.
+- [ ] **Server-side PDF generation** (e.g. @react-pdf/renderer) for
+      pixel-consistent output instead of relying on browser print.
+- [ ] **Send-to-customer** is separate from Print — takes an email input
+      and emails the PDF for approval.
 - [ ] **CSV/Excel mass import** where useful (parts inventory at minimum).
 
 ## Customers (CRM)
@@ -63,10 +67,11 @@ are pending and should be addressed when their owning module is built.
       dropdown. Adds line with sku/name/price/partId; stock NOT deducted
       at quote time (deducted when the linked work order moves to
       "In Progress" on the Workflow board).
+- [x] Column titles on the line-items table.
+- [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
-- [ ] PDF export for quotes/estimates/invoices (branded, see cross-cutting).
-- [ ] Print and Send-to-customer are separate (see cross-cutting).
+- [ ] Print and Send-to-customer are separate (Print done; Send pending).
 - [ ] Per-customer discount calculator that pre-fills line discounts
       based on the customer's negotiated rate.
 
@@ -90,8 +95,8 @@ are pending and should be addressed when their owning module is built.
 - [x] Filters on category, vendor, archived.
 - [x] Edit pencil opens correct row (uses `/inventory/[id]/edit` pattern).
 - [ ] Mass import via CSV/Excel.
-- [ ] Per-part PO history button → shows avg cost + FIFO costing
-      (depends on Purchase Orders module).
+- [ ] Per-part PO history button — currently shown as the FIFO layers
+      table on /inventory/[id]; consider a dedicated button if needed.
 - [ ] Inline "Add new vendor" inside the dropdown (currently links
       out to /vendors).
 
@@ -125,28 +130,22 @@ are pending and should be addressed when their owning module is built.
       - Updates PO status to `partially_received` or `received`.
 - [x] Status badges (pending/pending_review/po_received/partially_received/received).
 - [ ] Filters by vendor / status / date range.
-- [ ] Per-part PO history button on the part detail page (currently
-      shown as the FIFO layers table, which IS the PO history).
 
 ## Costing (FIFO + weighted average)
 
 - [x] **`part_receipts` ledger table** — one row per receipt, tracks
       qty_received, qty_remaining, unit_cost, vendor, PO link.
 - [x] Per-part **`/inventory/[id]` cost-history page**:
-      - Weighted-average cost across remaining FIFO layers (what the
-        on-hand stock is actually worth right now).
+      - Weighted-average cost across remaining FIFO layers.
       - Lifetime weighted average across all receipts ever.
       - Last received cost.
       - FIFO cost preview for sample qty (1, 5, 10, 25 units).
       - Full FIFO layers table, oldest first, depleted layers dimmed.
-- [x] **Consumption depletes FIFO layers**: when a work order linked
-      to a quote with stock parts moves to "In Progress" on the
-      Workflow board, oldest receipt layers are decremented oldest-first
-      and `parts.quantity_on_hand` is reduced. Idempotent via the
-      `work_orders.parts_consumed` flag.
+- [x] **Consumption depletes FIFO layers** when a work order linked to
+      a quote with stock parts moves to "In Progress" on the Workflow
+      board. Idempotent via `work_orders.parts_consumed`.
 - [ ] Restock action (manual reverse if a build is canceled).
-- [ ] Optional moving-weighted-average cache on `parts` for fast lookup
-      (currently computed at read time — fine until we have heavy load).
+- [ ] Optional moving-weighted-average cache on `parts` for fast lookup.
 
 ## Time Clock (not yet built)
 
@@ -155,8 +154,7 @@ are pending and should be addressed when their owning module is built.
       the shop. Browser geolocation + radius check.
 - [ ] **Build-time-per-part agent tracker**: when a part is added to a
       work order, automatically log time toward the build. (Need to
-      clarify what "agent" means — likely the assigned technician.
-      Confirm with user when building.)
+      clarify what "agent" means — likely the assigned technician.)
 
 ## Reporting / Accounting (not yet built)
 
@@ -181,33 +179,15 @@ are pending and should be addressed when their owning module is built.
 
 ## Open questions for the user
 
-These need answers before the related feature can be built:
-
 1. **"Agent tracker for build time per part"** — does "agent" mean the
-   assigned technician (employee), or an AI agent? If technician: when a
-   part is added to a work order, do we auto-log time, or start a timer
-   for the technician?
-2. **Logo file** for branded PDFs — needs to be uploaded to `public/`
-   when we get to PDF export.
+   assigned technician (employee), or an AI agent?
+2. **Logo file** for branded PDFs — needs to be uploaded to `public/`.
 3. **Email sending** — which provider? Resend / SendGrid / M365 SMTP?
-   `.env.example` already has SMTP placeholders.
-4. **Time-clock geofence** — what's the shop address (lat/lng) and
-   radius (meters)?
-5. **Accounting reports** — who receives the weekly/monthly emails?
-   What's in them?
-6. **Workflow page**: ✅ confirmed. Top-level `/workflow` page with
-   8 columns mirroring Shopmonkey style:
-   1. Estimates (sourced from quotes status sent/approved, before promotion)
-   2. Confirmed Builds
-   3. Awaiting Parts
-   4. Next In Line
-   5. In Progress
-   6. QC Check
-   7. Completed
-   8. Delivered
-   Phase 1 (current): cards with stage-change dropdown.
-   Phase 2: drag-and-drop, search/filter, tags on cards, photo
-   thumbnails, bulk actions.
+4. **Time-clock geofence** — shop address (lat/lng) and radius (meters)?
+5. **Accounting reports** — who receives, what's in them?
+6. **Workflow page**: ✅ confirmed. Top-level `/workflow` 8 columns
+   (Estimates → Delivered). Phase 2: drag-and-drop, search/filter,
+   tags on cards, photo thumbnails, bulk actions.
 
 ## Notes on building order
 
