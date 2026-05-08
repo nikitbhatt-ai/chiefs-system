@@ -160,6 +160,12 @@ export default async function InventoryPage({
         >
           Print / Save as PDF
         </a>
+        <a
+          href="/inventory/import"
+          className="text-zinc-300 hover:text-white px-3 py-1 border border-white/10 rounded"
+        >
+          Import CSV
+        </a>
       </form>
 
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
