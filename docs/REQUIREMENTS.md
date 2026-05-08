@@ -6,6 +6,15 @@ are pending and should be addressed when their owning module is built.
 
 ## Cross-cutting requirements (apply to every module)
 
+- [x] **Top navigation** grouped into 5 tabs: Dashboard, Workflow, CRM
+      (Customers, Leads, Quotes), Operations (Work Orders, Vehicles,
+      Inventory, Purchase Orders, Vendors), Admin (Timeclock, Reporting,
+      Users). Click-to-open dropdowns; the active parent tab is highlighted.
+- [x] **Breadcrumbs** under the header reflect section + parent group +
+      current page on every AppShell page.
+- [x] **Global search** in the header — `/api/search?q=` returns up to 5
+      hits per group across customers, leads, quotes, work orders. Results
+      open in a dropdown grouped by entity type.
 - [ ] **Edit anywhere**: every entity must have an Edit page (`/{section}/[id]/edit`).
       ✅ done for: customers, vendors, leads.
 - [ ] **Filter by column** on every list view (customers, leads, work orders,
