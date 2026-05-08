@@ -1,6 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
-import { desc, eq, and, sql, inArray } from "drizzle-orm";
+import { desc, eq, and, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
@@ -97,6 +96,15 @@ export default async function InventoryPage({
     .where(sql`${parts.category} is not null`);
   const categories = categoriesRaw.map((r) => r.category!).filter(Boolean);
 
+  const printQs = (() => {
+    const qs = new URLSearchParams();
+    if (sp.category) qs.set("category", sp.category);
+    if (sp.vendor) qs.set("vendor", sp.vendor);
+    if (sp.archived === "1") qs.set("archived", "1");
+    const s = qs.toString();
+    return s ? `?${s}` : "";
+  })();
+
   return (
     <AppShell title="Inventory" subtitle="Parts and supplies">
       <PartAddForm action={createPart} vendors={vendorRows} />
@@ -144,6 +152,13 @@ export default async function InventoryPage({
         </button>
         <a href="/inventory" className="text-zinc-500 hover:text-white">
           Reset
+        </a>
+        <a
+          href={`/inventory/print${printQs}`}
+          target="_blank"
+          className="text-zinc-300 hover:text-white px-3 py-1 border border-white/10 rounded"
+        >
+          Print / Save as PDF
         </a>
       </form>
 
