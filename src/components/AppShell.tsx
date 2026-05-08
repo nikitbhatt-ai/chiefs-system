@@ -6,6 +6,7 @@ const NAV = [
   { href: "/workflow", label: "Workflow" },
   { href: "/crm", label: "Customers" },
   { href: "/leads", label: "Leads" },
+  { href: "/deals", label: "Deals" },
   { href: "/quotes", label: "Quotes" },
   { href: "/vehicles", label: "Vehicles" },
   { href: "/inventory", label: "Inventory" },
