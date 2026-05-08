@@ -74,7 +74,7 @@ export const commType = pgEnum("comm_type", [
   "note",
 ]);
 
-// ── Auth.js core tables ─────────────────────────────────────────────────────
+// ── Auth.js core tables ───────────────────────────────────────────
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -129,7 +129,7 @@ export const verificationTokens = pgTable(
   (t) => [primaryKey({ columns: [t.identifier, t.token] })],
 );
 
-// ── Domain tables ───────────────────────────────────────────────────────────
+// ── Domain tables ─────────────────────────────────────────────────
 
 export const customers = pgTable("customers", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -238,6 +238,7 @@ export const quotes = pgTable("quotes", {
   taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).default("0"),
   grandTotal: numeric("grand_total", { precision: 12, scale: 2 }).default("0"),
   lineItems: jsonb("line_items").$type<QuoteLineItem[]>().default([]),
+  workflowStage: text("workflow_stage").notNull().default("estimate"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
@@ -428,7 +429,7 @@ export const agentLogs = pgTable("agent_logs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
-// ── Relations ────────────────────────────────────────────────────────────────
+// ── Relations ───────────────────────────────────────────────────────
 
 export const usersRelations = relations(users, ({ many }) => ({
   deals: many(deals),
