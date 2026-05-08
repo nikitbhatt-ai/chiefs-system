@@ -1,0 +1,257 @@
+import { notFound } from "next/navigation";
+import { eq } from "drizzle-orm";
+import { db } from "@/db";
+import { quotes, customers } from "@/db/schema";
+import { PrintTrigger } from "./PrintTrigger";
+
+type Line =
+  | {
+      kind: "item";
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      discount: number;
+      discountKind: "pct" | "amt";
+      partId?: string;
+    }
+  | {
+      kind: "fee";
+      description: string;
+      amount: number;
+      fixed: boolean;
+    };
+
+function fmt(n: number) {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+export default async function PrintQuotePage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) notFound();
+
+  const customer = q.customerId
+    ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0]
+    : null;
+
+  const lines = (q.lineItems as unknown as Line[]) ?? [];
+  let subtotal = 0;
+  let discountTotal = 0;
+  let feeTotal = 0;
+  for (const l of lines) {
+    if (l.kind === "item") {
+      const gross = (l.quantity || 0) * (l.unitPrice || 0);
+      const disc =
+        l.discountKind === "pct"
+          ? gross * ((l.discount || 0) / 100)
+          : l.discount || 0;
+      subtotal += gross;
+      discountTotal += disc;
+    } else {
+      feeTotal += l.amount || 0;
+    }
+  }
+  const tax = Number(q.taxTotal) || 0;
+  const grand = Number(q.grandTotal) || subtotal - discountTotal + feeTotal + tax;
+
+  return (
+    <div className="print-doc">
+      <PrintTrigger />
+      <style>{`
+        body { background: white; }
+        .print-doc {
+          font-family: "Times New Roman", Times, serif;
+          font-size: 12pt;
+          color: #000;
+          background: #fff;
+          padding: 0.75in;
+          max-width: 8.5in;
+          margin: 0 auto;
+        }
+        .print-doc h1, .print-doc h2 { font-family: "Times New Roman", Times, serif; }
+        .print-doc table { width: 100%; border-collapse: collapse; }
+        .print-doc th, .print-doc td {
+          border: 1px solid #000;
+          padding: 6pt 8pt;
+          text-align: left;
+          font-size: 11pt;
+        }
+        .print-doc th { background: #eee; font-weight: bold; }
+        .print-doc .totals td { border: none; padding: 2pt 8pt; }
+        .print-doc .totals .grand td {
+          border-top: 2pt solid #000;
+          font-weight: bold;
+          font-size: 13pt;
+        }
+        .print-doc .right { text-align: right; }
+        .print-doc .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 24pt;
+          border-bottom: 2pt solid #000;
+          padding-bottom: 12pt;
+        }
+        .print-doc .meta { font-size: 10pt; color: #444; }
+        .print-doc .actions {
+          margin-bottom: 12pt;
+        }
+        @media print {
+          .print-doc .actions { display: none; }
+          @page { margin: 0.5in; }
+        }
+        .print-doc button, .print-doc a.btn {
+          font-family: "Times New Roman", Times, serif;
+          font-size: 11pt;
+          padding: 4pt 10pt;
+          border: 1px solid #000;
+          background: #fff;
+          color: #000;
+          cursor: pointer;
+          text-decoration: none;
+          margin-right: 6pt;
+        }
+      `}</style>
+
+      <div className="actions">
+        <button type="button" id="__print">
+          Print
+        </button>
+        <a href={`/quotes/${id}`} className="btn">
+          Back to editor
+        </a>
+        <span style={{ fontSize: "10pt", color: "#666", marginLeft: "12pt" }}>
+          Use your browser's print dialog to "Save as PDF".
+        </span>
+      </div>
+
+      <div className="header">
+        <div>
+          <h1 style={{ fontSize: "20pt", margin: 0 }}>Chiefs Pursuit Surplus</h1>
+          <div className="meta">Quote / Estimate</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: "14pt", fontWeight: "bold" }}>
+            {q.quoteNumber ?? q.id.slice(0, 8)}
+          </div>
+          <div className="meta">Status: {q.status}</div>
+          <div className="meta">
+            Issued: {new Date(q.createdAt).toLocaleDateString()}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ marginBottom: "16pt" }}>
+        <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
+          Bill to
+        </div>
+        <div style={{ fontWeight: "bold", marginTop: "2pt" }}>
+          {customer?.name ?? "—"}
+        </div>
+        {customer?.address ? <div>{customer.address}</div> : null}
+        {customer?.email ? <div>{customer.email}</div> : null}
+        {customer?.phone ? <div>{customer.phone}</div> : null}
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: "55%" }}>Description</th>
+            <th className="right" style={{ width: "8%" }}>Qty</th>
+            <th className="right" style={{ width: "12%" }}>Unit price</th>
+            <th className="right" style={{ width: "12%" }}>Discount</th>
+            <th className="right" style={{ width: "13%" }}>Line total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.length === 0 ? (
+            <tr>
+              <td colSpan={5} style={{ textAlign: "center", color: "#666" }}>
+                (no line items)
+              </td>
+            </tr>
+          ) : (
+            lines.map((l, i) => {
+              if (l.kind === "item") {
+                const gross = (l.quantity || 0) * (l.unitPrice || 0);
+                const disc =
+                  l.discountKind === "pct"
+                    ? gross * ((l.discount || 0) / 100)
+                    : l.discount || 0;
+                const discLabel =
+                  l.discount > 0
+                    ? l.discountKind === "pct"
+                      ? `${l.discount}% (−${fmt(disc)})`
+                      : `−${fmt(l.discount)}`
+                    : "—";
+                return (
+                  <tr key={i}>
+                    <td>{l.description || "Item"}</td>
+                    <td className="right">{l.quantity}</td>
+                    <td className="right">{fmt(l.unitPrice)}</td>
+                    <td className="right">{discLabel}</td>
+                    <td className="right">{fmt(gross - disc)}</td>
+                  </tr>
+                );
+              }
+              return (
+                <tr key={i}>
+                  <td colSpan={4}>{l.description} <em style={{ color: "#666" }}>({l.fixed ? "fixed fee" : "custom fee"})</em></td>
+                  <td className="right">{fmt(l.amount)}</td>
+                </tr>
+              );
+            })
+          )}
+        </tbody>
+      </table>
+
+      <table className="totals" style={{ marginTop: "12pt" }}>
+        <tbody>
+          <tr>
+            <td style={{ width: "75%" }} className="right">Subtotal</td>
+            <td className="right">{fmt(subtotal)}</td>
+          </tr>
+          {discountTotal > 0 ? (
+            <tr>
+              <td className="right">Discount</td>
+              <td className="right">− {fmt(discountTotal)}</td>
+            </tr>
+          ) : null}
+          {feeTotal > 0 ? (
+            <tr>
+              <td className="right">Fees</td>
+              <td className="right">{fmt(feeTotal)}</td>
+            </tr>
+          ) : null}
+          {tax > 0 ? (
+            <tr>
+              <td className="right">Tax</td>
+              <td className="right">{fmt(tax)}</td>
+            </tr>
+          ) : null}
+          <tr className="grand">
+            <td className="right">Grand total</td>
+            <td className="right">{fmt(grand)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {q.notes ? (
+        <div style={{ marginTop: "20pt" }}>
+          <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
+            Notes
+          </div>
+          <div style={{ marginTop: "4pt", whiteSpace: "pre-wrap" }}>{q.notes}</div>
+        </div>
+      ) : null}
+
+      <div style={{ marginTop: "32pt", fontSize: "9pt", color: "#666", textAlign: "center" }}>
+        Generated by Chiefs Pursuit Surplus ERP · {new Date().toLocaleString()}
+      </div>
+    </div>
+  );
+}
