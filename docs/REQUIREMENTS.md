@@ -89,12 +89,20 @@ is reachable from anywhere.
       array of category slugs it covers. `credentialCoversPart()` in
       `src/lib/credentials.ts` is the canonical check used by quote /
       work-order flows.
-- [ ] **Quote/work-order restricted-part block** (PR 3): when a
-      restricted part is added to a walk-in deal's quote or work order,
-      verify the deal has a credential whose `restricted_equipment`
-      covers the part's category — otherwise reject the line item.
-- [ ] **Parallel tracks system** (PR 3): Sales / Build / Credential
-      tracks render side-by-side on the deal page with per-track stages.
+- [x] **Quote restricted-part block** (PR 3): `saveQuote` rejects on
+      save if the linked deal has `pipeline = walk_in_credentialed`
+      and any restricted part on the quote lacks credential coverage.
+      Error message names the offending parts. Restricted parts also
+      surface as a red badge in the quote-editor part-autocomplete
+      dropdown.
+- [ ] **Work-order restricted-part block** (later): same check in the
+      work-order flow when bypassing the quote.
+- [x] **Parallel tracks system** (PR 3): Sales / Credential / Build
+      tracks render stacked on the deal entity page with per-track
+      stages, current-stage highlighting, and past/future styling.
+      Credential track only appears for pipelines with a hard gate.
+      Build track sources its current stage from the latest quote's
+      `workflowStage` (or "not started" if no quote yet).
 - [ ] **Per-pipeline document templates** (PR 4): government PO intake,
       walk-in credential intake, commercial deposit receipt — stored in
       `templates` table, generated PDFs attached via `files`.
