@@ -176,9 +176,19 @@ the team can pull up the full history in seconds.
       current-version doc in the same customer + category increments
       `version`, sets `is_current_version = false` on the prior row, and
       points the new row's `parent_document_id` at the lineage root.
-- [ ] **Auto-link generated quotes / POs / invoices** to the customer
-      folder on creation (later — currently only pipeline docs and
-      manual uploads land here).
+- [x] **Auto-link generated quotes / invoices** to the customer folder
+      (PR 9): every quote with a `customer_id` gets one stable
+      `customer_documents` row keyed by
+      `kind = auto_link:quote:<quoteId>`. The row's category is
+      `quotes_estimates` while the quote is draft/sent/approved and
+      flips to `invoices` when `status = converted`. `blob_url` points
+      at the live `/quotes/[id]/print` view; `file_name` tracks the
+      quote number. Upserted on create, on save, and on status change;
+      deleted on quote delete or when the customer is unset.
+- [ ] **Auto-link purchase orders & spec sheets** (later). POs are
+      vendor-side artifacts so they need either an inbound-PO entity
+      or a manual upload flow; spec sheets need the spec UI built
+      first.
 - [ ] **Customer summary card** (deals, revenue, last contact, expiring
       credentials/contracts at 30/60/90 days) — later.
 - [ ] **Role-based access control** — later. Sales = quotes / POs /
