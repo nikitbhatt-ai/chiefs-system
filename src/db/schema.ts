@@ -305,9 +305,10 @@ export const files = pgTable("files", {
   filename: text("filename").notNull(),
   mimeType: text("mime_type"),
   sizeBytes: integer("size_bytes"),
+  kind: text("kind"),
   uploadedBy: uuid("uploaded_by").references(() => users.id),
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
-}, (t) => [index("files_entity_idx").on(t.entityType, t.entityId)]);
+}, (t) => [index("files_entity_idx").on(t.entityType, t.entityId), index("files_kind_idx").on(t.kind)]);
 
 export const agentLogs = pgTable("agent_logs", {
   id: uuid("id").defaultRandom().primaryKey(),

@@ -109,6 +109,9 @@ export function pipelineForCustomerType(
 
 export type StageTransitionContext = {
   hasActiveCredential?: boolean;
+  hasPipelineDocument?: boolean;
+  pipelineDocumentRequiredBeforeStage?: string;
+  pipelineDocumentLabel?: string;
 };
 
 export function canAdvanceTo(
@@ -157,6 +160,19 @@ export function canAdvanceTo(
       return {
         ok: false,
         reason: `${pipeline.label} requires a verified credential before advancing past ${stageLabel(pipeline.hardGate)}. Add and verify a credential first.`,
+      };
+    }
+  }
+
+  if (context.pipelineDocumentRequiredBeforeStage) {
+    const docGateIdx = pipeline.stages.indexOf(
+      context.pipelineDocumentRequiredBeforeStage as DealStage,
+    );
+    if (docGateIdx >= 0 && toIdx >= docGateIdx && !context.hasPipelineDocument) {
+      const docLabel = context.pipelineDocumentLabel ?? "pipeline document";
+      return {
+        ok: false,
+        reason: `${pipeline.label} requires the ${docLabel} to be attached before advancing to ${stageLabel(context.pipelineDocumentRequiredBeforeStage)}. Generate or upload it from the deal's Documents panel.`,
       };
     }
   }

@@ -103,9 +103,16 @@ is reachable from anywhere.
       Credential track only appears for pipelines with a hard gate.
       Build track sources its current stage from the latest quote's
       `workflowStage` (or "not started" if no quote yet).
-- [ ] **Per-pipeline document templates** (PR 4): government PO intake,
-      walk-in credential intake, commercial deposit receipt — stored in
-      `templates` table, generated PDFs attached via `files`.
+- [x] **Per-pipeline document templates** (PR 4): three docs defined in
+      `src/lib/documentTemplates.ts` — Government PO Intake, Walk-In
+      Credential Intake, Commercial Deposit Receipt. Each has a
+      generate (print-friendly HTML at
+      `/deals/[id]/documents/[kind]/print`) and upload action on the
+      deal page's Documents panel. Uploaded copies go to Vercel Blob
+      and a `files` row with `kind = pipeline_doc:<slug>`. Stage gate:
+      `canAdvanceTo` rejects advancement to/past
+      `pipelineDocumentRequiredBeforeStage` unless a matching `files`
+      row exists. Generic "other attachments" upload also available.
 
 ### Schema additions (PR 1)
 
@@ -126,6 +133,17 @@ enum value to be used in the same transaction it's added).
 ALTER TABLE parts ADD COLUMN IF NOT EXISTS restricted boolean NOT NULL DEFAULT false;
 ALTER TABLE parts ADD COLUMN IF NOT EXISTS restriction_category text;
 ```
+
+### Schema additions (PR 4)
+
+```sql
+ALTER TABLE files ADD COLUMN IF NOT EXISTS kind text;
+CREATE INDEX IF NOT EXISTS files_kind_idx ON files (kind);
+```
+
+Also requires the `BLOB_READ_WRITE_TOKEN` env var on Vercel (already
+present for any project that uses Vercel Blob — confirm in
+Settings → Environment Variables).
 
 ## Deals (not yet built)
 

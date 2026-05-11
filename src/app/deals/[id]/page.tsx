@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
+import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, files } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
@@ -20,6 +21,7 @@ import {
   salesTrack,
   type Track,
 } from "@/lib/tracks";
+import { docForPipeline } from "@/lib/documentTemplates";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +30,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) notFound();
 
-  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes] = await Promise.all([
+  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes, dealFiles] = await Promise.all([
     d.customerId ? db.select().from(customers).where(eq(customers.id, d.customerId)).limit(1) : Promise.resolve([]),
     d.assignedTo ? db.select().from(users).where(eq(users.id, d.assignedTo)).limit(1) : Promise.resolve([]),
     db.select().from(dealActivity).where(eq(dealActivity.dealId, id)).orderBy(desc(dealActivity.createdAt)),
@@ -36,6 +38,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     d.partnerContactId ? db.select().from(partnerContacts).where(eq(partnerContacts.id, d.partnerContactId)).limit(1) : Promise.resolve([]),
     db.select().from(dealCredentials).where(eq(dealCredentials.dealId, id)).orderBy(asc(dealCredentials.createdAt)),
     db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber, workflowStage: quotes.workflowStage }).from(quotes).where(eq(quotes.dealId, id)).orderBy(desc(quotes.updatedAt)),
+    db.select().from(files).where(and(eq(files.entityType, "deal"), eq(files.entityId, id))).orderBy(desc(files.uploadedAt)),
   ]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
@@ -116,6 +119,44 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     const credId = String(formData.get("credId") ?? "");
     if (!credId) return;
     await db.delete(dealCredentials).where(eq(dealCredentials.id, credId));
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function uploadDocument(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) return;
+    const kind = String(formData.get("kind") ?? "").trim() || "deal_attachment";
+    const blob = await put(`deals/${id}/${Date.now()}-${file.name}`, file, {
+      access: "public",
+      addRandomSuffix: true,
+    });
+    await db.insert(files).values({
+      entityType: "deal",
+      entityId: id,
+      blobUrl: blob.url,
+      filename: file.name,
+      mimeType: file.type || null,
+      sizeBytes: file.size || null,
+      kind,
+      uploadedBy: session.user.id,
+    });
+    await db.insert(dealActivity).values({
+      dealId: id,
+      authorId: session.user.id,
+      kind: "document_uploaded",
+      body: `Uploaded ${file.name}${kind && kind !== "deal_attachment" ? ` (${kind})` : ""}`,
+    });
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function deleteFile(formData: FormData) {
+    "use server";
+    const fileId = String(formData.get("fileId") ?? "");
+    if (!fileId) return;
+    await db.delete(files).where(eq(files.id, fileId));
     revalidatePath(`/deals/${id}`);
   }
 
@@ -296,6 +337,109 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
           </form>
         </div>
       ) : null}
+
+      {(() => {
+        const docSpec = docForPipeline(pipeline.slug);
+        const pipelineDocs = docSpec
+          ? dealFiles.filter((f) => f.kind === docSpec.slug)
+          : [];
+        const otherDocs = docSpec
+          ? dealFiles.filter((f) => f.kind !== docSpec.slug)
+          : dealFiles;
+        const printHref = docSpec
+          ? `/deals/${d.id}/documents/${docSpec.slug.replace(/^pipeline_doc:/, "")}/print`
+          : null;
+        return (
+          <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Documents</h3>
+              {docSpec ? (
+                <span className="text-[10px] font-body text-zinc-500">
+                  {pipeline.label} requires {docSpec.label} before {stageLabel(docSpec.requiredBeforeStage)}.
+                </span>
+              ) : null}
+            </div>
+            {docSpec ? (
+              <div className="bg-black/30 border border-white/5 rounded-md p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-body font-semibold text-white">{docSpec.label}</div>
+                    <div className="text-[11px] text-zinc-400 font-body">{docSpec.description}</div>
+                  </div>
+                  {pipelineDocs.length > 0 ? (
+                    <span className="text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 bg-green-500/10 text-green-300 border-green-500/30">
+                      {pipelineDocs.length} attached
+                    </span>
+                  ) : (
+                    <span className="text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 bg-amber-500/10 text-amber-300 border-amber-500/30">
+                      Not attached
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-3 pt-1">
+                  {printHref ? (
+                    <a href={printHref} target="_blank" className="text-[11px] text-amber-400 hover:text-amber-300 font-body">
+                      Generate blank form →
+                    </a>
+                  ) : null}
+                  <form action={uploadDocument} encType="multipart/form-data" className="flex items-center gap-2">
+                    <input type="hidden" name="kind" value={docSpec.slug} />
+                    <input type="file" name="file" required className="text-[11px] font-body text-zinc-300 file:bg-black/40 file:border file:border-white/10 file:rounded file:px-2 file:py-1 file:text-zinc-300 file:mr-2" />
+                    <button type="submit" className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1">
+                      Upload signed copy
+                    </button>
+                  </form>
+                </div>
+                {pipelineDocs.length > 0 ? (
+                  <ul className="pt-2 border-t border-white/5 space-y-1">
+                    {pipelineDocs.map((f) => (
+                      <li key={f.id} className="flex items-center justify-between text-[11px] font-body">
+                        <a href={f.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate">{f.filename}</a>
+                        <div className="flex items-center gap-3 text-zinc-500">
+                          <span>{new Date(f.uploadedAt).toLocaleDateString()}</span>
+                          <form action={deleteFile} className="inline">
+                            <input type="hidden" name="fileId" value={f.id} />
+                            <button type="submit" className="hover:text-red-400">Delete</button>
+                          </form>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase tracking-wider font-body text-zinc-500">Other attachments</span>
+                <form action={uploadDocument} encType="multipart/form-data" className="flex items-center gap-2">
+                  <input type="hidden" name="kind" value="deal_attachment" />
+                  <input type="file" name="file" required className="text-[11px] font-body text-zinc-300 file:bg-black/40 file:border file:border-white/10 file:rounded file:px-2 file:py-1 file:text-zinc-300 file:mr-2" />
+                  <button type="submit" className="text-[11px] font-body text-amber-400 hover:text-amber-300">+ Upload</button>
+                </form>
+              </div>
+              {otherDocs.length === 0 ? (
+                <p className="text-[11px] text-zinc-500 font-body">No other attachments.</p>
+              ) : (
+                <ul className="space-y-1">
+                  {otherDocs.map((f) => (
+                    <li key={f.id} className="flex items-center justify-between text-[11px] font-body">
+                      <a href={f.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate">{f.filename}</a>
+                      <div className="flex items-center gap-3 text-zinc-500">
+                        <span>{new Date(f.uploadedAt).toLocaleDateString()}</span>
+                        <form action={deleteFile} className="inline">
+                          <input type="hidden" name="fileId" value={f.id} />
+                          <button type="submit" className="hover:text-red-400">Delete</button>
+                        </form>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
