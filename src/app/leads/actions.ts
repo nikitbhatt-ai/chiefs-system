@@ -3,7 +3,17 @@
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { leads, customers } from "@/db/schema";
+import { leads, customers, deals } from "@/db/schema";
+import { pipelineForCustomerType } from "@/lib/pipelines";
+
+type CustomerTypeValue = "government" | "commercial" | "retail" | "walk_in_credentialed";
+
+function toCustomerType(value: string | null | undefined): CustomerTypeValue {
+  if (value === "government") return "government";
+  if (value === "walk_in_credentialed") return "walk_in_credentialed";
+  if (value === "retail") return "retail";
+  return "commercial";
+}
 
 export async function createLeadAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
@@ -51,23 +61,45 @@ export async function convertLeadAction(formData: FormData) {
   if (!id) return;
   const [lead] = await db.select().from(leads).where(eq(leads.id, id));
   if (!lead) return;
+
+  const customerTypeValue = toCustomerType(lead.customerType);
+  const pipeline = pipelineForCustomerType(lead.customerType);
+
   const [customer] = await db
     .insert(customers)
     .values({
       name: lead.name,
-      type: "commercial",
+      type: customerTypeValue,
       email: lead.email,
       phone: lead.phone,
     })
     .returning();
+
+  const [deal] = await db
+    .insert(deals)
+    .values({
+      customerId: customer.id,
+      pipeline,
+      stage: "prospect",
+      source: lead.source,
+      subSource: lead.subSource,
+      subSourceMeta: lead.subSourceMeta,
+      partnerId: lead.partnerId,
+      partnerContactId: lead.partnerContactId,
+      notes: lead.notes,
+    })
+    .returning();
+
   await db
     .update(leads)
     .set({
       status: "converted",
       convertedCustomerId: customer.id,
+      convertedDealId: deal.id,
       updatedAt: new Date(),
     })
     .where(eq(leads.id, id));
   revalidatePath("/leads");
   revalidatePath("/crm");
+  revalidatePath("/deals");
 }

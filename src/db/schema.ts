@@ -14,8 +14,8 @@ import {
 import { relations } from "drizzle-orm";
 
 export const userRole = pgEnum("user_role", ["admin","manager","sales","warehouse","tech","accountant"]);
-export const customerType = pgEnum("customer_type", ["government","commercial","retail"]);
-export const dealStage = pgEnum("deal_stage", ["prospect","quote_sent","po_received","in_production","delivered","lost"]);
+export const customerType = pgEnum("customer_type", ["government","commercial","retail","walk_in_credentialed"]);
+export const dealStage = pgEnum("deal_stage", ["prospect","quote_sent","po_received","in_production","delivered","lost","credential_verification","deposit_received"]);
 export const leadStatus = pgEnum("lead_status", ["new","contacted","converted","lost"]);
 export const quoteStatus = pgEnum("quote_status", ["draft","sent","approved","converted"]);
 export const purchaseOrderStatus = pgEnum("purchase_order_status", ["pending","pending_review","po_received","partially_received","received"]);
