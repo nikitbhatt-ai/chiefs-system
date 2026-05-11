@@ -6,6 +6,7 @@ import { and } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
 import { isCredentialActive } from "@/lib/credentials";
 import { docForPipeline } from "@/lib/documentTemplates";
+import { maybePromoteWonDeal } from "@/lib/dealTriggers";
 import {
   PIPELINES,
   PIPELINE_SLUGS,
@@ -107,8 +108,12 @@ async function changeStage(formData: FormData) {
     .update(deals)
     .set({ stage: requested as DealStage, currentStageEnteredAt: new Date(), updatedAt: new Date() })
     .where(eq(deals.id, id));
+  await maybePromoteWonDeal(id, requested, d.stage);
   revalidatePath("/deals");
   revalidatePath(`/deals/${id}`);
+  revalidatePath("/workflow");
+  revalidatePath("/quotes");
+  revalidatePath("/work-orders");
 }
 
 export default async function DealsPage() {

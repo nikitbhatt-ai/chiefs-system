@@ -7,6 +7,7 @@ import { canAdvanceTo, type DealStage } from "@/lib/pipelines";
 import { isCredentialActive } from "@/lib/credentials";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { stageForBucket, type BucketSlug, PIPELINE_BUCKETS } from "@/lib/pipelineBuckets";
+import { maybePromoteWonDeal } from "@/lib/dealTriggers";
 
 export const dynamic = "force-dynamic";
 
@@ -77,5 +78,12 @@ export async function POST(
     .set({ stage: targetStage, currentStageEnteredAt: new Date(), updatedAt: new Date() })
     .where(eq(deals.id, id));
 
-  return NextResponse.json({ ok: true, stage: targetStage });
+  const promotion = await maybePromoteWonDeal(id, targetStage, d.stage);
+
+  return NextResponse.json({
+    ok: true,
+    stage: targetStage,
+    promotedQuoteId: promotion.ok ? promotion.promotedQuoteId : null,
+    createdWorkOrderId: promotion.ok ? promotion.createdWorkOrderId : null,
+  });
 }

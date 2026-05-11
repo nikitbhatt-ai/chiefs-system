@@ -334,6 +334,25 @@ CREATE INDEX IF NOT EXISTS pipeline_stage_sla_lookup_idx ON pipeline_stage_sla (
 - "horizontal pipeline progress bar at top of deal record" remains as
   the parallel-tracks panel from PR #6 — they serve the same purpose
 
+### Won → Confirmed auto-trigger (PR 12)
+
+When a deal advances **into** the Won bucket (`po_received` or
+`deposit_received` depending on pipeline), the most recent quote on
+that deal is promoted from `estimate` to `workflowStage = 'confirmed'`
+and — if no work order exists yet — one is created with
+`status = 'confirmed'`. Implemented in `maybePromoteWonDeal()` in
+`src/lib/dealTriggers.ts`, called from both `/deals` `changeStage` and
+the kanban `move-bucket` API route.
+
+Behaviour:
+- Fires only on the forward edge (previous stage was not already in
+  Won), so re-saving a Won deal doesn't loop.
+- No-op if the deal has no quote yet — the deal still moves to Won.
+- No-op if the quote is already past `confirmed` (in_progress, qc_check,
+  etc.) — never goes backward.
+- One-way: moving the deal back out of Won does NOT reverse the
+  quote workflow or delete the work order.
+
 ## Deals (not yet built)
 
 - [ ] Pipeline / kanban view with drag-and-drop between stages.
