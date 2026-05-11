@@ -145,6 +145,109 @@ Also requires the `BLOB_READ_WRITE_TOKEN` env var on Vercel (already
 present for any project that uses Vercel Blob — confirm in
 Settings → Environment Variables).
 
+## Customer file / folder system
+
+Plain-language: every customer (Dallas County, etc.) has one folder holding
+every quote, PO, contract, credential, spec approval, photo, etc. Anyone on
+the team can pull up the full history in seconds.
+
+- [x] **`customer_documents` table** (PR 8, replaces the old `files` table).
+      Columns: `id`, `customer_id` (FK, cascade), `category`, `file_name`,
+      `blob_url`, `mime_type`, `size_bytes`, `uploaded_by`, `uploaded_at`,
+      `associated_deal_id` (FK, set null), `tags` (jsonb), `notes`, `kind`
+      (legacy pipeline-doc slug), `version`, `is_current_version`,
+      `parent_document_id`.
+- [x] **10 folder categories** defined in
+      `src/lib/customerDocuments.ts`: Quotes & Estimates, Purchase Orders,
+      Contracts & Agreements, Credentials & Certifications, Spec Approvals
+      (Signed), Invoices, Correspondence, Photos / Build Documentation,
+      Compliance Documents, Miscellaneous.
+- [x] **Pipeline-doc routing**: PR 4 pipeline documents now write to
+      `customer_documents` with the matching category — government PO
+      intake → Purchase Orders, walk-in credential intake → Credentials &
+      Certifications, commercial deposit receipt → Contracts & Agreements.
+      The pipeline-doc stage gate (PR 4) keys off `kind` on
+      `customer_documents`, so it keeps working transparently.
+- [x] **Folder view on `/crm/[id]`** with collapsible category sections,
+      direct upload form (file + category + associated deal + notes),
+      filter bar (filename, category, date range), per-file delete and
+      open-in-new-tab download.
+- [x] **Versioning**: uploading a file whose name matches an existing
+      current-version doc in the same customer + category increments
+      `version`, sets `is_current_version = false` on the prior row, and
+      points the new row's `parent_document_id` at the lineage root.
+- [ ] **Auto-link generated quotes / POs / invoices** to the customer
+      folder on creation (later — currently only pipeline docs and
+      manual uploads land here).
+- [ ] **Customer summary card** (deals, revenue, last contact, expiring
+      credentials/contracts at 30/60/90 days) — later.
+- [ ] **Role-based access control** — later. Sales = quotes / POs /
+      correspondence; Shop = spec approvals / WO / photos; Manager+
+      sees credentials / contracts / financials.
+- [ ] **Audit log** of upload / view / download / edit / delete actions
+      with `user_id`, `ip_address`, timestamp — later.
+- [ ] **Expiration alerts** scheduled scan for credentials & contracts
+      approaching expiration, dashboard surface + email to account
+      owner — later.
+
+### Schema migration (PR 8)
+
+```sql
+-- Create customer_documents (replaces files)
+CREATE TABLE IF NOT EXISTS customer_documents (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id uuid NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  category text NOT NULL,
+  file_name text NOT NULL,
+  blob_url text NOT NULL,
+  mime_type text,
+  size_bytes integer,
+  uploaded_by uuid REFERENCES users(id),
+  uploaded_at timestamp NOT NULL DEFAULT now(),
+  associated_deal_id uuid REFERENCES deals(id) ON DELETE SET NULL,
+  tags jsonb DEFAULT '[]'::jsonb,
+  notes text,
+  kind text,
+  version integer NOT NULL DEFAULT 1,
+  is_current_version boolean NOT NULL DEFAULT true,
+  parent_document_id uuid
+);
+CREATE INDEX IF NOT EXISTS customer_documents_customer_idx ON customer_documents (customer_id);
+CREATE INDEX IF NOT EXISTS customer_documents_category_idx ON customer_documents (customer_id, category);
+CREATE INDEX IF NOT EXISTS customer_documents_deal_idx ON customer_documents (associated_deal_id);
+CREATE INDEX IF NOT EXISTS customer_documents_current_idx ON customer_documents (customer_id, is_current_version);
+CREATE INDEX IF NOT EXISTS customer_documents_kind_idx ON customer_documents (kind);
+
+-- Migrate any existing rows from files. entity_type='deal' rows pull the
+-- customer_id from the deal; kind maps to category via the mapping in
+-- src/lib/customerDocuments.ts (which is documented in this file).
+INSERT INTO customer_documents
+  (id, customer_id, category, file_name, blob_url, mime_type, size_bytes, uploaded_by, uploaded_at, associated_deal_id, kind)
+SELECT
+  f.id,
+  d.customer_id,
+  CASE
+    WHEN f.kind = 'pipeline_doc:government_po_intake' THEN 'purchase_orders'
+    WHEN f.kind = 'pipeline_doc:walk_in_credential_intake' THEN 'credentials_certifications'
+    WHEN f.kind = 'pipeline_doc:commercial_deposit_receipt' THEN 'contracts_agreements'
+    ELSE 'misc'
+  END,
+  f.filename,
+  f.blob_url,
+  f.mime_type,
+  f.size_bytes,
+  f.uploaded_by,
+  f.uploaded_at,
+  f.entity_id,
+  f.kind
+FROM files f
+JOIN deals d ON d.id = f.entity_id
+WHERE f.entity_type = 'deal' AND d.customer_id IS NOT NULL
+ON CONFLICT (id) DO NOTHING;
+
+DROP TABLE IF EXISTS files;
+```
+
 ## Deals (not yet built)
 
 - [ ] Pipeline / kanban view with drag-and-drop between stages.

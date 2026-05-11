@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, files } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
@@ -22,6 +22,7 @@ import {
   type Track,
 } from "@/lib/tracks";
 import { docForPipeline } from "@/lib/documentTemplates";
+import { categoryForKind } from "@/lib/customerDocuments";
 
 export const dynamic = "force-dynamic";
 
@@ -38,7 +39,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     d.partnerContactId ? db.select().from(partnerContacts).where(eq(partnerContacts.id, d.partnerContactId)).limit(1) : Promise.resolve([]),
     db.select().from(dealCredentials).where(eq(dealCredentials.dealId, id)).orderBy(asc(dealCredentials.createdAt)),
     db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber, workflowStage: quotes.workflowStage }).from(quotes).where(eq(quotes.dealId, id)).orderBy(desc(quotes.updatedAt)),
-    db.select().from(files).where(and(eq(files.entityType, "deal"), eq(files.entityId, id))).orderBy(desc(files.uploadedAt)),
+    db.select().from(customerDocuments).where(and(eq(customerDocuments.associatedDealId, id), eq(customerDocuments.isCurrentVersion, true))).orderBy(desc(customerDocuments.uploadedAt)),
   ]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
@@ -126,38 +127,67 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     "use server";
     const session = await auth();
     if (!session?.user) return;
+    if (!d.customerId) {
+      throw new Error("Cannot upload a document until the deal has a customer.");
+    }
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) return;
     const kind = String(formData.get("kind") ?? "").trim() || "deal_attachment";
-    const blob = await put(`deals/${id}/${Date.now()}-${file.name}`, file, {
+    const category = categoryForKind(kind);
+    const blob = await put(`customers/${d.customerId}/${Date.now()}-${file.name}`, file, {
       access: "public",
       addRandomSuffix: true,
     });
-    await db.insert(files).values({
-      entityType: "deal",
-      entityId: id,
+    // Versioning: if a same-named, same-category, same-deal doc already exists,
+    // mark it stale and parent the new row to its lineage root.
+    const [prior] = await db
+      .select({ id: customerDocuments.id, version: customerDocuments.version, parentDocumentId: customerDocuments.parentDocumentId })
+      .from(customerDocuments)
+      .where(and(
+        eq(customerDocuments.customerId, d.customerId),
+        eq(customerDocuments.category, category),
+        eq(customerDocuments.fileName, file.name),
+        eq(customerDocuments.isCurrentVersion, true),
+      ))
+      .limit(1);
+    let version = 1;
+    let parentDocumentId: string | null = null;
+    if (prior) {
+      version = prior.version + 1;
+      parentDocumentId = prior.parentDocumentId ?? prior.id;
+      await db.update(customerDocuments).set({ isCurrentVersion: false }).where(eq(customerDocuments.id, prior.id));
+    }
+    await db.insert(customerDocuments).values({
+      customerId: d.customerId,
+      category,
+      fileName: file.name,
       blobUrl: blob.url,
-      filename: file.name,
       mimeType: file.type || null,
       sizeBytes: file.size || null,
-      kind,
       uploadedBy: session.user.id,
+      associatedDealId: id,
+      kind,
+      version,
+      isCurrentVersion: true,
+      parentDocumentId,
     });
     await db.insert(dealActivity).values({
       dealId: id,
       authorId: session.user.id,
       kind: "document_uploaded",
-      body: `Uploaded ${file.name}${kind && kind !== "deal_attachment" ? ` (${kind})` : ""}`,
+      body: `Uploaded ${file.name}${version > 1 ? ` (v${version})` : ""}${kind && kind !== "deal_attachment" ? ` — ${kind}` : ""}`,
     });
     revalidatePath(`/deals/${id}`);
+    revalidatePath(`/crm/${d.customerId}`);
   }
 
   async function deleteFile(formData: FormData) {
     "use server";
     const fileId = String(formData.get("fileId") ?? "");
     if (!fileId) return;
-    await db.delete(files).where(eq(files.id, fileId));
+    await db.delete(customerDocuments).where(eq(customerDocuments.id, fileId));
     revalidatePath(`/deals/${id}`);
+    if (d.customerId) revalidatePath(`/crm/${d.customerId}`);
   }
 
   const pipeline = getPipeline(d.pipeline);
@@ -394,7 +424,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
                   <ul className="pt-2 border-t border-white/5 space-y-1">
                     {pipelineDocs.map((f) => (
                       <li key={f.id} className="flex items-center justify-between text-[11px] font-body">
-                        <a href={f.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate">{f.filename}</a>
+                        <a href={f.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate">{f.fileName}</a>
                         <div className="flex items-center gap-3 text-zinc-500">
                           <span>{new Date(f.uploadedAt).toLocaleDateString()}</span>
                           <form action={deleteFile} className="inline">
@@ -424,7 +454,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
                 <ul className="space-y-1">
                   {otherDocs.map((f) => (
                     <li key={f.id} className="flex items-center justify-between text-[11px] font-body">
-                      <a href={f.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate">{f.filename}</a>
+                      <a href={f.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate">{f.fileName}</a>
                       <div className="flex items-center gap-3 text-zinc-500">
                         <span>{new Date(f.uploadedAt).toLocaleDateString()}</span>
                         <form action={deleteFile} className="inline">

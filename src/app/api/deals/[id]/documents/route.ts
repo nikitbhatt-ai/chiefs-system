@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { deals, files } from "@/db/schema";
-import { docForPipeline } from "@/lib/documentTemplates";
-import { getPipeline } from "@/lib/pipelines";
+import { deals, customerDocuments } from "@/db/schema";
+import { categoryForKind } from "@/lib/customerDocuments";
 
 export const dynamic = "force-dynamic";
 
@@ -23,40 +22,59 @@ export async function POST(
   if (!deal) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
+  if (!deal.customerId) {
+    return NextResponse.json({ error: "Deal has no customer; cannot upload" }, { status: 400 });
+  }
 
   const form = await req.formData();
   const file = form.get("file");
-  const requestedKind = String(form.get("kind") ?? "").trim() || null;
+  const kind = String(form.get("kind") ?? "").trim() || "deal_attachment";
 
-  if (!(file instanceof File)) {
+  if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
 
-  const pipeline = getPipeline(deal.pipeline);
-  const docSpec = docForPipeline(pipeline.slug);
-  let kind = requestedKind ?? docSpec?.slug ?? "deal_attachment";
-  if (docSpec && (requestedKind === docSpec.slug || requestedKind == null)) {
-    kind = docSpec.slug;
-  }
-
-  const blob = await put(`deals/${id}/${Date.now()}-${file.name}`, file, {
+  const category = categoryForKind(kind);
+  const blob = await put(`customers/${deal.customerId}/${Date.now()}-${file.name}`, file, {
     access: "public",
     addRandomSuffix: true,
   });
 
+  const [prior] = await db
+    .select({ id: customerDocuments.id, version: customerDocuments.version, parentDocumentId: customerDocuments.parentDocumentId })
+    .from(customerDocuments)
+    .where(and(
+      eq(customerDocuments.customerId, deal.customerId),
+      eq(customerDocuments.category, category),
+      eq(customerDocuments.fileName, file.name),
+      eq(customerDocuments.isCurrentVersion, true),
+    ))
+    .limit(1);
+  let version = 1;
+  let parentDocumentId: string | null = null;
+  if (prior) {
+    version = prior.version + 1;
+    parentDocumentId = prior.parentDocumentId ?? prior.id;
+    await db.update(customerDocuments).set({ isCurrentVersion: false }).where(eq(customerDocuments.id, prior.id));
+  }
+
   const [row] = await db
-    .insert(files)
+    .insert(customerDocuments)
     .values({
-      entityType: "deal",
-      entityId: id,
+      customerId: deal.customerId,
+      category,
+      fileName: file.name,
       blobUrl: blob.url,
-      filename: file.name,
       mimeType: file.type || null,
       sizeBytes: file.size || null,
-      kind,
       uploadedBy: session.user.id,
+      associatedDealId: id,
+      kind,
+      version,
+      isCurrentVersion: true,
+      parentDocumentId,
     })
     .returning();
 
-  return NextResponse.json({ file: row });
+  return NextResponse.json({ document: row });
 }

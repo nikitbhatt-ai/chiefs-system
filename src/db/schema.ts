@@ -297,18 +297,30 @@ export const templates = pgTable("templates", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export const files = pgTable("files", {
+export const customerDocuments = pgTable("customer_documents", {
   id: uuid("id").defaultRandom().primaryKey(),
-  entityType: text("entity_type").notNull(),
-  entityId: uuid("entity_id").notNull(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  category: text("category").notNull(),
+  fileName: text("file_name").notNull(),
   blobUrl: text("blob_url").notNull(),
-  filename: text("filename").notNull(),
   mimeType: text("mime_type"),
   sizeBytes: integer("size_bytes"),
-  kind: text("kind"),
   uploadedBy: uuid("uploaded_by").references(() => users.id),
   uploadedAt: timestamp("uploaded_at").notNull().defaultNow(),
-}, (t) => [index("files_entity_idx").on(t.entityType, t.entityId), index("files_kind_idx").on(t.kind)]);
+  associatedDealId: uuid("associated_deal_id").references(() => deals.id, { onDelete: "set null" }),
+  tags: jsonb("tags").$type<string[]>().default([]),
+  notes: text("notes"),
+  kind: text("kind"),
+  version: integer("version").notNull().default(1),
+  isCurrentVersion: boolean("is_current_version").notNull().default(true),
+  parentDocumentId: uuid("parent_document_id"),
+}, (t) => [
+  index("customer_documents_customer_idx").on(t.customerId),
+  index("customer_documents_category_idx").on(t.customerId, t.category),
+  index("customer_documents_deal_idx").on(t.associatedDealId),
+  index("customer_documents_current_idx").on(t.customerId, t.isCurrentVersion),
+  index("customer_documents_kind_idx").on(t.kind),
+]);
 
 export const agentLogs = pgTable("agent_logs", {
   id: uuid("id").defaultRandom().primaryKey(),

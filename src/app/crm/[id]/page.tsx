@@ -1,10 +1,17 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ilike } from "drizzle-orm";
+import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { customers, deals, quotes, workOrders, notes, users } from "@/db/schema";
+import { customers, deals, quotes, workOrders, notes, users, customerDocuments } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import {
+  CUSTOMER_DOC_CATEGORIES,
+  isValidCategory,
+} from "@/lib/customerDocuments";
+
+export const dynamic = "force-dynamic";
 
 const STAGE_COLORS: Record<string, string> = {
   prospect: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
@@ -22,17 +29,43 @@ function fmt(v: string | null | undefined) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-export default async function CustomerEntityPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function CustomerEntityPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ q?: string; category?: string; deal?: string; from?: string; to?: string }>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
   const [c] = await db.select().from(customers).where(eq(customers.id, id));
   if (!c) notFound();
 
-  const [dealRows, quoteRows, woRows, noteRows] = await Promise.all([
+  const docFilters = [eq(customerDocuments.customerId, id), eq(customerDocuments.isCurrentVersion, true)];
+  if (sp.q && sp.q.trim()) docFilters.push(ilike(customerDocuments.fileName, `%${sp.q.trim()}%`));
+  if (sp.category && isValidCategory(sp.category)) docFilters.push(eq(customerDocuments.category, sp.category));
+  if (sp.deal) docFilters.push(eq(customerDocuments.associatedDealId, sp.deal));
+  if (sp.from) docFilters.push(gte(customerDocuments.uploadedAt, new Date(sp.from)));
+  if (sp.to) docFilters.push(lte(customerDocuments.uploadedAt, new Date(sp.to)));
+
+  const [dealRows, quoteRows, woRows, noteRows, docRows] = await Promise.all([
     db.select().from(deals).where(eq(deals.customerId, id)).orderBy(desc(deals.createdAt)),
     db.select().from(quotes).where(eq(quotes.customerId, id)).orderBy(desc(quotes.createdAt)),
     db.select().from(workOrders).where(eq(workOrders.customerId, id)).orderBy(desc(workOrders.createdAt)),
     db.select({ id: notes.id, body: notes.body, authorId: notes.authorId, createdAt: notes.createdAt }).from(notes).where(and(eq(notes.entityType, "customer"), eq(notes.entityId, id))).orderBy(desc(notes.createdAt)),
+    db.select().from(customerDocuments).where(and(...docFilters)).orderBy(desc(customerDocuments.uploadedAt)),
   ]);
+
+  const dealLabelMap = new Map(
+    dealRows.map((d) => [d.id, [d.vehicleYear, d.vehicleMake, d.vehicleModel].filter(Boolean).join(" ") || d.id.slice(0, 8)]),
+  );
+  const docsByCategory = new Map<string, typeof docRows>();
+  for (const cat of CUSTOMER_DOC_CATEGORIES) docsByCategory.set(cat.value, [] as typeof docRows);
+  for (const d of docRows) {
+    const list = docsByCategory.get(d.category) ?? [];
+    list.push(d);
+    docsByCategory.set(d.category, list);
+  }
 
   const authorIds = Array.from(new Set(noteRows.map((n) => n.authorId).filter(Boolean) as string[]));
   const authorRows = authorIds.length
@@ -58,6 +91,66 @@ export default async function CustomerEntityPage({ params }: { params: Promise<{
     revalidatePath(`/crm/${id}`);
   }
 
+  async function uploadCustomerDoc(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const file = formData.get("file");
+    if (!(file instanceof File) || file.size === 0) return;
+    const requestedCategory = String(formData.get("category") ?? "");
+    const category = isValidCategory(requestedCategory) ? requestedCategory : "misc";
+    const associatedDealRaw = String(formData.get("associatedDealId") ?? "").trim();
+    const associatedDealId = associatedDealRaw || null;
+    const docNotes = String(formData.get("notes") ?? "").trim() || null;
+
+    const blob = await put(`customers/${id}/${Date.now()}-${file.name}`, file, {
+      access: "public",
+      addRandomSuffix: true,
+    });
+
+    const [prior] = await db
+      .select({ id: customerDocuments.id, version: customerDocuments.version, parentDocumentId: customerDocuments.parentDocumentId })
+      .from(customerDocuments)
+      .where(and(
+        eq(customerDocuments.customerId, id),
+        eq(customerDocuments.category, category),
+        eq(customerDocuments.fileName, file.name),
+        eq(customerDocuments.isCurrentVersion, true),
+      ))
+      .limit(1);
+    let version = 1;
+    let parentDocumentId: string | null = null;
+    if (prior) {
+      version = prior.version + 1;
+      parentDocumentId = prior.parentDocumentId ?? prior.id;
+      await db.update(customerDocuments).set({ isCurrentVersion: false }).where(eq(customerDocuments.id, prior.id));
+    }
+
+    await db.insert(customerDocuments).values({
+      customerId: id,
+      category,
+      fileName: file.name,
+      blobUrl: blob.url,
+      mimeType: file.type || null,
+      sizeBytes: file.size || null,
+      uploadedBy: session.user.id,
+      associatedDealId,
+      notes: docNotes,
+      version,
+      isCurrentVersion: true,
+      parentDocumentId,
+    });
+    revalidatePath(`/crm/${id}`);
+  }
+
+  async function deleteCustomerDoc(formData: FormData) {
+    "use server";
+    const docId = String(formData.get("docId") ?? "");
+    if (!docId) return;
+    await db.delete(customerDocuments).where(eq(customerDocuments.id, docId));
+    revalidatePath(`/crm/${id}`);
+  }
+
   return (
     <AppShell title={c.name} subtitle={`${c.type} customer`}>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -76,6 +169,105 @@ export default async function CustomerEntityPage({ params }: { params: Promise<{
           <Stat label="Deals" value={dealRows.length} />
           <Stat label="Quotes" value={quoteRows.length} />
           <Stat label="Work orders" value={woRows.length} />
+        </div>
+      </div>
+
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Customer folder</h3>
+          <span className="text-[10px] font-body text-zinc-500">
+            {docRows.length} of {CUSTOMER_DOC_CATEGORIES.length} categories · current versions only
+          </span>
+        </div>
+
+        <form action={uploadCustomerDoc} encType="multipart/form-data" className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end bg-black/30 border border-white/5 rounded-md p-3">
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body md:col-span-1">
+            File
+            <input type="file" name="file" required className="mt-1 w-full text-[11px] font-body text-zinc-300 file:bg-black/40 file:border file:border-white/10 file:rounded file:px-2 file:py-1 file:text-zinc-300 file:mr-2" />
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Category
+            <select name="category" defaultValue="misc" className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white">
+              {CUSTOMER_DOC_CATEGORIES.map((cat) => (<option key={cat.value} value={cat.value}>{cat.label}</option>))}
+            </select>
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Associated deal
+            <select name="associatedDealId" defaultValue="" className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white">
+              <option value="">— None —</option>
+              {dealRows.map((d) => (<option key={d.id} value={d.id}>{dealLabelMap.get(d.id)}</option>))}
+            </select>
+          </label>
+          <div className="flex gap-2">
+            <input name="notes" placeholder="Notes (optional)" className="flex-1 bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white placeholder:text-zinc-500" />
+            <button type="submit" className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1.5">Upload</button>
+          </div>
+        </form>
+
+        <form className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body md:col-span-2">
+            Search filename
+            <input name="q" defaultValue={sp.q ?? ""} placeholder="e.g. PO 2024-…" className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white placeholder:text-zinc-500" />
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Category
+            <select name="category" defaultValue={sp.category ?? ""} className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white">
+              <option value="">All</option>
+              {CUSTOMER_DOC_CATEGORIES.map((cat) => (<option key={cat.value} value={cat.value}>{cat.label}</option>))}
+            </select>
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            From
+            <input name="from" type="date" defaultValue={sp.from ?? ""} className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white" />
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            To
+            <input name="to" type="date" defaultValue={sp.to ?? ""} className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white" />
+          </label>
+          <div className="md:col-span-5 flex gap-2 justify-end">
+            <a href={`/crm/${id}`} className="text-[11px] text-zinc-400 hover:text-white font-body">Clear</a>
+            <button type="submit" className="text-[11px] font-body text-amber-400 hover:text-amber-300">Filter</button>
+          </div>
+        </form>
+
+        <div className="space-y-3">
+          {CUSTOMER_DOC_CATEGORIES.map((cat) => {
+            const docs = docsByCategory.get(cat.value) ?? [];
+            if (sp.category && sp.category !== cat.value) return null;
+            return (
+              <details key={cat.value} open={docs.length > 0} className="bg-black/30 border border-white/5 rounded-md">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-body font-semibold text-white flex items-center justify-between">
+                  <span>{cat.label}</span>
+                  <span className="text-[10px] font-normal text-zinc-500">{docs.length} {docs.length === 1 ? "file" : "files"}</span>
+                </summary>
+                {docs.length > 0 && (
+                  <ul className="px-3 pb-3 space-y-1">
+                    {docs.map((d) => (
+                      <li key={d.id} className="flex items-center justify-between gap-3 text-[11px] font-body py-1 border-t border-white/5">
+                        <div className="flex-1 min-w-0">
+                          <a href={d.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate inline-block max-w-full">{d.fileName}</a>
+                          {d.version > 1 && (<span className="ml-2 text-[10px] text-amber-400">v{d.version}</span>)}
+                          {d.notes && (<div className="text-[10px] text-zinc-500 italic">{d.notes}</div>)}
+                        </div>
+                        <div className="text-[10px] text-zinc-500 whitespace-nowrap flex items-center gap-3">
+                          {d.associatedDealId && (
+                            <a href={`/deals/${d.associatedDealId}`} className="text-blue-400 hover:text-blue-300">
+                              {dealLabelMap.get(d.associatedDealId) ?? "deal"}
+                            </a>
+                          )}
+                          <span>{new Date(d.uploadedAt).toLocaleDateString()}</span>
+                          <form action={deleteCustomerDoc} className="inline">
+                            <input type="hidden" name="docId" value={d.id} />
+                            <button type="submit" className="hover:text-red-400">Delete</button>
+                          </form>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </details>
+            );
+          })}
         </div>
       </div>
 
