@@ -51,6 +51,55 @@ are pending and should be addressed when their owning module is built.
 - [ ] Filters + tags + archive (cross-cutting).
 - [ ] Internal notes.
 
+## Pipeline templates (in progress, phased)
+
+Three pipeline templates drive how a deal flows from prospect to delivered.
+Pipeline is chosen at lead creation via the Customer Type / pipeline
+dropdown on `/leads` and carries through to the deal on conversion. Stage
+transitions are validated server-side: stages must advance one step at a
+time within the pipeline's stage list, backwards is allowed, and `lost`
+is reachable from anywhere.
+
+- [x] **Pipeline engine** — `src/lib/pipelines.ts` defines the three
+      pipelines (slug, label, ordered stages, procurement gate, hard
+      gate). `pipelineForCustomerType()` maps `customers.type` to a
+      pipeline slug. `canAdvanceTo()` validates transitions.
+- [x] **Government pipeline**: prospect → quote_sent → po_received →
+      in_production → delivered. PO Received is the procurement gate.
+- [x] **Walk-In Credentialed pipeline**: prospect →
+      credential_verification → quote_sent → deposit_received →
+      in_production → delivered. Credential Verification is a hard gate.
+- [x] **Commercial pipeline**: prospect → quote_sent → deposit_received
+      → in_production → delivered. Simpler deposit-based flow.
+- [x] **Lead → deal conversion** carries `customerType` to
+      `customers.type` and `deals.pipeline`, and creates the deal row.
+- [x] **Pipeline progression strip** on the deal entity page shows the
+      ordered stages with current position.
+- [ ] **Credential gate enforcement** (PR 2): block advancement past
+      `credential_verification` until a `deal_credentials` row exists
+      with `verified_at` set. Surface credential expiration warnings.
+- [ ] **Restricted equipment flagging** (PR 2): flag parts as restricted
+      and block adding them to walk-in deals unless the deal's
+      credential covers them.
+- [ ] **Parallel tracks system** (PR 3): Sales / Build / Credential
+      tracks render side-by-side on the deal page with per-track stages.
+- [ ] **Per-pipeline document templates** (PR 4): government PO intake,
+      walk-in credential intake, commercial deposit receipt — stored in
+      `templates` table, generated PDFs attached via `files`.
+
+### Schema additions (PR 1)
+
+Add new enum values via Neon's SQL Editor before deploying this PR:
+
+```sql
+ALTER TYPE customer_type ADD VALUE IF NOT EXISTS 'walk_in_credentialed';
+ALTER TYPE deal_stage ADD VALUE IF NOT EXISTS 'credential_verification';
+ALTER TYPE deal_stage ADD VALUE IF NOT EXISTS 'deposit_received';
+```
+
+Run each statement in its own transaction (Postgres won't allow the new
+enum value to be used in the same transaction it's added).
+
 ## Deals (not yet built)
 
 - [ ] Pipeline / kanban view with drag-and-drop between stages.
