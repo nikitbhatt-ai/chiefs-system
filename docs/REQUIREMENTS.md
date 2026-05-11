@@ -75,12 +75,24 @@ is reachable from anywhere.
       `customers.type` and `deals.pipeline`, and creates the deal row.
 - [x] **Pipeline progression strip** on the deal entity page shows the
       ordered stages with current position.
-- [ ] **Credential gate enforcement** (PR 2): block advancement past
-      `credential_verification` until a `deal_credentials` row exists
-      with `verified_at` set. Surface credential expiration warnings.
-- [ ] **Restricted equipment flagging** (PR 2): flag parts as restricted
-      and block adding them to walk-in deals unless the deal's
-      credential covers them.
+- [x] **Credential gate enforcement** (PR 2): `canAdvanceTo` accepts a
+      `hasActiveCredential` context; for pipelines with `hardGate`, the
+      gate blocks advancement past that stage unless at least one
+      credential is verified and not expired. Credentials panel on the
+      deal entity page (walk-in only) supports add / verify / delete
+      and shows status badges: `Verified`, `Pending verification`,
+      `Expiring soon` (≤30 days), `Expired`.
+- [x] **Restricted equipment flagging** (PR 2): `parts.restricted` +
+      `parts.restriction_category` columns; restricted-equipment
+      toggle on the part edit form; restricted badge on the inventory
+      list. Each credential carries a `restricted_equipment` jsonb
+      array of category slugs it covers. `credentialCoversPart()` in
+      `src/lib/credentials.ts` is the canonical check used by quote /
+      work-order flows.
+- [ ] **Quote/work-order restricted-part block** (PR 3): when a
+      restricted part is added to a walk-in deal's quote or work order,
+      verify the deal has a credential whose `restricted_equipment`
+      covers the part's category — otherwise reject the line item.
 - [ ] **Parallel tracks system** (PR 3): Sales / Build / Credential
       tracks render side-by-side on the deal page with per-track stages.
 - [ ] **Per-pipeline document templates** (PR 4): government PO intake,
@@ -99,6 +111,13 @@ ALTER TYPE deal_stage ADD VALUE IF NOT EXISTS 'deposit_received';
 
 Run each statement in its own transaction (Postgres won't allow the new
 enum value to be used in the same transaction it's added).
+
+### Schema additions (PR 2)
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS restricted boolean NOT NULL DEFAULT false;
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS restriction_category text;
+```
 
 ## Deals (not yet built)
 

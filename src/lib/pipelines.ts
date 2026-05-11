@@ -107,10 +107,15 @@ export function pipelineForCustomerType(
   return "commercial";
 }
 
+export type StageTransitionContext = {
+  hasActiveCredential?: boolean;
+};
+
 export function canAdvanceTo(
   pipelineSlug: string | null | undefined,
   fromStage: string,
   toStage: string,
+  context: StageTransitionContext = {},
 ): StageTransitionResult {
   const pipeline = getPipeline(pipelineSlug);
 
@@ -144,6 +149,16 @@ export function canAdvanceTo(
       ok: false,
       reason: `Cannot skip ${skipped}. Advance one stage at a time in the ${pipeline.label} pipeline.`,
     };
+  }
+
+  if (pipeline.hardGate) {
+    const gateIdx = pipeline.stages.indexOf(pipeline.hardGate);
+    if (toIdx > gateIdx && !context.hasActiveCredential) {
+      return {
+        ok: false,
+        reason: `${pipeline.label} requires a verified credential before advancing past ${stageLabel(pipeline.hardGate)}. Add and verify a credential first.`,
+      };
+    }
   }
 
   return { ok: true };

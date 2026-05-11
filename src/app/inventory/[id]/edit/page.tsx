@@ -31,6 +31,7 @@ export default async function EditPartPage({
     };
     const costNum = num("cost");
     const priceNum = num("price");
+    const restricted = formData.get("restricted") != null;
     await db
       .update(parts)
       .set({
@@ -45,6 +46,10 @@ export default async function EditPartPage({
         price: priceNum != null ? String(priceNum) : null,
         vendorId: String(formData.get("vendorId") ?? "") || null,
         manufacturerId: String(formData.get("manufacturerId") ?? "") || null,
+        restricted,
+        restrictionCategory: restricted
+          ? (String(formData.get("restrictionCategory") ?? "").trim() || null)
+          : null,
         updatedAt: new Date(),
       })
       .where(eq(parts.id, id));
@@ -69,6 +74,8 @@ export default async function EditPartPage({
           price: p.price ?? "",
           vendorId: p.vendorId ?? "",
           manufacturerId: p.manufacturerId ?? "",
+          restricted: p.restricted,
+          restrictionCategory: p.restrictionCategory ?? "",
         }}
       />
     </AppShell>

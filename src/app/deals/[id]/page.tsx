@@ -1,11 +1,18 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
+import {
+  CREDENTIAL_TYPES,
+  RESTRICTION_CATEGORIES,
+  STATUS_COLORS as CRED_STATUS_COLORS,
+  STATUS_LABELS as CRED_STATUS_LABELS,
+  credentialStatus,
+} from "@/lib/credentials";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +21,13 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) notFound();
 
-  const [customerRow, assigneeRow, activity, partnerRow, contactRow] = await Promise.all([
+  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials] = await Promise.all([
     d.customerId ? db.select().from(customers).where(eq(customers.id, d.customerId)).limit(1) : Promise.resolve([]),
     d.assignedTo ? db.select().from(users).where(eq(users.id, d.assignedTo)).limit(1) : Promise.resolve([]),
     db.select().from(dealActivity).where(eq(dealActivity.dealId, id)).orderBy(desc(dealActivity.createdAt)),
     d.partnerId ? db.select().from(partners).where(eq(partners.id, d.partnerId)).limit(1) : Promise.resolve([]),
     d.partnerContactId ? db.select().from(partnerContacts).where(eq(partnerContacts.id, d.partnerContactId)).limit(1) : Promise.resolve([]),
+    db.select().from(dealCredentials).where(eq(dealCredentials.dealId, id)).orderBy(asc(dealCredentials.createdAt)),
   ]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
@@ -40,6 +48,65 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     const body = String(formData.get("body") ?? "").trim();
     if (!body) return;
     await db.insert(dealActivity).values({ dealId: id, authorId: session.user.id, kind: "note", body });
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function addCredential(formData: FormData) {
+    "use server";
+    const credentialType = String(formData.get("credentialType") ?? "").trim();
+    if (credentialType !== "LE" && credentialType !== "Generic") return;
+    const issuedRaw = String(formData.get("issuedDate") ?? "").trim();
+    const expiresRaw = String(formData.get("expiresAt") ?? "").trim();
+    const restricted = formData
+      .getAll("restrictedEquipment")
+      .map((v) => String(v))
+      .filter(Boolean);
+    await db.insert(dealCredentials).values({
+      dealId: id,
+      credentialType,
+      credentialNumber: String(formData.get("credentialNumber") ?? "").trim() || null,
+      issuingAuthority: String(formData.get("issuingAuthority") ?? "").trim() || null,
+      issuedDate: issuedRaw ? new Date(issuedRaw) : null,
+      expiresAt: expiresRaw ? new Date(expiresRaw) : null,
+      notes: String(formData.get("notes") ?? "").trim() || null,
+      restrictedEquipment: restricted.length ? restricted : null,
+    });
+    const session = await auth();
+    if (session?.user) {
+      await db.insert(dealActivity).values({
+        dealId: id,
+        authorId: session.user.id,
+        kind: "credential_added",
+        body: `Added ${credentialType} credential` + (restricted.length ? ` covering ${restricted.join(", ")}` : ""),
+      });
+    }
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function verifyCredential(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const credId = String(formData.get("credId") ?? "");
+    if (!credId) return;
+    await db
+      .update(dealCredentials)
+      .set({ verifiedAt: new Date(), verifiedBy: session.user.id, updatedAt: new Date() })
+      .where(eq(dealCredentials.id, credId));
+    await db.insert(dealActivity).values({
+      dealId: id,
+      authorId: session.user.id,
+      kind: "credential_verified",
+      body: "Verified credential",
+    });
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function deleteCredential(formData: FormData) {
+    "use server";
+    const credId = String(formData.get("credId") ?? "");
+    if (!credId) return;
+    await db.delete(dealCredentials).where(eq(dealCredentials.id, credId));
     revalidatePath(`/deals/${id}`);
   }
 
@@ -97,6 +164,105 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
           <Stat label="Tasks" value={0} />
         </div>
       </div>
+      {pipeline.hardGate ? (
+        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Credentials</h3>
+            <span className="text-[10px] font-body text-zinc-500">
+              {pipeline.label} requires a verified credential before advancing past {stageLabel(pipeline.hardGate)}.
+            </span>
+          </div>
+          {credentials.length === 0 ? (
+            <p className="text-[11px] text-amber-300 font-body bg-amber-500/5 border border-amber-500/30 rounded p-2.5">
+              No credentials on file. The deal cannot advance past {stageLabel(pipeline.hardGate)} until a credential is added and verified.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {credentials.map((c) => {
+                const status = credentialStatus(c);
+                const restricted = Array.isArray(c.restrictedEquipment) ? (c.restrictedEquipment as string[]) : [];
+                return (
+                  <li key={c.id} className="bg-black/30 border border-white/5 rounded-md p-2.5 text-[11px] font-body grid grid-cols-1 md:grid-cols-4 gap-2 items-center">
+                    <div>
+                      <div className="text-white font-semibold">{c.credentialType === "LE" ? "Law Enforcement" : "Generic"}</div>
+                      <div className="text-zinc-400">{c.credentialNumber ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-zinc-500 uppercase tracking-wider text-[9px]">Authority</div>
+                      <div className="text-zinc-300">{c.issuingAuthority ?? "—"}</div>
+                    </div>
+                    <div>
+                      <div className="text-zinc-500 uppercase tracking-wider text-[9px]">Dates</div>
+                      <div className="text-zinc-300">
+                        {c.issuedDate ? new Date(c.issuedDate).toLocaleDateString() : "—"}
+                        {" → "}
+                        {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-start md:items-end gap-1">
+                      <span className={`inline-block text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${CRED_STATUS_COLORS[status]}`}>
+                        {CRED_STATUS_LABELS[status]}
+                      </span>
+                      <div className="flex gap-2">
+                        {!c.verifiedAt && (
+                          <form action={verifyCredential} className="inline">
+                            <input type="hidden" name="credId" value={c.id} />
+                            <button type="submit" className="text-[10px] text-green-400 hover:text-green-300">Verify</button>
+                          </form>
+                        )}
+                        <form action={deleteCredential} className="inline">
+                          <input type="hidden" name="credId" value={c.id} />
+                          <button type="submit" className="text-[10px] text-zinc-500 hover:text-red-400">Delete</button>
+                        </form>
+                      </div>
+                    </div>
+                    {restricted.length > 0 && (
+                      <div className="md:col-span-4 text-[10px] text-zinc-500 uppercase tracking-wider">
+                        Covers: <span className="text-zinc-300 normal-case tracking-normal">
+                          {restricted
+                            .map((r) => RESTRICTION_CATEGORIES.find((rc) => rc.value === r)?.label ?? r)
+                            .join(", ")}
+                        </span>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <form action={addCredential} className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2 border-t border-white/5">
+            <div className="md:col-span-3 text-[10px] uppercase tracking-wider text-zinc-500 font-body">Add credential</div>
+            <select name="credentialType" required defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
+              <option value="" disabled>— Type * —</option>
+              {CREDENTIAL_TYPES.map((t) => (<option key={t.value} value={t.value}>{t.label}</option>))}
+            </select>
+            <input name="credentialNumber" placeholder="Credential / badge #" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+            <input name="issuingAuthority" placeholder="Issuing authority" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+            <label className="text-[10px] text-zinc-500 font-body">Issued
+              <input name="issuedDate" type="date" className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-3 py-1.5 text-xs text-white" />
+            </label>
+            <label className="text-[10px] text-zinc-500 font-body">Expires
+              <input name="expiresAt" type="date" className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-3 py-1.5 text-xs text-white" />
+            </label>
+            <input name="notes" placeholder="Notes" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+            <fieldset className="md:col-span-3 border border-white/5 rounded-md p-2">
+              <legend className="text-[10px] uppercase tracking-wider text-zinc-500 font-body px-1">Restricted equipment this credential covers</legend>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {RESTRICTION_CATEGORIES.map((r) => (
+                  <label key={r.value} className="text-[11px] font-body text-zinc-300 flex items-center gap-1.5">
+                    <input type="checkbox" name="restrictedEquipment" value={r.value} className="accent-amber-500" />
+                    {r.label}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="md:col-span-3 flex justify-end">
+              <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add credential</button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
         <form action={postNote} className="flex gap-2">

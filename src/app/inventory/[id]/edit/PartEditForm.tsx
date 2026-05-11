@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { RESTRICTION_CATEGORIES } from "@/lib/credentials";
 
 type Initial = {
   sku: string;
@@ -14,6 +15,8 @@ type Initial = {
   price: string;
   vendorId: string;
   manufacturerId: string;
+  restricted: boolean;
+  restrictionCategory: string;
 };
 
 export function PartEditForm({
@@ -27,6 +30,7 @@ export function PartEditForm({
 }) {
   const [cost, setCost] = useState(String(initial.cost ?? ""));
   const [price, setPrice] = useState(String(initial.price ?? ""));
+  const [restricted, setRestricted] = useState(initial.restricted);
 
   const c = Number(cost);
   const p = Number(price);
@@ -170,6 +174,29 @@ export function PartEditForm({
             {m}% markup
           </button>
         ))}
+      </div>
+      <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-3 border-t border-white/5 pt-3 mt-1">
+        <label className="text-[11px] font-body text-zinc-300 flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="restricted"
+            checked={restricted}
+            onChange={(e) => setRestricted(e.target.checked)}
+            className="accent-amber-500"
+          />
+          Restricted equipment (requires credential)
+        </label>
+        <select
+          name="restrictionCategory"
+          defaultValue={initial.restrictionCategory}
+          disabled={!restricted}
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white md:col-span-2 disabled:opacity-40"
+        >
+          <option value="">— Restriction category —</option>
+          {RESTRICTION_CATEGORIES.map((r) => (
+            <option key={r.value} value={r.value}>{r.label}</option>
+          ))}
+        </select>
       </div>
       <textarea
         name="description"
