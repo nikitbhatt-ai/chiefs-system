@@ -138,6 +138,8 @@ export const deals = pgTable("deals", {
   vehicleModel: text("vehicle_model"),
   vin: text("vin"),
   stage: dealStage("stage").notNull().default("prospect"),
+  subStatus: text("sub_status"),
+  currentStageEnteredAt: timestamp("current_stage_entered_at").notNull().defaultNow(),
   referralSource: text("referral_source"),
   notes: text("notes"),
   pipeline: text("pipeline"),
@@ -154,6 +156,18 @@ export const deals = pgTable("deals", {
   index("deals_stage_idx").on(t.stage),
   index("deals_customer_idx").on(t.customerId),
   index("deals_pipeline_idx").on(t.pipeline),
+]);
+
+export const pipelineStageSla = pgTable("pipeline_stage_sla", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  pipelineSlug: text("pipeline_slug").notNull(),
+  stage: text("stage").notNull(),
+  warningDays: integer("warning_days").notNull().default(3),
+  overdueDays: integer("overdue_days").notNull().default(7),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("pipeline_stage_sla_lookup_idx").on(t.pipelineSlug, t.stage),
 ]);
 
 export const dealComms = pgTable("deal_comms", {

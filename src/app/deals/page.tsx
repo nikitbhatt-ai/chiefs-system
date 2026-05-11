@@ -105,7 +105,7 @@ async function changeStage(formData: FormData) {
 
   await db
     .update(deals)
-    .set({ stage: requested as DealStage, updatedAt: new Date() })
+    .set({ stage: requested as DealStage, currentStageEnteredAt: new Date(), updatedAt: new Date() })
     .where(eq(deals.id, id));
   revalidatePath("/deals");
   revalidatePath(`/deals/${id}`);

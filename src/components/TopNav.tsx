@@ -16,6 +16,7 @@ const NAV: NavGroup[] = [
       { href: "/crm", label: "Customers" },
       { href: "/leads", label: "Leads" },
       { href: "/deals", label: "Deals" },
+      { href: "/pipeline", label: "Pipeline (kanban)" },
       { href: "/quotes", label: "Quotes" },
       { href: "/partners", label: "Partners" },
     ],
@@ -37,6 +38,7 @@ const NAV: NavGroup[] = [
       { href: "/reporting", label: "Reporting" },
       { href: "/users", label: "Users" },
       { href: "/settings/lookups", label: "Settings (lookups)" },
+      { href: "/settings/sla", label: "Settings (stage SLAs)" },
     ],
   },
 ];
