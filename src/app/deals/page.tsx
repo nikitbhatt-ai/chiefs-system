@@ -1,8 +1,9 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, customers, users } from "@/db/schema";
+import { deals, customers, users, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { isCredentialActive } from "@/lib/credentials";
 import {
   PIPELINES,
   PIPELINE_SLUGS,
@@ -73,7 +74,13 @@ async function changeStage(formData: FormData) {
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) return;
 
-  const transition = canAdvanceTo(d.pipeline, d.stage, requested);
+  const creds = await db
+    .select({ verifiedAt: dealCredentials.verifiedAt, expiresAt: dealCredentials.expiresAt })
+    .from(dealCredentials)
+    .where(eq(dealCredentials.dealId, id));
+  const hasActiveCredential = creds.some((c) => isCredentialActive(c));
+
+  const transition = canAdvanceTo(d.pipeline, d.stage, requested, { hasActiveCredential });
   if (!transition.ok) {
     throw new Error(transition.reason);
   }

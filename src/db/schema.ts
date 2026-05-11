@@ -198,6 +198,8 @@ export const parts = pgTable("parts", {
   vendorId: uuid("vendor_id").references(() => vendors.id),
   manufacturerId: uuid("manufacturer_id").references(() => vendors.id),
   archived: boolean("archived").notNull().default(false),
+  restricted: boolean("restricted").notNull().default(false),
+  restrictionCategory: text("restriction_category"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("parts_sku_idx").on(t.sku)]);

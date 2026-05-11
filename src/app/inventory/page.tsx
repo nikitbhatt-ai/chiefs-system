@@ -198,7 +198,14 @@ export default async function InventoryPage({
                 return (
                   <tr key={p.id} className="border-t border-white/5">
                     <td className="px-3 py-2 font-mono text-xs text-white">{p.sku}</td>
-                    <td className="px-3 py-2 text-xs text-white">{p.name}</td>
+                    <td className="px-3 py-2 text-xs text-white">
+                      {p.name}
+                      {p.restricted ? (
+                        <span className="ml-2 inline-block text-[9px] uppercase tracking-wider rounded border border-red-500/40 bg-red-500/10 text-red-300 px-1.5 py-0.5">
+                          Restricted{p.restrictionCategory ? ` · ${p.restrictionCategory.replace(/_/g, " ")}` : ""}
+                        </span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-xs">{p.category ?? "—"}</td>
                     <td className="px-3 py-2 text-xs">
                       {p.manufacturerId ? vendorMap.get(p.manufacturerId) ?? "—" : "—"}
