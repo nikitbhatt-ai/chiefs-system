@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, desc, and, gte, lte, ilike } from "drizzle-orm";
+import { eq, desc, and, gte, lte, ilike, inArray } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { customers, deals, quotes, workOrders, notes, users, customerDocuments } from "@/db/schema";
+import { customers, deals, quotes, workOrders, notes, users, customerDocuments, dealCredentials, dealActivity } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -25,6 +25,11 @@ const STAGE_COLORS: Record<string, string> = {
 function fmt(v: string | null | undefined) {
   if (v == null) return "—";
   const n = Number(v);
+  if (Number.isNaN(n)) return "—";
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+function fmtMoney(n: number) {
   if (Number.isNaN(n)) return "—";
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
@@ -59,6 +64,70 @@ export default async function CustomerEntityPage({
   const dealLabelMap = new Map(
     dealRows.map((d) => [d.id, [d.vehicleYear, d.vehicleMake, d.vehicleModel].filter(Boolean).join(" ") || d.id.slice(0, 8)]),
   );
+  const dealIds = dealRows.map((d) => d.id);
+
+  // Summary card data: credentials for expiring buckets, last activity timestamp.
+  const [credentialRows, activityRows] = await Promise.all([
+    dealIds.length
+      ? db
+          .select({
+            id: dealCredentials.id,
+            dealId: dealCredentials.dealId,
+            credentialType: dealCredentials.credentialType,
+            credentialNumber: dealCredentials.credentialNumber,
+            expiresAt: dealCredentials.expiresAt,
+            verifiedAt: dealCredentials.verifiedAt,
+          })
+          .from(dealCredentials)
+          .where(inArray(dealCredentials.dealId, dealIds))
+      : Promise.resolve([] as { id: string; dealId: string; credentialType: string; credentialNumber: string | null; expiresAt: Date | null; verifiedAt: Date | null }[]),
+    dealIds.length
+      ? db
+          .select({ createdAt: dealActivity.createdAt })
+          .from(dealActivity)
+          .where(inArray(dealActivity.dealId, dealIds))
+          .orderBy(desc(dealActivity.createdAt))
+          .limit(1)
+      : Promise.resolve([] as { createdAt: Date }[]),
+  ]);
+
+  const totalDeals = dealRows.length;
+  const activeDeals = dealRows.filter((d) => d.stage !== "lost" && d.stage !== "delivered").length;
+  const closedWonRevenue = quoteRows
+    .filter((q) => q.status === "converted")
+    .reduce((sum, q) => sum + Number(q.grandTotal ?? 0), 0);
+
+  const lastContactCandidates: Date[] = [];
+  if (dealRows[0]?.updatedAt) lastContactCandidates.push(new Date(dealRows[0].updatedAt));
+  if (noteRows[0]?.createdAt) lastContactCandidates.push(new Date(noteRows[0].createdAt));
+  if (docRows[0]?.uploadedAt) lastContactCandidates.push(new Date(docRows[0].uploadedAt));
+  if (activityRows[0]?.createdAt) lastContactCandidates.push(new Date(activityRows[0].createdAt));
+  const lastContact = lastContactCandidates.length
+    ? new Date(Math.max(...lastContactCandidates.map((d) => d.getTime())))
+    : null;
+
+  // Bucket credentials by days-until-expiry. Already-expired land in their
+  // own bucket so they surface in the warning banner even if past 0.
+  const now = Date.now();
+  const dayMs = 1000 * 60 * 60 * 24;
+  type ExpiringCred = (typeof credentialRows)[number] & { daysLeft: number };
+  const expiringCreds: { expired: ExpiringCred[]; in30: ExpiringCred[]; in60: ExpiringCred[]; in90: ExpiringCred[] } = {
+    expired: [],
+    in30: [],
+    in60: [],
+    in90: [],
+  };
+  for (const cred of credentialRows) {
+    if (!cred.expiresAt) continue;
+    const daysLeft = Math.floor((new Date(cred.expiresAt).getTime() - now) / dayMs);
+    const entry = { ...cred, daysLeft };
+    if (daysLeft < 0) expiringCreds.expired.push(entry);
+    else if (daysLeft <= 30) expiringCreds.in30.push(entry);
+    else if (daysLeft <= 60) expiringCreds.in60.push(entry);
+    else if (daysLeft <= 90) expiringCreds.in90.push(entry);
+  }
+  const hasExpiringCreds =
+    expiringCreds.expired.length + expiringCreds.in30.length + expiringCreds.in60.length + expiringCreds.in90.length > 0;
   const docsByCategory = new Map<string, typeof docRows>();
   for (const cat of CUSTOMER_DOC_CATEGORIES) docsByCategory.set(cat.value, [] as typeof docRows);
   for (const d of docRows) {
@@ -165,12 +234,59 @@ export default async function CustomerEntityPage({
             <a href="/crm" className="text-[11px] text-zinc-400 hover:text-white">Back to list</a>
           </div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-3 gap-2 text-center">
-          <Stat label="Deals" value={dealRows.length} />
-          <Stat label="Quotes" value={quoteRows.length} />
-          <Stat label="Work orders" value={woRows.length} />
+        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-3 text-center">
+          <Stat label="Total deals" value={totalDeals} />
+          <Stat label="Active deals" value={activeDeals} />
+          <div className="col-span-2">
+            <div className="text-2xl font-display font-bold text-white">{fmtMoney(closedWonRevenue)}</div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mt-1">Revenue (closed-won)</div>
+          </div>
+          <div className="col-span-2 border-t border-white/5 pt-3">
+            <div className="text-sm font-body font-semibold text-white">
+              {lastContact ? lastContact.toLocaleDateString() : "—"}
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mt-1">Last contact</div>
+          </div>
         </div>
       </div>
+
+      {hasExpiringCreds && (
+        <div className="bg-amber-500/5 border border-amber-500/30 rounded-lg p-4 space-y-2">
+          <h3 className="text-xs font-body font-semibold text-amber-200 uppercase tracking-wider">Expiring credentials</h3>
+          {expiringCreds.expired.length > 0 && (
+            <ExpirationGroup
+              label={`Already expired (${expiringCreds.expired.length})`}
+              tone="error"
+              creds={expiringCreds.expired}
+              dealLabelMap={dealLabelMap}
+            />
+          )}
+          {expiringCreds.in30.length > 0 && (
+            <ExpirationGroup
+              label={`Within 30 days (${expiringCreds.in30.length})`}
+              tone="error"
+              creds={expiringCreds.in30}
+              dealLabelMap={dealLabelMap}
+            />
+          )}
+          {expiringCreds.in60.length > 0 && (
+            <ExpirationGroup
+              label={`30 – 60 days (${expiringCreds.in60.length})`}
+              tone="warning"
+              creds={expiringCreds.in60}
+              dealLabelMap={dealLabelMap}
+            />
+          )}
+          {expiringCreds.in90.length > 0 && (
+            <ExpirationGroup
+              label={`60 – 90 days (${expiringCreds.in90.length})`}
+              tone="warning"
+              creds={expiringCreds.in90}
+              dealLabelMap={dealLabelMap}
+            />
+          )}
+        </div>
+      )}
 
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -360,6 +476,42 @@ function Stat({ label, value }: { label: string; value: number }) {
     <div>
       <div className="text-2xl font-display font-bold text-white">{value}</div>
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mt-1">{label}</div>
+    </div>
+  );
+}
+
+function ExpirationGroup({
+  label,
+  tone,
+  creds,
+  dealLabelMap,
+}: {
+  label: string;
+  tone: "warning" | "error";
+  creds: { id: string; dealId: string; credentialType: string; credentialNumber: string | null; expiresAt: Date | null; daysLeft: number }[];
+  dealLabelMap: Map<string, string>;
+}) {
+  const cls = tone === "error"
+    ? "text-red-300"
+    : "text-amber-300";
+  return (
+    <div className="space-y-1">
+      <div className={`text-[10px] uppercase tracking-wider font-body font-semibold ${cls}`}>{label}</div>
+      <ul className="space-y-1">
+        {creds.map((c) => (
+          <li key={c.id} className="flex items-center justify-between text-[11px] font-body">
+            <a href={`/deals/${c.dealId}`} className="text-zinc-200 hover:text-white">
+              {c.credentialType === "LE" ? "LE" : "Generic"}{c.credentialNumber ? ` #${c.credentialNumber}` : ""}
+              <span className="text-zinc-500"> · {dealLabelMap.get(c.dealId) ?? c.dealId.slice(0, 8)}</span>
+            </a>
+            <span className={`text-[10px] ${cls}`}>
+              {c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : "—"}
+              {" · "}
+              {c.daysLeft < 0 ? `${Math.abs(c.daysLeft)}d ago` : `${c.daysLeft}d left`}
+            </span>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

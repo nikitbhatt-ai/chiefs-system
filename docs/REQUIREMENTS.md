@@ -189,8 +189,15 @@ the team can pull up the full history in seconds.
       vendor-side artifacts so they need either an inbound-PO entity
       or a manual upload flow; spec sheets need the spec UI built
       first.
-- [ ] **Customer summary card** (deals, revenue, last contact, expiring
-      credentials/contracts at 30/60/90 days) — later.
+- [x] **Customer summary card** (PR 10): top-right of `/crm/[id]` now
+      shows Total deals, Active deals, Revenue (closed-won = converted
+      quotes), and Last contact (most recent of deal update, customer
+      note, document upload, deal activity). Below the card, an
+      amber-bordered "Expiring credentials" banner lists any
+      `deal_credentials` rows for the customer's deals bucketed by
+      expiry: already expired, within 30 days, 30–60, 60–90. Each
+      entry jumps to its deal. Primary contacts list deferred — no
+      customer-contacts table exists yet.
 - [ ] **Role-based access control** — later. Sales = quotes / POs /
       correspondence; Shop = spec approvals / WO / photos; Manager+
       sees credentials / contracts / financials.
