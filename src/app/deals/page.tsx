@@ -1,9 +1,11 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, customers, users, dealCredentials } from "@/db/schema";
+import { deals, customers, users, dealCredentials, files } from "@/db/schema";
+import { and } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
 import { isCredentialActive } from "@/lib/credentials";
+import { docForPipeline } from "@/lib/documentTemplates";
 import {
   PIPELINES,
   PIPELINE_SLUGS,
@@ -80,7 +82,23 @@ async function changeStage(formData: FormData) {
     .where(eq(dealCredentials.dealId, id));
   const hasActiveCredential = creds.some((c) => isCredentialActive(c));
 
-  const transition = canAdvanceTo(d.pipeline, d.stage, requested, { hasActiveCredential });
+  const docSpec = docForPipeline(d.pipeline);
+  let hasPipelineDocument = true;
+  if (docSpec) {
+    const docRows = await db
+      .select({ id: files.id })
+      .from(files)
+      .where(and(eq(files.entityType, "deal"), eq(files.entityId, id), eq(files.kind, docSpec.slug)))
+      .limit(1);
+    hasPipelineDocument = docRows.length > 0;
+  }
+
+  const transition = canAdvanceTo(d.pipeline, d.stage, requested, {
+    hasActiveCredential,
+    hasPipelineDocument,
+    pipelineDocumentRequiredBeforeStage: docSpec?.requiredBeforeStage,
+    pipelineDocumentLabel: docSpec?.label,
+  });
   if (!transition.ok) {
     throw new Error(transition.reason);
   }
