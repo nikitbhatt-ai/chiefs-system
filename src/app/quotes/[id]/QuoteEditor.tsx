@@ -8,6 +8,8 @@ type PartOption = {
   name: string;
   price: string | null;
   cost: string | null;
+  restricted: boolean;
+  restrictionCategory: string | null;
 };
 
 function PartAutocomplete({
@@ -87,6 +89,11 @@ function PartAutocomplete({
               <div className="text-white">
                 <span className="font-mono text-amber-400">{m.sku}</span>{" "}
                 {m.name}
+                {m.restricted ? (
+                  <span className="ml-2 inline-block text-[9px] uppercase tracking-wider rounded border border-red-500/40 bg-red-500/10 text-red-300 px-1.5 py-0.5">
+                    Restricted{m.restrictionCategory ? ` · ${m.restrictionCategory.replace(/_/g, " ")}` : ""}
+                  </span>
+                ) : null}
               </div>
               <div className="text-[10px] text-zinc-500">
                 {m.price
@@ -138,7 +145,7 @@ export function QuoteEditor({
   notes: string;
   initialLines: QuoteLine[];
   customers: { id: string; name: string }[];
-  parts: { id: string; sku: string; name: string; price: string | null; cost: string | null }[];
+  parts: PartOption[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);

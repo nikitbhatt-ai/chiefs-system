@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
@@ -13,6 +13,13 @@ import {
   STATUS_LABELS as CRED_STATUS_LABELS,
   credentialStatus,
 } from "@/lib/credentials";
+import {
+  TRACK_STAGE_COLORS,
+  buildTrack,
+  credentialTrack,
+  salesTrack,
+  type Track,
+} from "@/lib/tracks";
 
 export const dynamic = "force-dynamic";
 
@@ -21,18 +28,20 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) notFound();
 
-  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials] = await Promise.all([
+  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes] = await Promise.all([
     d.customerId ? db.select().from(customers).where(eq(customers.id, d.customerId)).limit(1) : Promise.resolve([]),
     d.assignedTo ? db.select().from(users).where(eq(users.id, d.assignedTo)).limit(1) : Promise.resolve([]),
     db.select().from(dealActivity).where(eq(dealActivity.dealId, id)).orderBy(desc(dealActivity.createdAt)),
     d.partnerId ? db.select().from(partners).where(eq(partners.id, d.partnerId)).limit(1) : Promise.resolve([]),
     d.partnerContactId ? db.select().from(partnerContacts).where(eq(partnerContacts.id, d.partnerContactId)).limit(1) : Promise.resolve([]),
     db.select().from(dealCredentials).where(eq(dealCredentials.dealId, id)).orderBy(asc(dealCredentials.createdAt)),
+    db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber, workflowStage: quotes.workflowStage }).from(quotes).where(eq(quotes.dealId, id)).orderBy(desc(quotes.updatedAt)),
   ]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
   const partner = partnerRow[0] ?? null;
   const contact = contactRow[0] ?? null;
+  const latestQuote = dealQuotes[0] ?? null;
 
   const authorIds = Array.from(new Set(activity.map((a) => a.authorId).filter(Boolean) as string[]));
   const authorMap = new Map<string, string>();
@@ -111,33 +120,58 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
   }
 
   const pipeline = getPipeline(d.pipeline);
-  const currentStageIdx = pipeline.stages.indexOf(d.stage as typeof pipeline.stages[number]);
+  const tracks: Track[] = [salesTrack(pipeline, d.stage)];
+  if (pipeline.hardGate) tracks.push(credentialTrack(credentials));
+  tracks.push(buildTrack(latestQuote?.workflowStage));
 
   return (
     <AppShell title={`Deal ${d.id.slice(0, 8)}`} subtitle={`${pipeline.label} pipeline`}>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Pipeline progression</h3>
-          <span className="text-[10px] text-zinc-500 font-body">{pipeline.description}</span>
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Parallel tracks</h3>
+          {latestQuote ? (
+            <a href={`/quotes/${latestQuote.id}`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body">
+              Open {latestQuote.quoteNumber ?? "quote"} →
+            </a>
+          ) : null}
         </div>
-        <ol className="flex flex-wrap items-center gap-1.5 text-[10px] font-body uppercase tracking-wider">
-          {pipeline.stages.filter((s) => s !== "lost").map((s, idx) => {
-            const isCurrent = s === d.stage;
-            const isPast = currentStageIdx > -1 && idx < currentStageIdx;
-            const cls = isCurrent
-              ? STAGE_COLORS[s]
-              : isPast
-                ? "bg-white/10 text-zinc-300 border-white/10"
-                : "bg-black/20 text-zinc-600 border-white/5";
-            return (
-              <li key={s} className="flex items-center gap-1.5">
-                {idx > 0 ? <span className="text-zinc-700">→</span> : null}
-                <span className={`inline-block rounded border px-2 py-0.5 ${cls}`}>{stageLabel(s)}</span>
-              </li>
-            );
-          })}
-          {d.stage === "lost" ? (<li className="flex items-center gap-1.5"><span className="text-zinc-700">·</span><span className={`inline-block rounded border px-2 py-0.5 ${STAGE_COLORS.lost}`}>Lost</span></li>) : null}
-        </ol>
+        {tracks.map((track) => {
+          const currentIdx = track.stages.findIndex((s) => s.value === track.currentValue);
+          return (
+            <div key={track.slug} className="space-y-1.5">
+              <div className="flex items-baseline justify-between">
+                <span className="text-[10px] uppercase tracking-wider font-body font-semibold text-zinc-300">
+                  {track.label} track
+                </span>
+                <span className="text-[10px] text-zinc-500 font-body">{track.description}</span>
+              </div>
+              <ol className="flex flex-wrap items-center gap-1.5 text-[10px] font-body uppercase tracking-wider">
+                {track.stages.map((stage, idx) => {
+                  const isCurrent = stage.value === track.currentValue;
+                  const isPast = currentIdx > -1 && idx < currentIdx;
+                  let cls: string;
+                  if (isCurrent) {
+                    cls = stage.status
+                      ? TRACK_STAGE_COLORS[stage.status]
+                      : track.slug === "sales"
+                        ? STAGE_COLORS[stage.value] ?? TRACK_STAGE_COLORS.neutral
+                        : TRACK_STAGE_COLORS.neutral;
+                  } else if (isPast) {
+                    cls = "bg-white/10 text-zinc-300 border-white/10";
+                  } else {
+                    cls = "bg-black/20 text-zinc-600 border-white/5";
+                  }
+                  return (
+                    <li key={stage.value} className="flex items-center gap-1.5">
+                      {idx > 0 ? <span className="text-zinc-700">→</span> : null}
+                      <span className={`inline-block rounded border px-2 py-0.5 ${cls}`}>{stage.label}</span>
+                    </li>
+                  );
+                })}
+              </ol>
+            </div>
+          );
+        })}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

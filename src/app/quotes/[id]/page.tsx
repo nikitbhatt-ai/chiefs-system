@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, asc, sql } from "drizzle-orm";
+import { eq, asc, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, parts, workOrders, partReceipts } from "@/db/schema";
+import { quotes, customers, parts, workOrders, partReceipts, deals, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
+import { credentialCoversPart } from "@/lib/credentials";
 
 async function saveQuote(formData: FormData) {
   "use server";
@@ -19,6 +20,55 @@ async function saveQuote(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const linesJson = String(formData.get("lines") ?? "[]");
   const lines = JSON.parse(linesJson) as QuoteLine[];
+
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+  if (!q) return;
+
+  if (q.dealId) {
+    const [deal] = await db.select().from(deals).where(eq(deals.id, q.dealId));
+    if (deal?.pipeline === "walk_in_credentialed") {
+      const partIds = Array.from(
+        new Set(
+          lines
+            .filter((l): l is Extract<QuoteLine, { kind: "item" }> => l.kind === "item")
+            .map((l) => l.partId)
+            .filter(Boolean) as string[],
+        ),
+      );
+      if (partIds.length > 0) {
+        const partRows = await db
+          .select({
+            id: parts.id,
+            sku: parts.sku,
+            name: parts.name,
+            restricted: parts.restricted,
+            restrictionCategory: parts.restrictionCategory,
+          })
+          .from(parts)
+          .where(inArray(parts.id, partIds));
+        const restrictedParts = partRows.filter((p) => p.restricted);
+        if (restrictedParts.length > 0) {
+          const creds = await db
+            .select({
+              verifiedAt: dealCredentials.verifiedAt,
+              expiresAt: dealCredentials.expiresAt,
+              restrictedEquipment: dealCredentials.restrictedEquipment,
+            })
+            .from(dealCredentials)
+            .where(eq(dealCredentials.dealId, deal.id));
+          const uncovered = restrictedParts.filter(
+            (p) => !creds.some((c) => credentialCoversPart(c, p)),
+          );
+          if (uncovered.length > 0) {
+            const list = uncovered.map((p) => `${p.sku} ${p.name}`).join(", ");
+            throw new Error(
+              `This Walk-In Credentialed deal has no credential covering the following restricted parts: ${list}. Add or verify a credential that covers each part's restriction category before saving.`,
+            );
+          }
+        }
+      }
+    }
+  }
 
   let subtotal = 0;
   let discountTotal = 0;
@@ -168,6 +218,8 @@ export default async function QuotePage({
       name: parts.name,
       price: parts.price,
       cost: parts.cost,
+      restricted: parts.restricted,
+      restrictionCategory: parts.restrictionCategory,
     })
     .from(parts)
     .where(eq(parts.archived, false))
