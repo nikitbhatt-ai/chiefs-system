@@ -38,12 +38,32 @@ export async function maybePromoteWonDeal(
   // Won (e.g. po_received → deposit_received reorder), don't re-trigger.
   if (bucketForStage(prevStage) === "won") return { ok: false, reason: "not_won_bucket" };
 
-  const [q] = await db
+  // 1) Direct deal linkage. If no quote has quote.dealId = this deal, fall
+  // back to the most recent non-converted quote belonging to the same
+  // customer. Whichever we pick, stamp deal_id on it so future triggers and
+  // the customer folder auto-link stay tight.
+  const direct = await db
     .select()
     .from(quotes)
     .where(eq(quotes.dealId, dealId))
     .orderBy(desc(quotes.updatedAt))
     .limit(1);
+  let q: (typeof direct)[number] | undefined = direct[0];
+
+  if (!q) {
+    const [deal] = await db.select({ customerId: deals.customerId }).from(deals).where(eq(deals.id, dealId));
+    if (deal?.customerId) {
+      const candidates = await db
+        .select()
+        .from(quotes)
+        .where(eq(quotes.customerId, deal.customerId))
+        .orderBy(desc(quotes.updatedAt));
+      q = candidates.find((c) => c.status !== "converted");
+      if (q) {
+        await db.update(quotes).set({ dealId: dealId, updatedAt: new Date() }).where(eq(quotes.id, q.id));
+      }
+    }
+  }
   if (!q) return { ok: false, reason: "no_quote" };
 
   const currentIdx = WORKFLOW_ORDER.indexOf(q.workflowStage as (typeof WORKFLOW_ORDER)[number]);
