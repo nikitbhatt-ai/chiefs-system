@@ -1,7 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, customers, users, dealCredentials, files } from "@/db/schema";
+import { deals, customers, users, dealCredentials, customerDocuments } from "@/db/schema";
 import { and } from "drizzle-orm";
 import { AppShell } from "@/components/AppShell";
 import { isCredentialActive } from "@/lib/credentials";
@@ -86,9 +86,9 @@ async function changeStage(formData: FormData) {
   let hasPipelineDocument = true;
   if (docSpec) {
     const docRows = await db
-      .select({ id: files.id })
-      .from(files)
-      .where(and(eq(files.entityType, "deal"), eq(files.entityId, id), eq(files.kind, docSpec.slug)))
+      .select({ id: customerDocuments.id })
+      .from(customerDocuments)
+      .where(and(eq(customerDocuments.associatedDealId, id), eq(customerDocuments.kind, docSpec.slug), eq(customerDocuments.isCurrentVersion, true)))
       .limit(1);
     hasPipelineDocument = docRows.length > 0;
   }
