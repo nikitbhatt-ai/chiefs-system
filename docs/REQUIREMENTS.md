@@ -265,6 +265,75 @@ ON CONFLICT (id) DO NOTHING;
 DROP TABLE IF EXISTS files;
 ```
 
+## Pipeline UI layout (hybrid model)
+
+Three layers:
+1. **Kanban buckets** — Lead, Discovery, Proposal, Won, Build, Delivery,
+   Post-Sale. Each pipeline stage maps to one bucket via code-defined
+   `bucketForStage()` in `src/lib/pipelineBuckets.ts`. Each (pipeline,
+   bucket) pair maps to a single stage so drag-and-drop is unambiguous.
+2. **Sub-status** — free-text `deals.sub_status` column. UI surfaces it
+   as an inline label under the stage on each kanban card. Conditional
+   dropdowns by stage will come once a sub-status registry is defined.
+3. **Parallel tracks** — already shipped (PR #6). Sales / Credential /
+   Build tracks on `/deals/[id]`.
+
+### What this PR adds (PR 11)
+
+- [x] **`/pipeline` kanban view** — 7 buckets rendered as columns,
+      cards grouped by `bucketForStage(deal.stage)`. Each card shows
+      customer, vehicle, pipeline label, current stage, sub-status,
+      assignee, days in stage, age badge.
+- [x] **Drag-and-drop with optimistic UI** — `KanbanBoard.tsx`
+      (client) uses native HTML5 drag events. On drop, POSTs to
+      `/api/deals/[id]/move-bucket`. Card moves locally first; if the
+      server rejects (gate failure, no stage in pipeline for target
+      bucket, etc.), the move is reverted and an error banner shows
+      the reason.
+- [x] **Card aging** — `deals.current_stage_entered_at` stamped on
+      every stage change. `cardAge()` returns `fresh` / `warning` /
+      `overdue` against thresholds from `pipeline_stage_sla` (per
+      pipeline + stage) with fallback to `DEFAULT_BUCKET_SLA` in code.
+- [x] **Admin SLA editor at `/settings/sla`** — per-pipeline table of
+      stages with warning-days / overdue-days inputs; reset-to-default
+      removes the DB row so the code fallback kicks in.
+- [x] **Tabbed deal record page** — URL-driven `?tab=` over Details,
+      Activity, Documents, Tasks, Communication. Parallel-tracks panel
+      stays pinned above the tab nav. Active-task count shows as a
+      badge on the Tasks tab.
+- [x] **Tasks tab** — `deal_tasks` CRUD: title, description, assignee,
+      department, due date. Inline complete toggle, overdue flagging,
+      delete.
+- [x] **Communication log tab** — `customer_messages` CRUD: channel
+      (call / email / sms / in_person / meeting / other), direction
+      (inbound / outbound), subject, body. Lists newest first.
+
+### Schema additions (PR 11)
+
+```sql
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS sub_status text;
+ALTER TABLE deals ADD COLUMN IF NOT EXISTS current_stage_entered_at timestamp NOT NULL DEFAULT now();
+
+CREATE TABLE IF NOT EXISTS pipeline_stage_sla (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  pipeline_slug text NOT NULL,
+  stage text NOT NULL,
+  warning_days integer NOT NULL DEFAULT 3,
+  overdue_days integer NOT NULL DEFAULT 7,
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now(),
+  UNIQUE(pipeline_slug, stage)
+);
+CREATE INDEX IF NOT EXISTS pipeline_stage_sla_lookup_idx ON pipeline_stage_sla (pipeline_slug, stage);
+```
+
+### Deferred
+
+- Conditional sub-status dropdowns (need a registry by pipeline+stage)
+- Post-Sale stage on each pipeline (today no stage maps to that bucket)
+- "horizontal pipeline progress bar at top of deal record" remains as
+  the parallel-tracks panel from PR #6 — they serve the same purpose
+
 ## Deals (not yet built)
 
 - [ ] Pipeline / kanban view with drag-and-drop between stages.

@@ -3,7 +3,7 @@ import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments, dealTasks, customerMessages } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
@@ -26,12 +26,26 @@ import { categoryForKind } from "@/lib/customerDocuments";
 
 export const dynamic = "force-dynamic";
 
-export default async function DealEntityPage({ params }: { params: Promise<{ id: string }> }) {
+const TABS = ["details", "activity", "documents", "tasks", "communication"] as const;
+type Tab = (typeof TABS)[number];
+
+export default async function DealEntityPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
+  const tab: Tab = (TABS as readonly string[]).includes(sp.tab ?? "")
+    ? (sp.tab as Tab)
+    : "details";
+
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) notFound();
 
-  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes, dealFiles] = await Promise.all([
+  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes, dealFiles, taskRows, messageRows, userRows] = await Promise.all([
     d.customerId ? db.select().from(customers).where(eq(customers.id, d.customerId)).limit(1) : Promise.resolve([]),
     d.assignedTo ? db.select().from(users).where(eq(users.id, d.assignedTo)).limit(1) : Promise.resolve([]),
     db.select().from(dealActivity).where(eq(dealActivity.dealId, id)).orderBy(desc(dealActivity.createdAt)),
@@ -40,6 +54,9 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     db.select().from(dealCredentials).where(eq(dealCredentials.dealId, id)).orderBy(asc(dealCredentials.createdAt)),
     db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber, workflowStage: quotes.workflowStage }).from(quotes).where(eq(quotes.dealId, id)).orderBy(desc(quotes.updatedAt)),
     db.select().from(customerDocuments).where(and(eq(customerDocuments.associatedDealId, id), eq(customerDocuments.isCurrentVersion, true))).orderBy(desc(customerDocuments.uploadedAt)),
+    db.select().from(dealTasks).where(eq(dealTasks.dealId, id)).orderBy(asc(dealTasks.completedAt), asc(dealTasks.dueDate)),
+    db.select().from(customerMessages).where(eq(customerMessages.dealId, id)).orderBy(desc(customerMessages.createdAt)),
+    db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.active, true)),
   ]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
@@ -190,6 +207,77 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
     if (d.customerId) revalidatePath(`/crm/${d.customerId}`);
   }
 
+  async function createTask(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const title = String(formData.get("title") ?? "").trim();
+    if (!title) return;
+    const dueRaw = String(formData.get("dueDate") ?? "").trim();
+    await db.insert(dealTasks).values({
+      dealId: id,
+      title,
+      description: String(formData.get("description") ?? "").trim() || null,
+      assignedTo: String(formData.get("assignedTo") ?? "").trim() || null,
+      department: String(formData.get("department") ?? "").trim() || null,
+      dueDate: dueRaw ? new Date(dueRaw) : null,
+      createdBy: session.user.id,
+    });
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function toggleTaskComplete(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const taskId = String(formData.get("taskId") ?? "");
+    const currentlyCompleted = formData.get("currentlyCompleted") === "1";
+    if (!taskId) return;
+    await db
+      .update(dealTasks)
+      .set({
+        completedAt: currentlyCompleted ? null : new Date(),
+        completedBy: currentlyCompleted ? null : session.user.id,
+      })
+      .where(eq(dealTasks.id, taskId));
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function deleteTask(formData: FormData) {
+    "use server";
+    const taskId = String(formData.get("taskId") ?? "");
+    if (!taskId) return;
+    await db.delete(dealTasks).where(eq(dealTasks.id, taskId));
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function logMessage(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const channel = String(formData.get("channel") ?? "").trim();
+    const direction = String(formData.get("direction") ?? "").trim();
+    const body = String(formData.get("body") ?? "").trim();
+    if (!channel || !direction || !body) return;
+    await db.insert(customerMessages).values({
+      dealId: id,
+      channel,
+      direction,
+      subject: String(formData.get("subject") ?? "").trim() || null,
+      body,
+      sentBy: session.user.id,
+    });
+    revalidatePath(`/deals/${id}`);
+  }
+
+  async function deleteMessage(formData: FormData) {
+    "use server";
+    const msgId = String(formData.get("msgId") ?? "");
+    if (!msgId) return;
+    await db.delete(customerMessages).where(eq(customerMessages.id, msgId));
+    revalidatePath(`/deals/${id}`);
+  }
+
   const pipeline = getPipeline(d.pipeline);
   const tracks: Track[] = [salesTrack(pipeline, d.stage)];
   if (pipeline.hardGate) tracks.push(credentialTrack(credentials));
@@ -245,6 +333,28 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
         })}
       </div>
 
+      <nav className="flex flex-wrap gap-1 border-b border-white/5">
+        {TABS.map((t) => (
+          <a
+            key={t}
+            href={`/deals/${id}?tab=${t}`}
+            className={`text-xs font-body uppercase tracking-wider px-3 py-2 -mb-px border-b-2 transition-colors ${
+              tab === t
+                ? "border-amber-400 text-white"
+                : "border-transparent text-zinc-500 hover:text-white"
+            }`}
+          >
+            {t}
+            {t === "tasks" && taskRows.filter((tk) => !tk.completedAt).length > 0 && (
+              <span className="ml-1.5 inline-block text-[9px] rounded-full bg-amber-500 text-black px-1.5 py-0.5">
+                {taskRows.filter((tk) => !tk.completedAt).length}
+              </span>
+            )}
+          </a>
+        ))}
+      </nav>
+
+      {tab === "details" && (<>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div className="flex items-center gap-3 mb-2">
@@ -266,7 +376,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
         </div>
         <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-2 text-center">
           <Stat label="Activity" value={activity.length} />
-          <Stat label="Tasks" value={0} />
+          <Stat label="Open tasks" value={taskRows.filter((tk) => !tk.completedAt).length} />
         </div>
       </div>
       {pipeline.hardGate ? (
@@ -367,8 +477,9 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
           </form>
         </div>
       ) : null}
+      </>)}
 
-      {(() => {
+      {tab === "documents" && (() => {
         const docSpec = docForPipeline(pipeline.slug);
         const pipelineDocs = docSpec
           ? dealFiles.filter((f) => f.kind === docSpec.slug)
@@ -471,6 +582,7 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
         );
       })()}
 
+      {tab === "activity" && (
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
         <form action={postNote} className="flex gap-2">
@@ -490,6 +602,112 @@ export default async function DealEntityPage({ params }: { params: Promise<{ id:
           </ul>
         )}
       </div>
+      )}
+
+      {tab === "tasks" && (
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Tasks</h3>
+        <form action={createTask} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+          <input name="title" required placeholder="Task title *" className="md:col-span-2 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <select name="assignedTo" defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
+            <option value="">— Assignee —</option>
+            {userRows.map((u) => (<option key={u.id} value={u.id}>{u.name ?? u.email}</option>))}
+          </select>
+          <select name="department" defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
+            <option value="">— Dept —</option>
+            <option value="sales">Sales</option>
+            <option value="shop">Shop</option>
+            <option value="warehouse">Warehouse</option>
+            <option value="finance">Finance</option>
+            <option value="admin">Admin</option>
+          </select>
+          <input name="dueDate" type="date" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white" />
+          <textarea name="description" placeholder="Description (optional)" rows={2} className="md:col-span-4 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add task</button>
+        </form>
+        {taskRows.length === 0 ? (
+          <p className="text-xs text-zinc-500 font-body">No tasks.</p>
+        ) : (
+          <ul className="space-y-1">
+            {taskRows.map((t) => {
+              const done = !!t.completedAt;
+              const overdue = !done && t.dueDate && new Date(t.dueDate).getTime() < Date.now();
+              return (
+                <li key={t.id} className={`flex items-start gap-3 text-xs font-body bg-black/30 border border-white/5 rounded-md p-2.5 ${done ? "opacity-60" : ""}`}>
+                  <form action={toggleTaskComplete} className="pt-0.5">
+                    <input type="hidden" name="taskId" value={t.id} />
+                    <input type="hidden" name="currentlyCompleted" value={done ? "1" : "0"} />
+                    <button type="submit" aria-label="Toggle complete" className={`w-4 h-4 rounded border ${done ? "bg-green-500 border-green-400" : "bg-black/40 border-white/30 hover:border-amber-400"}`}>
+                      {done && (<span className="text-black text-[10px] leading-none">✓</span>)}
+                    </button>
+                  </form>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-white ${done ? "line-through" : ""}`}>{t.title}</div>
+                    {t.description && (<div className="text-zinc-400 text-[11px] mt-0.5 whitespace-pre-wrap">{t.description}</div>)}
+                    <div className="text-[10px] text-zinc-500 mt-1 flex flex-wrap gap-3">
+                      {t.assignedTo && <span>→ {userRows.find((u) => u.id === t.assignedTo)?.name ?? userRows.find((u) => u.id === t.assignedTo)?.email ?? "—"}</span>}
+                      {t.department && <span className="uppercase tracking-wider">{t.department}</span>}
+                      {t.dueDate && <span className={overdue ? "text-red-300" : ""}>Due {new Date(t.dueDate).toLocaleDateString()}{overdue ? " (overdue)" : ""}</span>}
+                      {done && t.completedAt && <span className="text-green-300">Done {new Date(t.completedAt).toLocaleDateString()}</span>}
+                    </div>
+                  </div>
+                  <form action={deleteTask}>
+                    <input type="hidden" name="taskId" value={t.id} />
+                    <button type="submit" className="text-[10px] text-zinc-500 hover:text-red-400">Delete</button>
+                  </form>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+      )}
+
+      {tab === "communication" && (
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Communication log</h3>
+        <form action={logMessage} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
+          <select name="channel" required defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
+            <option value="" disabled>— Channel * —</option>
+            <option value="call">Call</option>
+            <option value="email">Email</option>
+            <option value="sms">SMS</option>
+            <option value="in_person">In person</option>
+            <option value="meeting">Meeting</option>
+            <option value="other">Other</option>
+          </select>
+          <select name="direction" required defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
+            <option value="" disabled>— Direction * —</option>
+            <option value="inbound">Inbound</option>
+            <option value="outbound">Outbound</option>
+          </select>
+          <input name="subject" placeholder="Subject (optional)" className="md:col-span-2 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <textarea name="body" required rows={2} placeholder="Body / notes *" className="md:col-span-4 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Log message</button>
+        </form>
+        {messageRows.length === 0 ? (
+          <p className="text-xs text-zinc-500 font-body">No communication logged yet.</p>
+        ) : (
+          <ul className="space-y-2">
+            {messageRows.map((m) => (
+              <li key={m.id} className="bg-black/30 border border-white/5 rounded-md p-2.5 text-xs font-body">
+                <div className="flex items-center justify-between mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                  <span>
+                    {m.channel} · {m.direction} · {(m.sentBy && (userRows.find((u) => u.id === m.sentBy)?.name ?? userRows.find((u) => u.id === m.sentBy)?.email)) ?? "—"} · {new Date(m.createdAt).toLocaleString()}
+                  </span>
+                  <form action={deleteMessage} className="inline">
+                    <input type="hidden" name="msgId" value={m.id} />
+                    <button type="submit" className="text-zinc-500 hover:text-red-400">Delete</button>
+                  </form>
+                </div>
+                {m.subject && (<div className="text-white font-semibold">{m.subject}</div>)}
+                {m.body && (<div className="whitespace-pre-wrap text-zinc-200 mt-1">{m.body}</div>)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      )}
     </AppShell>
   );
 }
