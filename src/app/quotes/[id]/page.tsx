@@ -6,6 +6,7 @@ import { quotes, customers, parts, workOrders, partReceipts, deals, dealCredenti
 import { AppShell } from "@/components/AppShell";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { credentialCoversPart } from "@/lib/credentials";
+import { upsertQuoteLink } from "@/lib/customerDocLinks";
 
 async function saveQuote(formData: FormData) {
   "use server";
@@ -104,9 +105,11 @@ async function saveQuote(formData: FormData) {
       updatedAt: new Date(),
     })
     .where(eq(quotes.id, id));
+  await upsertQuoteLink(id);
   revalidatePath("/quotes");
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/workflow");
+  if (customerId) revalidatePath(`/crm/${customerId}`);
 }
 
 const WORKFLOW_STAGES = [

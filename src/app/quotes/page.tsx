@@ -4,6 +4,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { quotes, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
@@ -28,6 +29,10 @@ async function createQuote(formData: FormData) {
       grandTotal: "0",
     })
     .returning();
+  if (customerId) {
+    await upsertQuoteLink(row.id);
+    revalidatePath(`/crm/${customerId}`);
+  }
   revalidatePath("/quotes");
   redirect(`/quotes/${row.id}`);
 }
@@ -36,9 +41,12 @@ async function deleteQuote(formData: FormData) {
   "use server";
   const id = String(formData.get("id") ?? "");
   if (!id) return;
+  const [q] = await db.select({ customerId: quotes.customerId }).from(quotes).where(eq(quotes.id, id));
+  await unlinkQuote(id);
   await db.delete(quotes).where(eq(quotes.id, id));
   revalidatePath("/quotes");
   revalidatePath("/workflow");
+  if (q?.customerId) revalidatePath(`/crm/${q.customerId}`);
 }
 
 function fmtMoney(v: string | null | undefined) {
