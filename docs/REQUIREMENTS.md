@@ -51,6 +51,44 @@ are pending and should be addressed when their owning module is built.
 - [ ] Filters + tags + archive (cross-cutting).
 - [ ] Internal notes.
 
+### Lead source tracking (PR 18)
+
+- [x] **Source required** at lead creation. The `<select name="source">`
+      drives a per-source sub-source widget (`SOURCE_WIDGETS` in
+      `src/app/leads/NewLeadForm.tsx`). Server `createLeadAction`
+      drops inserts that have no source so reporting can't drift.
+- [x] **Conditional sub-source widgets** per spec:
+      - **Sales Call** → required dropdown of active users with
+        `role='sales'`.
+      - **Trade Show / Social Media** → required dropdown from the
+        existing `lookups` table (categories `trade_show` /
+        `social_platform`, parented under the source row). Surfaces
+        an inline admin warning if no children exist.
+      - **Agency/RFP / Sales Reference / Other** → required text input.
+      - **Walk-In / Email Inquiry / Website/Web Form** → optional text.
+      - **Referral / Repeat Customer** → optional "Link to existing
+        customer" dropdown + free-text detail. Linked customer id
+        lands on `leads.sub_source_meta.referralCustomerId`.
+      - **Sames Reference** → unchanged (PR 5 widget).
+      Sources outside this list fall through to the prior behavior
+      (admin-defined sub-source dropdown if any children exist,
+      otherwise an optional text input).
+- [x] **Source lock on Won**: `maybePromoteWonDeal` now sets
+      `deals.source_locked = true` the first time the deal enters
+      the Won bucket. `PATCH /api/deals/[id]` allows `source`,
+      `subSource`, `subSourceMeta` in the update body, but rejects
+      changes to any of them when `source_locked = true` unless the
+      caller has `role IN ('admin','manager')` (403 otherwise).
+- [x] **Reporting** at `/reporting/lead-sources` with a window
+      selector (30 / 90 / 365 days / all-time). Per-source columns:
+      lead count, converted count, won count, revenue (sum of the
+      latest linked quote's `grand_total` for deals whose stage is in
+      the won/build/delivery/post_sale bucket), avg deal size, close
+      rate (won / lead count), avg cycle days (delivered deals only:
+      mean of `currentStageEnteredAt − leads.created_at`). A second
+      table cross-tabs source × customer_type lead counts. The
+      parent `/reporting` index lists this report.
+
 ## Pipeline templates (in progress, phased)
 
 Three pipeline templates drive how a deal flows from prospect to delivered.

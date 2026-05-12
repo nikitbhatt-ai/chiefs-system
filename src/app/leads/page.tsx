@@ -1,6 +1,6 @@
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { leads, lookups, partners, partnerContacts } from "@/db/schema";
+import { leads, lookups, partners, partnerContacts, users, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { NewLeadForm } from "./NewLeadForm";
 import { convertLeadAction, deleteLeadAction } from "./actions";
@@ -15,11 +15,13 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 export default async function LeadsPage() {
-  const [rows, sources, subSources, samesRow] = await Promise.all([
+  const [rows, sources, subSources, samesRow, salesReps, customerRows] = await Promise.all([
     db.select().from(leads).orderBy(desc(leads.createdAt)),
     db.select({ id: lookups.id, value: lookups.value, parentId: lookups.parentId }).from(lookups).where(and(eq(lookups.category, "source"), eq(lookups.active, true))).orderBy(asc(lookups.sortOrder), asc(lookups.value)),
     db.select({ id: lookups.id, value: lookups.value, parentId: lookups.parentId }).from(lookups).where(and(eq(lookups.category, "sub_source"), eq(lookups.active, true))).orderBy(asc(lookups.sortOrder), asc(lookups.value)),
     db.select().from(partners).where(eq(partners.name, "Sames")).limit(1),
+    db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(and(eq(users.active, true), eq(users.role, "sales"))).orderBy(asc(users.name)),
+    db.select({ id: customers.id, name: customers.name }).from(customers).orderBy(asc(customers.name)),
   ]);
   const samesPartner = samesRow[0] ?? null;
   const samesContacts = samesPartner
@@ -35,7 +37,7 @@ export default async function LeadsPage() {
             No sources configured yet. An admin needs to add options in <a className="underline" href="/settings/lookups?category=source">Settings → Lookups → Lead sources</a>.
           </div>
         ) : (
-          <NewLeadForm sources={sources} subSources={subSources} samesPartner={samesPartner ? { id: samesPartner.id, name: samesPartner.name } : null} samesContacts={samesContacts} />
+          <NewLeadForm sources={sources} subSources={subSources} samesPartner={samesPartner ? { id: samesPartner.id, name: samesPartner.name } : null} samesContacts={samesContacts} salesReps={salesReps} customers={customerRows} />
         )}
       </div>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
