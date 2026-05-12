@@ -1,15 +1,44 @@
 import { asc, eq, isNull, and, inArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { dealTasks, deals, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { SalesDashboard } from "@/components/dashboard/SalesDashboard";
+import { OperationsDashboard } from "@/components/dashboard/OperationsDashboard";
+import { AdminDashboard } from "@/components/dashboard/AdminDashboard";
 
 export const dynamic = "force-dynamic";
 
-export default async function DashboardPage() {
+type View = "sales" | "operations" | "admin";
+
+function defaultViewForRole(role: string | null | undefined): View {
+  if (role === "admin" || role === "manager" || role === "accountant") return "admin";
+  if (role === "sales") return "sales";
+  if (role === "warehouse" || role === "tech") return "operations";
+  return "sales";
+}
+
+function isView(s: string | null | undefined): s is View {
+  return s === "sales" || s === "operations" || s === "admin";
+}
+
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
   const session = await auth();
   if (!session?.user) redirect("/signin");
+  const role = (session.user as { role?: string }).role ?? null;
+  const sp = await searchParams;
+  // Admin / manager / accountant can switch views via ?view=. Everyone
+  // else is locked to the default for their role — keeps the UI focused
+  // on what they need.
+  const canSwitch = role === "admin" || role === "manager" || role === "accountant";
+  const requested = isView(sp.view ?? "") ? (sp.view as View) : null;
+  const view: View = canSwitch && requested ? requested : defaultViewForRole(role);
 
   const tasks = await db
     .select()
@@ -41,28 +70,31 @@ export default async function DashboardPage() {
 
   const now = Date.now();
 
+  const subtitle = ({ sales: "Sales view", operations: "Operations view", admin: "Admin view" } as const)[view];
+
   return (
-    <AppShell title="Dashboard" subtitle="Operational overview">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          { label: "Open Deals", value: "—" },
-          { label: "Vehicles On Lot", value: "—" },
-          { label: "Work Orders In Progress", value: "—" },
-          { label: "POs Pending Receipt", value: "—" },
-        ].map((stat) => (
-          <div
-            key={stat.label}
-            className="bg-[#161624] border border-white/5 rounded-lg p-4"
-          >
-            <div className="text-[10px] text-zinc-500 font-body uppercase tracking-wider">
-              {stat.label}
-            </div>
-            <div className="text-2xl font-display font-bold text-white mt-1">
-              {stat.value}
-            </div>
-          </div>
-        ))}
-      </div>
+    <AppShell title="Dashboard" subtitle={subtitle}>
+      {canSwitch && (
+        <div className="flex gap-2 flex-wrap">
+          {(["sales", "operations", "admin"] as const).map((v) => (
+            <Link
+              key={v}
+              href={`/?view=${v}`}
+              className={`text-[11px] font-body px-3 py-1.5 rounded-md border ${
+                view === v
+                  ? "bg-amber-500/10 border-amber-500/40 text-amber-300"
+                  : "border-white/10 text-zinc-400 hover:text-white"
+              }`}
+            >
+              {v[0].toUpperCase() + v.slice(1)}
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {view === "sales" && <SalesDashboard userId={session.user.id} />}
+      {view === "operations" && <OperationsDashboard />}
+      {view === "admin" && <AdminDashboard />}
 
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
@@ -102,16 +134,6 @@ export default async function DashboardPage() {
             })}
           </ul>
         )}
-      </div>
-
-      <div className="bg-[#161624] border border-amber-500/20 rounded-lg p-4">
-        <div className="text-[10px] text-amber-400 font-body font-semibold uppercase tracking-wider mb-1">
-          Build status
-        </div>
-        <p className="text-xs text-zinc-300 font-body leading-relaxed">
-          Customers (CRM) is live. Next up: Leads, Vehicles, Quotes, Work Orders,
-          Inventory, Purchase Orders, Vendors, Timeclock, Reporting.
-        </p>
       </div>
     </AppShell>
   );
