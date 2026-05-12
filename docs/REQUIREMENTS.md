@@ -334,15 +334,35 @@ CREATE INDEX IF NOT EXISTS pipeline_stage_sla_lookup_idx ON pipeline_stage_sla (
 - "horizontal pipeline progress bar at top of deal record" remains as
   the parallel-tracks panel from PR #6 — they serve the same purpose
 
-### Won → Confirmed auto-trigger (PR 12)
+### Won → Confirmed auto-trigger (PR 12, hardened in PR 13)
 
 When a deal advances **into** the Won bucket (`po_received` or
 `deposit_received` depending on pipeline), the most recent quote on
 that deal is promoted from `estimate` to `workflowStage = 'confirmed'`
 and — if no work order exists yet — one is created with
 `status = 'confirmed'`. Implemented in `maybePromoteWonDeal()` in
-`src/lib/dealTriggers.ts`, called from both `/deals` `changeStage` and
-the kanban `move-bucket` API route.
+`src/lib/dealTriggers.ts`, called from both `/deals` `changeStage`,
+the kanban `move-bucket` API route, and the modal `stage` API route.
+
+If `quotes.dealId` isn't yet set on any quote, the trigger falls back
+to the customer's most recent non-converted quote and stamps `deal_id`
+on it so subsequent triggers (and the PR-9 customer-folder auto-link)
+keep working without manual relinking.
+
+### Kanban quality-of-life (PR 13)
+
+- **Click a card** to open a modal with deal summary (pipeline,
+  stage, sub-status, days in stage, assignee, VIN, notes, latest
+  activity, linked quotes) without leaving the kanban view.
+- **Stage select** inside the modal — pick any valid stage for the
+  pipeline. POSTs to `/api/deals/[id]/stage`, which validates with
+  `canAdvanceTo` (so all gates still fire) and runs the Won
+  auto-trigger.
+- **"+ New deal" button** at the top right of the kanban opens a
+  modal with customer / pipeline / starting-stage / vehicle / notes
+  fields. POSTs to `/api/deals`.
+- Quote/customer-folder shortcuts inside the modal (open quote,
+  open customer folder, open full deal page).
 
 Behaviour:
 - Fires only on the forward edge (previous stage was not already in
