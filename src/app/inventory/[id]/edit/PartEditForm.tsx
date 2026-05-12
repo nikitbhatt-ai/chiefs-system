@@ -17,6 +17,7 @@ type Initial = {
   manufacturerId: string;
   restricted: boolean;
   restrictionCategory: string;
+  leadTimeDays: number;
 };
 
 export function PartEditForm({
@@ -111,6 +112,14 @@ export function PartEditForm({
         min="0"
         defaultValue={initial.reorderPoint ?? ""}
         placeholder="Reorder point"
+        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+      />
+      <input
+        name="leadTimeDays"
+        type="number"
+        min="0"
+        defaultValue={initial.leadTimeDays}
+        placeholder="Lead time (days)"
         className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
       />
       <input

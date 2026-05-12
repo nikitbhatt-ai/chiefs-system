@@ -663,6 +663,83 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
       a build.
 - [ ] Intake checklist with photo upload + generate external PDF.
 
+## Procurement / lead-time management (PR 19)
+
+Procurement plans use a per-part `lead_time_days` and a per-WO target
+build start date + safety buffer to compute the latest each part can
+be ordered without delaying the build. Surfaces overdue and at-risk
+parts across every active work order so the buyer can act before the
+shop runs out of runway.
+
+- [x] **Schema**:
+  - `parts.lead_time_days int NOT NULL DEFAULT 0` (per-part quoted
+    lead time).
+  - `work_orders.target_build_start_date timestamp` and
+    `work_orders.safety_buffer_days int NOT NULL DEFAULT 7`.
+- [x] **Procurement library** (`src/lib/procurement.ts`):
+  - `latestOrderDate(targetStart, leadDays, bufferDays)`.
+  - `requiredPartQuantities(lineItems)` rolls up a quote's line items
+    to a quantity-per-part map (free-form lines without a `partId`
+    are ignored).
+  - `partOrderedQuantities(openPOLines)` aggregates open PO lines so
+    the same part across multiple POs is counted once.
+  - `buildPartPlan` + `sortPlan` produce a status-ranked per-WO plan
+    (`overdue` → `at_risk` → `comfortable` → `ordered`). At-risk
+    horizon: 14 days from latest-order-by.
+  - `criticalPathForPlan` returns the longest-lead part on the WO —
+    the one driving the build start date.
+  - `rollupVarianceByVendor` aggregates receipt-vs-quoted-lead-time
+    deltas per vendor for the learning report.
+- [x] **Part edit form** (`/inventory/[id]/edit`) accepts
+  `leadTimeDays`.
+- [x] **Work orders list** (`/work-orders`) gets two new columns:
+  - **Procurement** badge group: overdue / at-risk / ordered counts
+    + critical-path part inline.
+  - **Target start** inline form: target build start date + safety
+    buffer days, save via the `setProcurementPlan` server action.
+- [x] **Parts-to-order dashboard** (`/procurement/parts-to-order`):
+  one row per (WO × part) for every overdue or at-risk part across
+  every active work order (statuses estimate / confirmed /
+  awaiting_parts / next_in_line / in_progress / qc_check). Columns:
+  status, part, vendor, qty (with already-ordered split), lead
+  time, latest-order-by date, days until latest, WO, customer.
+- [x] **Procurement index** (`/procurement`) cards link to
+  parts-to-order, the WO procurement plan, and the variance
+  report.
+- [x] **Vendor lead-time variance report**
+  (`/reporting/vendor-lead-times`): one sample per
+  `part_receipts` row joined to its `purchase_orders.created_at`
+  and `parts.lead_time_days`. Rolled up per vendor with avg
+  quoted, avg actual, avg variance, worst variance. Window: 90 /
+  365 / all-time.
+- [x] **Reporting index** (`/reporting`) lists the variance report
+  (and other reports as they land).
+- [x] **Procurement** nav entry under Operations.
+
+### Schema additions (PR 19)
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS lead_time_days int NOT NULL DEFAULT 0;
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS target_build_start_date timestamp;
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL DEFAULT 7;
+```
+
+### Deferred (post PR 19)
+
+- **Multi-vendor lead times per part** (`vendor_item_mapping`
+  table): today `parts.vendor_id` is a single supplier and
+  `parts.lead_time_days` is global. A future table keyed by
+  (part_id, vendor_id) lets the buyer choose between vendors with
+  different lead-time / cost trade-offs.
+- **Auto-recalc on change order**: today adding a long-lead part
+  mid-build surfaces in the per-WO procurement column on the next
+  render. The next iteration should flag the WO and post to the
+  deal activity feed ("Change order added 90d lead-time part →
+  build window slips") so sales sees the impact.
+- **Auto-update lead times from variance**: surface a suggested
+  `lead_time_days` per part based on observed receipts (median or
+  p75 of recent samples) with a one-click "apply" action.
+
 ## Purchase Orders
 
 - [x] List + create draft + delete.
