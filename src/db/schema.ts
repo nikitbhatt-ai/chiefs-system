@@ -182,6 +182,22 @@ export const stageMapping = pgTable("stage_mapping", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Audit log for stage transitions that bypassed the default guardrails.
+// Two kinds: "skip_override" (forward jump of more than one stage allowed
+// by a manager) and "backwards" (deal moved earlier in the pipeline).
+// Backwards moves are allowed but always logged with a reason so we can
+// trace why sales walked a deal back.
+export const stageOverrides = pgTable("stage_overrides", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  fromStage: text("from_stage").notNull(),
+  toStage: text("to_stage").notNull(),
+  reason: text("reason").notNull(),
+  userId: uuid("user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("stage_overrides_deal_idx").on(t.dealId)]);
+
 export const dealComms = pgTable("deal_comms", {
   id: uuid("id").defaultRandom().primaryKey(),
   dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),

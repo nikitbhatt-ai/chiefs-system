@@ -54,3 +54,33 @@ export function mapCrmToWorkflow(
   const def = DEFAULT_MAPPING.find((d) => d.crmStage === crmStage);
   return def?.workflowStage ?? null;
 }
+
+// Reverse: which CRM stage corresponds to a given workflow stage?
+// Some workflow stages don't have a one-to-one CRM target — for example,
+// awaiting_parts / next_in_line / qc_check / completed are all intermediate
+// shop states that should leave the CRM stage at "in_production". The
+// "confirmed" target is pipeline-dependent: government pipelines key off
+// po_received, walk-in and commercial off deposit_received.
+export function mapWorkflowToCrm(
+  workflowStage: string,
+  pipelineSlug: string | null,
+): string | null {
+  switch (workflowStage) {
+    case "estimate":
+      return "quote_sent";
+    case "confirmed":
+      return pipelineSlug === "government" ? "po_received" : "deposit_received";
+    case "awaiting_parts":
+    case "next_in_line":
+    case "in_progress":
+    case "qc_check":
+    case "completed":
+      return "in_production";
+    case "delivered":
+      return "delivered";
+    case "archived":
+      return "lost";
+    default:
+      return null;
+  }
+}

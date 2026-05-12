@@ -6,14 +6,14 @@
 // auto-create a work order if none exists yet. One-way trigger: moving
 // the deal back out of Won does NOT reverse the workflow.
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity } from "@/db/schema";
+import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity, users } from "@/db/schema";
 import { bucketForStage } from "@/lib/pipelineBuckets";
 import { docForPipeline } from "@/lib/documentTemplates";
-import { getPipeline } from "@/lib/pipelines";
+import { getPipeline, stageLabel, type DealStage } from "@/lib/pipelines";
 import { notify } from "@/lib/notifications";
-import { loadStageMapping, mapCrmToWorkflow, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
+import { loadStageMapping, mapCrmToWorkflow, mapWorkflowToCrm, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -270,5 +270,107 @@ export async function syncDealToWorkflow(
     metadata: { workflowStage: target, workOrderId: wo!.id, source: "crm_stage_change" },
   });
 
+  await notifyShopSide(dealId, wo!.id, wo!.assignedTo, label, newStage);
+
   return { ok: true, workOrderId: wo!.id, workflowStage: target, created };
+}
+
+// Workflow -> CRM reverse sync. When a work order's status changes on the
+// /workflow board, push the corresponding CRM stage on the linked deal so
+// sales sees the same source of truth. Pipeline-aware: "confirmed" maps to
+// po_received for government deals and deposit_received otherwise.
+// Intermediate shop states (awaiting_parts / next_in_line / qc_check /
+// completed) keep the CRM stage at in_production so we don't oscillate
+// sales' view while the shop iterates internally.
+export async function syncWorkflowToDeal(
+  workOrderId: string,
+  newWorkflowStage: string,
+  prevWorkflowStage: string | null,
+): Promise<
+  | { ok: true; dealId: string; newCrmStage: string; prevCrmStage: string }
+  | { ok: false; reason: "no_deal" | "no_target" | "same_target" | "no_change" }
+> {
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
+  if (!wo?.dealId) return { ok: false, reason: "no_deal" };
+
+  const [d] = await db.select().from(deals).where(eq(deals.id, wo.dealId));
+  if (!d) return { ok: false, reason: "no_deal" };
+
+  const targetCrm = mapWorkflowToCrm(newWorkflowStage, d.pipeline);
+  if (!targetCrm) return { ok: false, reason: "no_target" };
+
+  if (prevWorkflowStage) {
+    const prevCrm = mapWorkflowToCrm(prevWorkflowStage, d.pipeline);
+    if (prevCrm === targetCrm) return { ok: false, reason: "same_target" };
+  }
+
+  if (d.stage === targetCrm) return { ok: false, reason: "no_change" };
+
+  await db
+    .update(deals)
+    .set({ stage: targetCrm as DealStage, currentStageEnteredAt: new Date(), updatedAt: new Date() })
+    .where(eq(deals.id, d.id));
+
+  const wfLabel = WORKFLOW_STAGE_LABELS[newWorkflowStage] ?? newWorkflowStage;
+  await db.insert(dealActivity).values({
+    dealId: d.id,
+    kind: "workflow_sync",
+    body: `Auto-synced from workflow: ${wfLabel} → CRM stage ${stageLabel(targetCrm)}.`,
+    metadata: { workflowStage: newWorkflowStage, workOrderId: wo.id, newCrmStage: targetCrm, source: "workflow_stage_change" },
+  });
+
+  await notifySalesSide(d.id, d.assignedTo, targetCrm, wfLabel);
+
+  return { ok: true, dealId: d.id, newCrmStage: targetCrm, prevCrmStage: d.stage };
+}
+
+// Notify the shop side when sales moves a deal: the WO assignee if any,
+// otherwise users with manager / admin roles. Skips silently if no one is
+// reachable so this never blocks the parent transaction.
+async function notifyShopSide(
+  dealId: string,
+  workOrderId: string,
+  woAssignedTo: string | null,
+  workflowLabel: string,
+  crmStage: string,
+) {
+  const title = `Deal moved to ${workflowLabel}`;
+  const body = `Sales advanced this deal to ${crmStage.replace(/_/g, " ")}; workflow record is now ${workflowLabel}.`;
+  const link = `/workflow`;
+  if (woAssignedTo) {
+    await notify(woAssignedTo, { kind: "stage_change", title, body, link, dealId });
+    return;
+  }
+  const recipients = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.active, true), inArray(users.role, ["manager", "admin"])));
+  for (const r of recipients) {
+    await notify(r.id, { kind: "stage_change", title, body, link, dealId });
+  }
+  void workOrderId;
+}
+
+// Notify the sales side when the shop moves a workflow stage: the deal's
+// assignee. If none is set, fall back to users with role=sales.
+async function notifySalesSide(
+  dealId: string,
+  dealAssignedTo: string | null,
+  crmStage: string,
+  workflowLabel: string,
+) {
+  const title = `Shop update: ${workflowLabel}`;
+  const body = `Shop moved this build to ${workflowLabel}; CRM stage is now ${crmStage.replace(/_/g, " ")}.`;
+  const link = `/deals/${dealId}`;
+  if (dealAssignedTo) {
+    await notify(dealAssignedTo, { kind: "stage_change", title, body, link, dealId });
+    return;
+  }
+  const recipients = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(and(eq(users.active, true), eq(users.role, "sales")));
+  for (const r of recipients) {
+    await notify(r.id, { kind: "stage_change", title, body, link, dealId });
+  }
 }

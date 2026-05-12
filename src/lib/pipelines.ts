@@ -93,8 +93,8 @@ export function stageLabel(stage: string): string {
 }
 
 export type StageTransitionResult =
-  | { ok: true }
-  | { ok: false; reason: string };
+  | { ok: true; backwards?: boolean }
+  | { ok: false; reason: string; overridable?: boolean; backwards?: boolean };
 
 // Maps a customer_type value to the pipeline that drives it. Retail is treated
 // as commercial; walk-ins that need credentialing should be set to
@@ -112,6 +112,9 @@ export type StageTransitionContext = {
   hasPipelineDocument?: boolean;
   pipelineDocumentRequiredBeforeStage?: string;
   pipelineDocumentLabel?: string;
+  // When true, allow forward-skip transitions; logged as a manager override.
+  // Does NOT bypass the credential hard gate — that one is always strict.
+  override?: boolean;
 };
 
 export function canAdvanceTo(
@@ -143,7 +146,7 @@ export function canAdvanceTo(
     };
   }
 
-  if (toIdx > fromIdx + 1) {
+  if (toIdx > fromIdx + 1 && !context.override) {
     const skipped = pipeline.stages
       .slice(fromIdx + 1, toIdx)
       .map(stageLabel)
@@ -151,18 +154,23 @@ export function canAdvanceTo(
     return {
       ok: false,
       reason: `Cannot skip ${skipped}. Advance one stage at a time in the ${pipeline.label} pipeline.`,
+      overridable: true,
     };
   }
 
   if (pipeline.hardGate) {
     const gateIdx = pipeline.stages.indexOf(pipeline.hardGate);
     if (toIdx > gateIdx && !context.hasActiveCredential) {
+      // Credential gate is never overridable — strict by policy.
       return {
         ok: false,
         reason: `${pipeline.label} requires a verified credential before advancing past ${stageLabel(pipeline.hardGate)}. Add and verify a credential first.`,
+        overridable: false,
       };
     }
   }
+
+  const backwards = toIdx < fromIdx;
 
   // Pipeline-document requirement is enforced as a soft reminder instead
   // of a hard gate — see `maybeCreateDocReminder` in src/lib/dealTriggers.ts.
@@ -170,7 +178,7 @@ export function canAdvanceTo(
   // associated paperwork hasn't been filed yet; the reminder task chases
   // it down rather than blocking the workflow.
 
-  return { ok: true };
+  return { ok: true, backwards };
 }
 
 export const STAGE_COLORS: Record<string, string> = {
