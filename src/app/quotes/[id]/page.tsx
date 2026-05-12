@@ -235,6 +235,35 @@ export default async function QuotePage({
       title={q.quoteNumber ?? "Quote"}
       subtitle={`Status: ${q.status} · Stage: ${q.workflowStage.replace(/_/g, " ")}`}
     >
+      <div className="flex justify-end gap-2">
+        <a
+          href={`/api/pdf/quotes/${q.id}`}
+          target="_blank"
+          rel="noopener"
+          className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
+        >
+          Download PDF
+        </a>
+        {q.status === "converted" && (
+          <a
+            href={`/api/pdf/quotes/${q.id}?variant=invoice`}
+            target="_blank"
+            rel="noopener"
+            className="text-[11px] font-body bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-500/30 rounded-md px-3 py-1.5"
+          >
+            Download invoice PDF
+          </a>
+        )}
+        <a
+          href={`/quotes/${q.id}/print`}
+          target="_blank"
+          rel="noopener"
+          className="text-[11px] font-body bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10 rounded-md px-3 py-1.5"
+        >
+          Open print view
+        </a>
+      </div>
+
       <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
         <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
           Workflow stage

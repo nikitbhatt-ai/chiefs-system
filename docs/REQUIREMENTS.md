@@ -26,11 +26,105 @@ are pending and should be addressed when their owning module is built.
       Save-as-PDF. Pattern to be reused for invoices, work orders,
       reports, inventory exports.
 - [ ] **Logo on branded PDFs** — pending logo file upload to `public/`.
-- [ ] **Server-side PDF generation** (e.g. @react-pdf/renderer) for
-      pixel-consistent output instead of relying on browser print.
+- [~] **Server-side PDF generation** via `@react-pdf/renderer` (PR 21,
+      Phase 1). Centralized service at `src/lib/pdf/` with shared
+      branding + styles, a `registry.ts` mapping `record_type` →
+      `(data resolver, React-PDF document)`, templates for Quote /
+      Invoice / Purchase Order, and an `audit.ts` helper that writes
+      to the new `pdf_audit_log` table. API endpoints
+      `GET /api/pdf/quotes/[id]` (with `?variant=invoice`) and
+      `GET /api/pdf/purchase-orders/[id]` stream the PDF buffer with
+      a sensible `Content-Disposition`. Phase 2+ (work orders, spec
+      sheets, change orders, receipts, deal summaries, customer
+      dossier, bulk export, watermarks, email auto-attach,
+      versioning snapshots, admin template editor) is deferred.
 - [ ] **Send-to-customer** is separate from Print — takes an email input
       and emails the PDF for approval.
 - [ ] **CSV/Excel mass import** where useful (parts inventory at minimum).
+
+## Universal PDF export (PR 21, Phase 1)
+
+System-wide PDF generation registered through one service. Phase 1
+covers Quote (with Invoice variant) and Purchase Order. New record
+types added later just register a `(resolver, renderer)` pair in
+`src/lib/pdf/registry.ts` to inherit endpoint + audit + download UI.
+
+- [x] **Service** `src/lib/pdf/`:
+  - `branding.ts` reads company name / tagline / address / phone /
+    email / website / colors from `PDF_COMPANY_*` env vars (falls
+    back to defaults). Moves to admin settings in a later PR.
+  - `styles.ts` shared React-PDF `StyleSheet` for page chrome,
+    header, sections, table, totals, footer, and watermark.
+  - `templates/quote.tsx` renders Quote OR Invoice variant from
+    the same data shape; line-item table, totals breakdown, notes,
+    DRAFT watermark when `status='draft'`. Footer carries
+    page numbers + generation timestamp.
+  - `templates/purchaseOrder.tsx` mirrors the quote template for
+    vendor-side POs; `RECEIVED` watermark when fully received.
+  - `registry.ts` exports `renderRecordPdf(recordType, recordId)`
+    returning `{ buffer, fileName, template }`. Filename
+    convention `Quote_<num>_<YYYYMMDD>.pdf`, etc.
+  - `audit.ts` writes a `pdf_audit_log` row per generation with
+    `(record_type, record_id, template, purpose, user_id,
+    recipient, ip_address, created_at)`.
+- [x] **API endpoints** (Node runtime — React-PDF needs it):
+  - `GET /api/pdf/quotes/[id]` — quote PDF, accepts
+    `?variant=invoice` to flip the document title + footer
+    wording (no separate invoice table; converted quotes are
+    invoices).
+  - `GET /api/pdf/purchase-orders/[id]` — PO PDF.
+  - Both check session, log to `pdf_audit_log` with `purpose =
+    download`, then stream `application/pdf` with
+    `Content-Disposition: attachment; filename=…`.
+- [x] **Download buttons**:
+  - `/quotes/[id]` action bar: Download PDF, Download invoice
+    PDF (visible only when `status=converted`), Open print view.
+  - `/purchase-orders/[id]` action bar: Download PDF.
+- [x] **RBAC**: inherits page-level auth check; restricted-doc
+  enforcement on customer-folder downloads stays in
+  `/api/customer-documents/[id]/download`.
+
+### Schema additions (PR 21)
+
+```sql
+CREATE TABLE IF NOT EXISTS pdf_audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  record_type text NOT NULL,
+  record_id uuid NOT NULL,
+  template text NOT NULL,
+  purpose text NOT NULL,
+  user_id uuid REFERENCES users(id),
+  recipient text,
+  ip_address text,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS pdf_audit_log_record_idx ON pdf_audit_log (record_type, record_id);
+CREATE INDEX IF NOT EXISTS pdf_audit_log_user_idx ON pdf_audit_log (user_id);
+```
+
+Optional env vars to customize branding without code changes:
+`PDF_COMPANY_NAME`, `PDF_COMPANY_TAGLINE`, `PDF_COMPANY_ADDRESS`,
+`PDF_COMPANY_PHONE`, `PDF_COMPANY_EMAIL`, `PDF_COMPANY_WEBSITE`.
+
+### Deferred (post PR 21)
+
+- **Auto-storage** into `customer_documents` on quote convert +
+  PO create (Phase 2 of the spec).
+- **Versioning snapshots** — immutable file with versioned name
+  per generation (Phase 5).
+- **Email auto-attach** workflow + Send-to-customer button
+  (Phase 2).
+- **Bulk export** (Phase 4): zip of all customer docs, all
+  invoices in a date range, customer dossier with TOC.
+- **Watermarks**: DRAFT/VOID/PAID/PAST DUE/CONFIDENTIAL beyond
+  the two already present, plus user-watermark for sensitive
+  exports (Phase 5).
+- **Admin template editor** — moves branding + templates to a
+  DB-backed `pdf_templates` table editable via
+  `/settings/pdf-templates`.
+- **Additional record types**: Work Order, Spec Sheet, Change
+  Order, Deal Summary, Payment Receipt, Credential Record,
+  Partner Referral Summary, Reports, Audit Logs, Activity Feed.
 
 ## Customers (CRM)
 
