@@ -51,7 +51,7 @@ export const PIPELINES: Record<PipelineSlug, PipelineDef> = {
       "lost",
     ],
     procurementGate: "deposit_received",
-    hardGate: "credential_verification",
+    hardGate: null,
   },
   commercial: {
     slug: "commercial",
