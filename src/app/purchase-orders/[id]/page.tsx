@@ -138,6 +138,16 @@ export default async function POPage({
 
   return (
     <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${po.status.replace(/_/g, " ")}`}>
+      <div className="flex justify-end">
+        <a
+          href={`/api/pdf/purchase-orders/${po.id}`}
+          target="_blank"
+          rel="noopener"
+          className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
+        >
+          Download PDF
+        </a>
+      </div>
       <POEditor
         id={po.id}
         vendorId={po.vendorId ?? ""}
