@@ -12,6 +12,7 @@ import {
 } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { stageLabel, STAGE_COLORS } from "@/lib/pipelines";
+import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 
 type StockLine = {
   kind?: string;
@@ -41,6 +42,7 @@ async function moveQuoteStage(formData: FormData) {
   if (!q) return;
 
   let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
+  const prevWorkflowStage = wo?.status ?? null;
   if (!wo && stage !== "estimate") {
     const woNumber = `WO-${Date.now().toString().slice(-7)}`;
     const inserted = await db
@@ -49,11 +51,16 @@ async function moveQuoteStage(formData: FormData) {
         woNumber,
         customerId: q.customerId ?? null,
         quoteId: id,
+        dealId: q.dealId ?? null,
         status: stage,
       })
       .returning();
     wo = inserted[0];
   } else if (wo) {
+    if (!wo.dealId && q.dealId) {
+      await db.update(workOrders).set({ dealId: q.dealId, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
+      wo = { ...wo, dealId: q.dealId };
+    }
     await db
       .update(workOrders)
       .set({ status: stage, updatedAt: new Date() })
@@ -101,11 +108,16 @@ async function moveQuoteStage(formData: FormData) {
     .set({ workflowStage: stage, updatedAt: new Date() })
     .where(eq(quotes.id, id));
 
+  if (wo?.id) {
+    await syncWorkflowToDeal(wo.id, stage, prevWorkflowStage);
+  }
+
   revalidatePath("/workflow");
   revalidatePath("/quotes");
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/inventory");
   revalidatePath("/work-orders");
+  if (wo?.dealId) revalidatePath(`/deals/${wo.dealId}`);
 }
 
 function fmtMoney(v: string | null | undefined) {

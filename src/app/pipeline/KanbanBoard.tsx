@@ -53,6 +53,52 @@ export function KanbanBoard({
   for (const b of buckets) cardsByBucket.set(b.slug, []);
   for (const c of cards) cardsByBucket.get(c.bucket)?.push(c);
 
+  // POST helper that handles the guardrail override flow: on a 400 marked
+  // overridable, asks the user for a manager reason; on a 400 marked
+  // requiresReason (a backwards move), asks for the reason; either way
+  // retries once with { override, reason }. Returns the parsed body on
+  // success, or null on failure (after surfacing the error in setError).
+  async function postWithOverride(
+    url: string,
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | null> {
+    const first = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (first.ok) return first.json();
+    const body = (await first.json().catch(() => ({}))) as {
+      error?: string;
+      overridable?: boolean;
+      requiresReason?: boolean;
+      backwards?: boolean;
+    };
+    if (!body.overridable && !body.requiresReason) {
+      setError(body.error ?? `Move rejected (${first.status})`);
+      return null;
+    }
+    const prompt = body.backwards
+      ? `Moving this deal backwards: ${body.error}\n\nEnter a reason (will be logged):`
+      : `${body.error}\n\nManager override — enter a reason (will be logged):`;
+    const reason = window.prompt(prompt, "");
+    if (!reason || !reason.trim()) {
+      setError("Move cancelled — reason is required.");
+      return null;
+    }
+    const second = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, override: !body.backwards, reason: reason.trim() }),
+    });
+    if (!second.ok) {
+      const b2 = await second.json().catch(() => ({}));
+      setError((b2 as { error?: string })?.error ?? `Override rejected (${second.status})`);
+      return null;
+    }
+    return second.json();
+  }
+
   async function moveBucket(cardId: string, target: BucketSlug) {
     const card = cards.find((c) => c.id === cardId);
     if (!card || card.bucket === target) return;
@@ -60,20 +106,15 @@ export function KanbanBoard({
     setCards((cs) => cs.map((c) => (c.id === cardId ? { ...c, bucket: target } : c)));
     setError(null);
     try {
-      const res = await fetch(`/api/deals/${cardId}/move-bucket`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bucket: target }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
+      const body = await postWithOverride(`/api/deals/${cardId}/move-bucket`, { bucket: target });
+      if (!body) {
         setCards(prev);
-        setError(body?.error ?? `Move rejected (${res.status})`);
         return;
       }
-      const body = await res.json();
       setCards((cs) =>
-        cs.map((c) => (c.id === cardId ? { ...c, bucket: target, stage: body.stage ?? c.stage, daysInStage: 0, age: "fresh" } : c)),
+        cs.map((c) =>
+          c.id === cardId ? { ...c, bucket: target, stage: (body.stage as string) ?? c.stage, daysInStage: 0, age: "fresh" } : c,
+        ),
       );
       startTransition(() => router.refresh());
     } catch (e) {
@@ -84,16 +125,8 @@ export function KanbanBoard({
 
   async function changeStage(cardId: string, stage: string) {
     setError(null);
-    const res = await fetch(`/api/deals/${cardId}/stage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage }),
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      setError(body?.error ?? `Stage change rejected (${res.status})`);
-      return false;
-    }
+    const body = await postWithOverride(`/api/deals/${cardId}/stage`, { stage });
+    if (!body) return false;
     startTransition(() => router.refresh());
     return true;
   }

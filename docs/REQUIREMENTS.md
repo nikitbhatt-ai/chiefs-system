@@ -524,24 +524,68 @@ INSERT INTO stage_mapping (crm_stage, workflow_stage, sort_order) VALUES
 ON CONFLICT (crm_stage) DO NOTHING;
 ```
 
-### Deferred to follow-up PRs
+### PR 17 — reverse sync + guardrails + cross-module notifications
 
-- **Workflow → CRM triggers** (two-way sync): "Build started" /
-  "Build complete" / "Ready" in the shop pushing the deal stage
-  back through `in_production` → `delivered`.
-- **Conflict resolution**: stage transition rules with manager
-  override + audit log (`stage_overrides` table).
-- **Notification routing on cross-module sync**: notify shop
-  manager on CRM stage changes; notify sales rep on workflow
-  stage changes. Today only an activity-feed entry is written.
+- **Workflow → CRM reverse sync** (`syncWorkflowToDeal`): when the
+  shop moves a card on `/workflow`, push the corresponding CRM
+  stage on the linked deal. Pipeline-aware: `confirmed` maps to
+  `po_received` for government deals and `deposit_received`
+  otherwise. Intermediate shop states (`awaiting_parts`,
+  `next_in_line`, `qc_check`, `completed`) keep the CRM stage at
+  `in_production` so we don't oscillate the sales view while the
+  shop iterates internally. Stamps `work_orders.deal_id` on first
+  sync if the WO was previously orphan.
+- **Transition guardrails + override audit**:
+  - `canAdvanceTo` now returns `{ overridable, backwards }`
+    metadata on its result. Forward skips of more than one stage
+    return `ok=false, overridable=true`. Credential gate is
+    always strict (`overridable=false`).
+  - `POST /api/deals/[id]/stage` and `POST /api/deals/[id]/move-bucket`
+    accept `{ override: boolean, reason: string }`. A 400 with
+    `overridable=true` tells the client to prompt for a manager
+    reason and retry with `override=true`. A 200-eligible backwards
+    move still requires a `reason` (400 `requiresReason=true,
+    backwards=true` if missing). Every accepted override or
+    backwards move logs a row to the new `stage_overrides` audit
+    table AND writes a `stage_override` entry to `deal_activity`.
+  - `KanbanBoard` handles both 400 shapes with a `window.prompt`
+    and a single retry call. Cancel = move aborted.
+- **Cross-module notifications**: both sync helpers now fire a
+  `stage_change` notification.
+  - CRM → Workflow: notify the WO assignee if set, else fall back
+    to active users with `role IN ('manager','admin')`.
+  - Workflow → CRM: notify the deal assignee if set, else fall
+    back to active users with `role = 'sales'`.
+
+### Schema additions (PR 17)
+
+```sql
+CREATE TABLE IF NOT EXISTS stage_overrides (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  deal_id uuid NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  from_stage text NOT NULL,
+  to_stage text NOT NULL,
+  reason text NOT NULL,
+  user_id uuid REFERENCES users(id),
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id);
+```
+
+### Still deferred (post PR 17)
+
 - **Event log table** for richer pub/sub / debugging.
 - **Direct entry in Workflow** auto-creating a minimal CRM deal
-  (currently /workflow still creates WOs off bare quotes; those
-  won't have a deal until linked).
-- **Lifecycle stage expansion**: add the richer stages from the
-  spec (Spec Approval, Vehicle Procurement, Upfit Scheduled,
-  Compliance/Inspection, Invoiced, Paid/Closed) to the deal stage
-  enum and remap.
+  (currently /workflow still creates WOs off bare quotes; PR 17
+  stamps `deal_id` if the quote already has one, but the
+  no-quote-at-all path isn't covered).
+- **Lifecycle stage expansion**: enum-add Spec Approval / Vehicle
+  Procurement / Upfit Scheduled / Compliance / Invoiced / Paid &
+  Closed; re-map. This is the next PR.
+- **Customer-facing notifications** (SMS/email) triggered by
+  workflow stage changes (per spec: customer-facing comms key off
+  the shop, not the CRM).
 
 ## Deals (not yet built)
 
