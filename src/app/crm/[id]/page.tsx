@@ -3,13 +3,16 @@ import { revalidatePath } from "next/cache";
 import { eq, desc, and, gte, lte, ilike, inArray } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { customers, deals, quotes, workOrders, notes, users, customerDocuments, dealCredentials, dealActivity } from "@/db/schema";
+import { customers, deals, quotes, workOrders, notes, users, customerDocuments, dealCredentials, dealActivity, documentAuditLog } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import {
   CUSTOMER_DOC_CATEGORIES,
   isValidCategory,
+  categoryVisibleTo,
+  visibleCategoriesFor,
 } from "@/lib/customerDocuments";
+import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +49,21 @@ export default async function CustomerEntityPage({
   const [c] = await db.select().from(customers).where(eq(customers.id, id));
   if (!c) notFound();
 
+  const session = await auth();
+  const role = (session?.user as { role?: string } | undefined)?.role ?? null;
+  const allowedCategories = visibleCategoriesFor(role);
+
   const docFilters = [eq(customerDocuments.customerId, id), eq(customerDocuments.isCurrentVersion, true)];
+  // RBAC: only fetch documents in categories the user can read. Non-admins
+  // who somehow request a restricted category via ?category= get an empty
+  // list rather than an error.
+  if (allowedCategories.length === 0) {
+    // No allowed categories (unknown role or unauthenticated) — short-
+    // circuit by adding an impossible filter.
+    docFilters.push(eq(customerDocuments.id, "00000000-0000-0000-0000-000000000000"));
+  } else {
+    docFilters.push(inArray(customerDocuments.category, allowedCategories));
+  }
   if (sp.q && sp.q.trim()) docFilters.push(ilike(customerDocuments.fileName, `%${sp.q.trim()}%`));
   if (sp.category && isValidCategory(sp.category)) docFilters.push(eq(customerDocuments.category, sp.category));
   if (sp.deal) docFilters.push(eq(customerDocuments.associatedDealId, sp.deal));
@@ -162,12 +179,15 @@ export default async function CustomerEntityPage({
 
   async function uploadCustomerDoc(formData: FormData) {
     "use server";
-    const session = await auth();
-    if (!session?.user) return;
+    const s = await auth();
+    if (!s?.user) return;
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) return;
     const requestedCategory = String(formData.get("category") ?? "");
     const category = isValidCategory(requestedCategory) ? requestedCategory : "misc";
+    // RBAC write check. A user who can't see the category can't upload to it.
+    const sRole = (s.user as { role?: string }).role;
+    if (!categoryVisibleTo(category, sRole)) return;
     const associatedDealRaw = String(formData.get("associatedDealId") ?? "").trim();
     const associatedDealId = associatedDealRaw || null;
     const docNotes = String(formData.get("notes") ?? "").trim() || null;
@@ -195,28 +215,55 @@ export default async function CustomerEntityPage({
       await db.update(customerDocuments).set({ isCurrentVersion: false }).where(eq(customerDocuments.id, prior.id));
     }
 
-    await db.insert(customerDocuments).values({
+    const [inserted] = await db
+      .insert(customerDocuments)
+      .values({
+        customerId: id,
+        category,
+        fileName: file.name,
+        blobUrl: blob.url,
+        mimeType: file.type || null,
+        sizeBytes: file.size || null,
+        uploadedBy: s.user.id,
+        associatedDealId,
+        notes: docNotes,
+        version,
+        isCurrentVersion: true,
+        parentDocumentId,
+      })
+      .returning({ id: customerDocuments.id });
+
+    const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+    await db.insert(documentAuditLog).values({
+      documentId: inserted?.id ?? null,
       customerId: id,
-      category,
-      fileName: file.name,
-      blobUrl: blob.url,
-      mimeType: file.type || null,
-      sizeBytes: file.size || null,
-      uploadedBy: session.user.id,
-      associatedDealId,
-      notes: docNotes,
-      version,
-      isCurrentVersion: true,
-      parentDocumentId,
+      userId: s.user.id,
+      action: prior ? "upload_new_version" : "upload",
+      ipAddress: ip,
     });
     revalidatePath(`/crm/${id}`);
   }
 
   async function deleteCustomerDoc(formData: FormData) {
     "use server";
+    const s = await auth();
+    if (!s?.user) return;
     const docId = String(formData.get("docId") ?? "");
     if (!docId) return;
+    // RBAC: load the doc's category and re-check.
+    const [doc] = await db.select({ category: customerDocuments.category }).from(customerDocuments).where(eq(customerDocuments.id, docId));
+    if (!doc) return;
+    const sRole = (s.user as { role?: string }).role;
+    if (!categoryVisibleTo(doc.category, sRole)) return;
     await db.delete(customerDocuments).where(eq(customerDocuments.id, docId));
+    const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+    await db.insert(documentAuditLog).values({
+      documentId: docId,
+      customerId: id,
+      userId: s.user.id,
+      action: "delete",
+      ipAddress: ip,
+    });
     revalidatePath(`/crm/${id}`);
   }
 
@@ -304,7 +351,9 @@ export default async function CustomerEntityPage({
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
             Category
             <select name="category" defaultValue="misc" className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white">
-              {CUSTOMER_DOC_CATEGORIES.map((cat) => (<option key={cat.value} value={cat.value}>{cat.label}</option>))}
+              {CUSTOMER_DOC_CATEGORIES
+                .filter((cat) => allowedCategories.includes(cat.value))
+                .map((cat) => (<option key={cat.value} value={cat.value}>{cat.label}</option>))}
             </select>
           </label>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -329,7 +378,9 @@ export default async function CustomerEntityPage({
             Category
             <select name="category" defaultValue={sp.category ?? ""} className="mt-1 w-full bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white">
               <option value="">All</option>
-              {CUSTOMER_DOC_CATEGORIES.map((cat) => (<option key={cat.value} value={cat.value}>{cat.label}</option>))}
+              {CUSTOMER_DOC_CATEGORIES
+                .filter((cat) => allowedCategories.includes(cat.value))
+                .map((cat) => (<option key={cat.value} value={cat.value}>{cat.label}</option>))}
             </select>
           </label>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -361,7 +412,7 @@ export default async function CustomerEntityPage({
                     {docs.map((d) => (
                       <li key={d.id} className="flex items-center justify-between gap-3 text-[11px] font-body py-1 border-t border-white/5">
                         <div className="flex-1 min-w-0">
-                          <a href={d.blobUrl} target="_blank" className="text-zinc-200 hover:text-white truncate inline-block max-w-full">{d.fileName}</a>
+                          <a href={`/api/customer-documents/${d.id}/download`} target="_blank" className="text-zinc-200 hover:text-white truncate inline-block max-w-full">{d.fileName}</a>
                           {d.version > 1 && (<span className="ml-2 text-[10px] text-amber-400">v{d.version}</span>)}
                           {d.notes && (<div className="text-[10px] text-zinc-500 italic">{d.notes}</div>)}
                         </div>
