@@ -6,10 +6,12 @@
 // auto-create a work order if none exists yet. One-way trigger: moving
 // the deal back out of Won does NOT reverse the workflow.
 
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, quotes, workOrders } from "@/db/schema";
+import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity } from "@/db/schema";
 import { bucketForStage } from "@/lib/pipelineBuckets";
+import { docForPipeline } from "@/lib/documentTemplates";
+import { getPipeline } from "@/lib/pipelines";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -94,4 +96,72 @@ export async function maybePromoteWonDeal(
   }
 
   return { ok: true, promotedQuoteId: q.id, createdWorkOrderId };
+}
+
+// Soft pipeline-document reminder. When a deal advances to / past the
+// pipeline document's `requiredBeforeStage` without the doc attached,
+// drop an open task on the deal so the assignee chases it down. Deduped
+// per kind so we don't spam tasks every time the stage is touched.
+export async function maybeCreateDocReminder(
+  dealId: string,
+  newStage: string,
+  prevStage: string,
+): Promise<{ created: boolean; taskId: string | null }> {
+  const [d] = await db.select().from(deals).where(eq(deals.id, dealId));
+  if (!d) return { created: false, taskId: null };
+
+  const pipeline = getPipeline(d.pipeline);
+  const docSpec = docForPipeline(pipeline.slug);
+  if (!docSpec) return { created: false, taskId: null };
+
+  const stages = pipeline.stages;
+  const requiredIdx = stages.indexOf(docSpec.requiredBeforeStage as (typeof stages)[number]);
+  const newIdx = stages.indexOf(newStage as (typeof stages)[number]);
+  const prevIdx = stages.indexOf(prevStage as (typeof stages)[number]);
+  if (requiredIdx < 0 || newIdx < 0) return { created: false, taskId: null };
+  // Only fire on the forward edge into the requirement.
+  if (newIdx < requiredIdx) return { created: false, taskId: null };
+  if (prevIdx >= requiredIdx) return { created: false, taskId: null };
+
+  // Skip if the doc is already attached.
+  const [existingDoc] = await db
+    .select({ id: customerDocuments.id })
+    .from(customerDocuments)
+    .where(and(
+      eq(customerDocuments.associatedDealId, dealId),
+      eq(customerDocuments.kind, docSpec.slug),
+      eq(customerDocuments.isCurrentVersion, true),
+    ))
+    .limit(1);
+  if (existingDoc) return { created: false, taskId: null };
+
+  // Dedup: skip if an open reminder for this kind already exists on the deal.
+  const reminderTitle = `Upload ${docSpec.label}`;
+  const [existingTask] = await db
+    .select({ id: dealTasks.id })
+    .from(dealTasks)
+    .where(and(
+      eq(dealTasks.dealId, dealId),
+      eq(dealTasks.title, reminderTitle),
+      isNull(dealTasks.completedAt),
+    ))
+    .limit(1);
+  if (existingTask) return { created: false, taskId: existingTask.id };
+
+  const [task] = await db
+    .insert(dealTasks)
+    .values({
+      dealId,
+      title: reminderTitle,
+      description: `${pipeline.label} expects this paperwork by ${docSpec.requiredBeforeStage.replace(/_/g, " ")}. Generate or upload it from the deal's Documents tab.`,
+      assignedTo: d.assignedTo,
+      department: "sales",
+    })
+    .returning();
+  await db.insert(dealActivity).values({
+    dealId,
+    kind: "doc_reminder_created",
+    body: `Reminder: ${reminderTitle}`,
+  });
+  return { created: true, taskId: task?.id ?? null };
 }
