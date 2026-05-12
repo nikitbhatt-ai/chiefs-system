@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, customers, users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { syncDealToWorkflow } from "@/lib/dealTriggers";
 
 const STAGES = ["prospect", "quote_sent", "po_received", "in_production", "delivered", "lost"] as const;
 type Stage = (typeof STAGES)[number];
@@ -23,6 +24,7 @@ export default async function EditDealPage({ params }: { params: Promise<{ id: s
   async function update(formData: FormData) {
     "use server";
     const stage = String(formData.get("stage") ?? "prospect") as Stage;
+    const finalStage = STAGES.includes(stage) ? stage : "prospect";
     const yearRaw = String(formData.get("vehicleYear") ?? "").trim();
     await db
       .update(deals)
@@ -34,12 +36,15 @@ export default async function EditDealPage({ params }: { params: Promise<{ id: s
         vehicleMake: String(formData.get("vehicleMake") ?? "").trim() || null,
         vehicleModel: String(formData.get("vehicleModel") ?? "").trim() || null,
         vin: String(formData.get("vin") ?? "").trim().toUpperCase() || null,
-        stage: STAGES.includes(stage) ? stage : "prospect",
+        stage: finalStage,
         referralSource: String(formData.get("referralSource") ?? "").trim() || null,
         notes: String(formData.get("notes") ?? "").trim() || null,
         updatedAt: new Date(),
       })
       .where(eq(deals.id, id));
+    if (finalStage !== d.stage) {
+      await syncDealToWorkflow(id, finalStage, d.stage);
+    }
     revalidatePath("/deals");
     redirect("/deals");
   }

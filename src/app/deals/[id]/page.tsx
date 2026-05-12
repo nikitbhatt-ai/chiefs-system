@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments, dealTasks, customerMessages } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments, dealTasks, customerMessages, workOrders } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
@@ -25,6 +26,7 @@ import { docForPipeline } from "@/lib/documentTemplates";
 import { categoryForKind } from "@/lib/customerDocuments";
 import { parseMentions } from "@/lib/mentions";
 import { notify, notifyMany } from "@/lib/notifications";
+import { loadStageMapping, mapCrmToWorkflow, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
 
 export const dynamic = "force-dynamic";
 
@@ -47,7 +49,7 @@ export default async function DealEntityPage({
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) notFound();
 
-  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes, dealFiles, taskRows, messageRows, userRows] = await Promise.all([
+  const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes, dealFiles, taskRows, messageRows, userRows, dealWorkOrders, stageMap] = await Promise.all([
     d.customerId ? db.select().from(customers).where(eq(customers.id, d.customerId)).limit(1) : Promise.resolve([]),
     d.assignedTo ? db.select().from(users).where(eq(users.id, d.assignedTo)).limit(1) : Promise.resolve([]),
     db.select().from(dealActivity).where(eq(dealActivity.dealId, id)).orderBy(desc(dealActivity.createdAt)),
@@ -59,6 +61,8 @@ export default async function DealEntityPage({
     db.select().from(dealTasks).where(eq(dealTasks.dealId, id)).orderBy(asc(dealTasks.completedAt), asc(dealTasks.dueDate)),
     db.select().from(customerMessages).where(eq(customerMessages.dealId, id)).orderBy(desc(customerMessages.createdAt)),
     db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.active, true)),
+    db.select({ id: workOrders.id, woNumber: workOrders.woNumber, status: workOrders.status }).from(workOrders).where(eq(workOrders.dealId, id)).orderBy(desc(workOrders.updatedAt)).limit(1),
+    loadStageMapping(),
   ]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
@@ -428,8 +432,29 @@ export default async function DealEntityPage({
       {tab === "details" && (<>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             <span className={`inline-block text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${STAGE_COLORS[d.stage] ?? "bg-zinc-500/10 text-zinc-400 border-zinc-500/30"}`}>{stageLabel(d.stage)}</span>
+            {(() => {
+              const wo = dealWorkOrders[0] ?? null;
+              const liveStage = wo?.status ?? mapCrmToWorkflow(d.stage, stageMap);
+              if (!liveStage) {
+                return (
+                  <span className="text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 bg-zinc-500/10 text-zinc-500 border-zinc-500/20">
+                    Workflow · pre-shop
+                  </span>
+                );
+              }
+              const label = WORKFLOW_STAGE_LABELS[liveStage] ?? liveStage;
+              return (
+                <Link
+                  href="/workflow"
+                  className="inline-block text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 bg-blue-500/10 text-blue-300 border-blue-500/30 hover:bg-blue-500/20"
+                  title={wo ? `Linked work order ${wo.woNumber ?? wo.id.slice(0, 8)}` : "No work order yet — derived from CRM stage"}
+                >
+                  Workflow · {label}{wo ? "" : " (pending)"}
+                </Link>
+              );
+            })()}
             {d.sourceLocked && (<span className="text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 bg-amber-500/10 text-amber-300 border-amber-500/30">🔒 Source locked</span>)}
           </div>
           <Row label="Customer" value={customer?.name ?? "—"} />

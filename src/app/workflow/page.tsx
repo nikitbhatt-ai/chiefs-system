@@ -8,8 +8,10 @@ import {
   vehicles,
   parts,
   partReceipts,
+  deals,
 } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { stageLabel, STAGE_COLORS } from "@/lib/pipelines";
 
 type StockLine = {
   kind?: string;
@@ -134,6 +136,12 @@ export default async function WorkflowPage() {
     new Set(linkedWOs.map((w) => w.vehicleId).filter(Boolean) as string[]),
   );
 
+  const dealIds = Array.from(new Set(quoteRows.map((r) => r.dealId).filter(Boolean) as string[]));
+  const dealRows = dealIds.length
+    ? await db.select({ id: deals.id, stage: deals.stage }).from(deals).where(inArray(deals.id, dealIds))
+    : [];
+  const dealMap = new Map(dealRows.map((d) => [d.id, d.stage]));
+
   const [customerRows, vehicleRows] = await Promise.all([
     customerIds.length
       ? db
@@ -228,6 +236,15 @@ export default async function WorkflowPage() {
                           <div className="text-[11px] text-zinc-400 font-body">
                             {customerName}
                           </div>
+                        ) : null}
+                        {q.dealId && dealMap.has(q.dealId) ? (
+                          <a
+                            href={`/deals/${q.dealId}`}
+                            className={`inline-block text-[9px] uppercase tracking-wider rounded border px-1.5 py-0.5 ${STAGE_COLORS[dealMap.get(q.dealId)!] ?? "bg-zinc-500/10 text-zinc-400 border-zinc-500/30"} hover:opacity-80`}
+                            title="CRM stage — click to open deal"
+                          >
+                            CRM · {stageLabel(dealMap.get(q.dealId)!)}
+                          </a>
                         ) : null}
                         {vehicle ? (
                           <div className="text-[10px] text-zinc-500 font-mono">
