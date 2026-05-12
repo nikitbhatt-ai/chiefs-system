@@ -31,13 +31,36 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     "stage",
     "referralSource",
     "notes",
+    "source",
+    "subSource",
+    "subSourceMeta",
   ]) {
     if (f in body) update[f] = body[f];
   }
-  const [existing] = await db.select({ stage: deals.stage }).from(deals).where(eq(deals.id, id));
+  const [existing] = await db
+    .select({ stage: deals.stage, sourceLocked: deals.sourceLocked })
+    .from(deals)
+    .where(eq(deals.id, id));
+  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Source lock: once a deal hits Won the marketing-attribution source is
+  // frozen. Only manager/admin can edit it after that — anyone else trying
+  // to change source / subSource / subSourceMeta is rejected so reporting
+  // doesn't drift retroactively.
+  const touchingSource = "source" in update || "subSource" in update || "subSourceMeta" in update;
+  if (touchingSource && existing.sourceLocked) {
+    const role = (session.user as { role?: string }).role;
+    if (role !== "admin" && role !== "manager") {
+      return NextResponse.json(
+        { error: "Deal source is locked because the deal has been won. Only manager/admin can edit it." },
+        { status: 403 },
+      );
+    }
+  }
+
   const [row] = await db.update(deals).set(update).where(eq(deals.id, id)).returning();
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (existing && typeof update.stage === "string" && update.stage !== existing.stage) {
+  if (typeof update.stage === "string" && update.stage !== existing.stage) {
     await syncDealToWorkflow(id, String(update.stage), existing.stage);
   }
   return NextResponse.json(row);

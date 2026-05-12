@@ -42,6 +42,12 @@ export async function maybePromoteWonDeal(
   // Won (e.g. po_received → deposit_received reorder), don't re-trigger.
   if (bucketForStage(prevStage) === "won") return { ok: false, reason: "not_won_bucket" };
 
+  // Lock the marketing-attribution source on the deal as soon as it lands
+  // in Won. From here on, only manager/admin roles can edit source +
+  // subSource (enforced in the PATCH /api/deals/[id] route). Idempotent
+  // because Drizzle no-ops a same-value update.
+  await db.update(deals).set({ sourceLocked: true, updatedAt: new Date() }).where(eq(deals.id, dealId));
+
   // 1) Direct deal linkage. If no quote has quote.dealId = this deal, fall
   // back to the most recent non-converted quote belonging to the same
   // customer. Whichever we pick, stamp deal_id on it so future triggers and
