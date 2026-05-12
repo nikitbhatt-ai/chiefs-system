@@ -50,6 +50,7 @@ export default async function EditPartPage({
         restrictionCategory: restricted
           ? (String(formData.get("restrictionCategory") ?? "").trim() || null)
           : null,
+        leadTimeDays: num("leadTimeDays") ?? 0,
         updatedAt: new Date(),
       })
       .where(eq(parts.id, id));
@@ -76,6 +77,7 @@ export default async function EditPartPage({
           manufacturerId: p.manufacturerId ?? "",
           restricted: p.restricted,
           restrictionCategory: p.restrictionCategory ?? "",
+          leadTimeDays: p.leadTimeDays,
         }}
       />
     </AppShell>

@@ -242,6 +242,7 @@ export const parts = pgTable("parts", {
   archived: boolean("archived").notNull().default(false),
   restricted: boolean("restricted").notNull().default(false),
   restrictionCategory: text("restriction_category"),
+  leadTimeDays: integer("lead_time_days").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("parts_sku_idx").on(t.sku)]);
@@ -297,6 +298,8 @@ export const workOrders = pgTable("work_orders", {
   buildSpec: jsonb("build_spec"),
   notes: text("notes"),
   partsConsumed: boolean("parts_consumed").notNull().default(false),
+  targetBuildStartDate: timestamp("target_build_start_date"),
+  safetyBufferDays: integer("safety_buffer_days").notNull().default(7),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
