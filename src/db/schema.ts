@@ -403,8 +403,25 @@ export const dealActivity = pgTable("deal_activity", {
   kind: text("kind").notNull(),
   body: text("body"),
   metadata: jsonb("metadata"),
+  mentions: jsonb("mentions").$type<string[]>().default([]),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("deal_activity_deal_idx").on(t.dealId)]);
+
+export const notifications = pgTable("notifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  title: text("title").notNull(),
+  body: text("body"),
+  link: text("link"),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "cascade" }),
+  actorId: uuid("actor_id").references(() => users.id),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("notifications_user_idx").on(t.userId),
+  index("notifications_unread_idx").on(t.userId, t.readAt),
+]);
 
 export const dealTasks = pgTable("deal_tasks", {
   id: uuid("id").defaultRandom().primaryKey(),

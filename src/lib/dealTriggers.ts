@@ -12,6 +12,7 @@ import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity }
 import { bucketForStage } from "@/lib/pipelineBuckets";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline } from "@/lib/pipelines";
+import { notify } from "@/lib/notifications";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -163,5 +164,14 @@ export async function maybeCreateDocReminder(
     kind: "doc_reminder_created",
     body: `Reminder: ${reminderTitle}`,
   });
+  if (d.assignedTo) {
+    await notify(d.assignedTo, {
+      kind: "doc_reminder",
+      title: `Reminder: ${reminderTitle}`,
+      body: `${pipeline.label} expects this paperwork by ${docSpec.requiredBeforeStage.replace(/_/g, " ")}.`,
+      link: `/deals/${dealId}?tab=tasks`,
+      dealId,
+    });
+  }
   return { created: true, taskId: task?.id ?? null };
 }
