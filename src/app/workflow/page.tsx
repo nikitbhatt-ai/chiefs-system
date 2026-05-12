@@ -109,7 +109,14 @@ async function moveQuoteStage(formData: FormData) {
     .where(eq(quotes.id, id));
 
   if (wo?.id) {
-    await syncWorkflowToDeal(wo.id, stage, prevWorkflowStage);
+    // Cross-module sync is best-effort: a missing downstream table (from
+    // a later PR whose SQL hasn't been run yet) shouldn't prevent the shop
+    // from moving a card on the workflow board.
+    try {
+      await syncWorkflowToDeal(wo.id, stage, prevWorkflowStage);
+    } catch (err) {
+      console.error("syncWorkflowToDeal failed:", err);
+    }
   }
 
   revalidatePath("/workflow");
