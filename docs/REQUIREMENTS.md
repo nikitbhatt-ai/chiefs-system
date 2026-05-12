@@ -440,6 +440,109 @@ CREATE INDEX IF NOT EXISTS notifications_unread_idx ON notifications (user_id, r
 - Vercel Cron daily SLA scan + alert.
 - Email delivery (Resend or similar) for in-app notifications.
 
+## CRM ↔ Workflow synchronization
+
+Sales and shop must work off the same record. CRM stage and Workflow
+stage are two views over a single deal — when one moves the other
+follows.
+
+### Architecture (PR 16, hybrid)
+
+The existing /workflow Kanban is keyed on `quotes.workflow_stage`,
+not on deals directly. PR 16 keeps that board but makes deal stage
+the authority: every deal stage change auto-creates or updates the
+corresponding `work_orders` row (linked via new `work_orders.deal_id`),
+and the WO status mirrors the mapped workflow stage. Sales no longer
+loses visibility — the deal page surfaces a "Workflow Status" badge
+that reads the live WO status; the workflow board surfaces a "CRM
+Stage" badge linking back to the deal.
+
+### Mapping (PR 16)
+
+Stored in `stage_mapping(crm_stage, workflow_stage, sort_order)`,
+editable at `/settings/stage-mapping`. Default seed:
+
+| CRM stage                  | Workflow target   |
+| -------------------------- | ----------------- |
+| prospect                   | (none — pre-shop) |
+| credential_verification    | (none — pre-shop) |
+| quote_sent                 | estimate          |
+| po_received                | confirmed         |
+| deposit_received           | confirmed         |
+| in_production              | in_progress       |
+| delivered                  | delivered         |
+| lost                       | archived          |
+
+`workflow_stage = NULL` means the deal isn't visible on the board
+yet (pre-shop). `archived` keeps the WO out of the active Kanban
+but accessible for audit.
+
+### Sync (PR 16, one-way CRM → Workflow)
+
+`src/lib/dealTriggers.ts :: syncDealToWorkflow(dealId, newStage,
+prevStage)` runs after every deal stage update:
+
+1. Loads the mapping; if `newStage` has no workflow target, no-op.
+2. If `newStage` and `prevStage` map to the same workflow stage,
+   no-op.
+3. Finds the WO via `work_orders.deal_id`, then via the deal's
+   most recent quote. If none and the target is non-archive, a
+   new WO is created (number `WO-<7-digit>`, status = target,
+   `deal_id` stamped).
+4. Otherwise updates `work_orders.status` to the new target.
+5. Writes a `workflow_sync` row to `deal_activity` so both sides
+   see the handoff in the unified feed (e.g. *"Auto-synced to
+   workflow: Confirmed Builds (from CRM stage po received)."*).
+
+Called from every deal-stage write path:
+- `POST /api/deals/[id]/stage`
+- `POST /api/deals/[id]/move-bucket`
+- `PATCH /api/deals/[id]` (when `stage` changes)
+- `/deals/[id]/edit` server action
+
+### Schema additions (PR 16)
+
+```sql
+ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS deal_id uuid REFERENCES deals(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS work_orders_deal_idx ON work_orders (deal_id);
+
+CREATE TABLE IF NOT EXISTS stage_mapping (
+  crm_stage text PRIMARY KEY,
+  workflow_stage text,
+  sort_order int NOT NULL DEFAULT 0,
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+INSERT INTO stage_mapping (crm_stage, workflow_stage, sort_order) VALUES
+  ('prospect', NULL, 10),
+  ('credential_verification', NULL, 20),
+  ('quote_sent', 'estimate', 30),
+  ('po_received', 'confirmed', 40),
+  ('deposit_received', 'confirmed', 50),
+  ('in_production', 'in_progress', 60),
+  ('delivered', 'delivered', 70),
+  ('lost', 'archived', 80)
+ON CONFLICT (crm_stage) DO NOTHING;
+```
+
+### Deferred to follow-up PRs
+
+- **Workflow → CRM triggers** (two-way sync): "Build started" /
+  "Build complete" / "Ready" in the shop pushing the deal stage
+  back through `in_production` → `delivered`.
+- **Conflict resolution**: stage transition rules with manager
+  override + audit log (`stage_overrides` table).
+- **Notification routing on cross-module sync**: notify shop
+  manager on CRM stage changes; notify sales rep on workflow
+  stage changes. Today only an activity-feed entry is written.
+- **Event log table** for richer pub/sub / debugging.
+- **Direct entry in Workflow** auto-creating a minimal CRM deal
+  (currently /workflow still creates WOs off bare quotes; those
+  won't have a deal until linked).
+- **Lifecycle stage expansion**: add the richer stages from the
+  spec (Spec Approval, Vehicle Procurement, Upfit Scheduled,
+  Compliance/Inspection, Invoiced, Paid/Closed) to the deal stage
+  enum and remap.
+
 ## Deals (not yet built)
 
 - [ ] Pipeline / kanban view with drag-and-drop between stages.

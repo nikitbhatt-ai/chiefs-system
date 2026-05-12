@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { deals } from "@/db/schema";
+import { syncDealToWorkflow } from "@/lib/dealTriggers";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -33,8 +34,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   ]) {
     if (f in body) update[f] = body[f];
   }
+  const [existing] = await db.select({ stage: deals.stage }).from(deals).where(eq(deals.id, id));
   const [row] = await db.update(deals).set(update).where(eq(deals.id, id)).returning();
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
+  if (existing && typeof update.stage === "string" && update.stage !== existing.stage) {
+    await syncDealToWorkflow(id, String(update.stage), existing.stage);
+  }
   return NextResponse.json(row);
 }
 

@@ -6,7 +6,7 @@ import { deals, dealCredentials } from "@/db/schema";
 import { canAdvanceTo, type DealStage } from "@/lib/pipelines";
 import { isCredentialActive } from "@/lib/credentials";
 import { stageForBucket, type BucketSlug, PIPELINE_BUCKETS } from "@/lib/pipelineBuckets";
-import { maybeCreateDocReminder, maybePromoteWonDeal } from "@/lib/dealTriggers";
+import { maybeCreateDocReminder, maybePromoteWonDeal, syncDealToWorkflow } from "@/lib/dealTriggers";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +58,7 @@ export async function POST(
 
   const promotion = await maybePromoteWonDeal(id, targetStage, d.stage);
   const reminder = await maybeCreateDocReminder(id, targetStage, d.stage);
+  const sync = await syncDealToWorkflow(id, targetStage, d.stage);
 
   return NextResponse.json({
     ok: true,
@@ -65,5 +66,6 @@ export async function POST(
     promotedQuoteId: promotion.ok ? promotion.promotedQuoteId : null,
     createdWorkOrderId: promotion.ok ? promotion.createdWorkOrderId : null,
     reminderTaskId: reminder.taskId,
+    workflowSync: sync.ok ? { workOrderId: sync.workOrderId, workflowStage: sync.workflowStage, created: sync.created } : null,
   });
 }

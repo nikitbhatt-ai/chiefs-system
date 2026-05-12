@@ -170,6 +170,18 @@ export const pipelineStageSla = pgTable("pipeline_stage_sla", {
   index("pipeline_stage_sla_lookup_idx").on(t.pipelineSlug, t.stage),
 ]);
 
+// CRM (deal) stage -> Workflow (work order) stage mapping. Editable by
+// admins via /settings/stage-mapping. A row whose workflow_stage is NULL
+// means the deal stage is pre-shop and does not appear on the workflow
+// board. `archived` is a sentinel for lost / closed deals that should be
+// hidden from the active workflow Kanban but kept for audit.
+export const stageMapping = pgTable("stage_mapping", {
+  crmStage: text("crm_stage").primaryKey(),
+  workflowStage: text("workflow_stage"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
 export const dealComms = pgTable("deal_comms", {
   id: uuid("id").defaultRandom().primaryKey(),
   dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
@@ -260,6 +272,7 @@ export const workOrders = pgTable("work_orders", {
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),
   quoteId: uuid("quote_id").references(() => quotes.id),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
   assignedTo: uuid("assigned_to").references(() => users.id),
   status: text("status").notNull().default("open"),
   priority: text("priority"),

@@ -13,6 +13,7 @@ import { bucketForStage } from "@/lib/pipelineBuckets";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline } from "@/lib/pipelines";
 import { notify } from "@/lib/notifications";
+import { loadStageMapping, mapCrmToWorkflow, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -174,4 +175,100 @@ export async function maybeCreateDocReminder(
     });
   }
   return { created: true, taskId: task?.id ?? null };
+}
+
+// CRM -> Workflow one-way sync. Whenever a deal's CRM stage changes,
+// find the work order that represents this deal (linked via deal_id, or
+// indirectly via the deal's most recent quote) and update its status to
+// the mapped workflow stage. Creates a work order on first cross into a
+// shop-visible stage. Skips when:
+//   - the mapped workflow stage is null (CRM stage is pre-shop)
+//   - the new and previous stages map to the same workflow stage
+// On the lost transition the WO is parked at status="archived" so it
+// drops off the active board but stays accessible for audit.
+export async function syncDealToWorkflow(
+  dealId: string,
+  newStage: string,
+  prevStage: string | null,
+): Promise<
+  | { ok: true; workOrderId: string; workflowStage: string; created: boolean }
+  | { ok: false; reason: "no_target" | "same_target" | "no_deal" }
+> {
+  const [d] = await db.select().from(deals).where(eq(deals.id, dealId));
+  if (!d) return { ok: false, reason: "no_deal" };
+
+  const mapping = await loadStageMapping();
+  const target = mapCrmToWorkflow(newStage, mapping);
+  if (!target) return { ok: false, reason: "no_target" };
+
+  if (prevStage) {
+    const prevTarget = mapCrmToWorkflow(prevStage, mapping);
+    if (prevTarget === target) return { ok: false, reason: "same_target" };
+  }
+
+  // 1) Direct link by deal_id. 2) Fallback to a WO linked through a quote
+  // that already references this deal. 3) Otherwise create a new WO.
+  let [wo] = await db.select().from(workOrders).where(eq(workOrders.dealId, dealId)).limit(1);
+  if (!wo) {
+    const [q] = await db
+      .select()
+      .from(quotes)
+      .where(eq(quotes.dealId, dealId))
+      .orderBy(desc(quotes.updatedAt))
+      .limit(1);
+    if (q) {
+      const [woByQuote] = await db.select().from(workOrders).where(eq(workOrders.quoteId, q.id)).limit(1);
+      if (woByQuote) {
+        await db.update(workOrders).set({ dealId, updatedAt: new Date() }).where(eq(workOrders.id, woByQuote.id));
+        wo = { ...woByQuote, dealId };
+      }
+    }
+  }
+
+  let created = false;
+  if (!wo) {
+    if (target === "archived") {
+      // Don't materialize a brand-new archived WO for a deal that never
+      // had one. Just record the sync on the activity feed and bail.
+      await db.insert(dealActivity).values({
+        dealId,
+        kind: "workflow_sync",
+        body: `Deal lost — no workflow record to archive.`,
+      });
+      return { ok: false, reason: "no_target" };
+    }
+    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+    const [q] = await db
+      .select()
+      .from(quotes)
+      .where(eq(quotes.dealId, dealId))
+      .orderBy(desc(quotes.updatedAt))
+      .limit(1);
+    const [inserted] = await db
+      .insert(workOrders)
+      .values({
+        woNumber,
+        customerId: d.customerId ?? null,
+        quoteId: q?.id ?? null,
+        dealId,
+        status: target,
+      })
+      .returning();
+    wo = inserted;
+    created = true;
+  } else if (wo.status !== target) {
+    await db.update(workOrders).set({ status: target, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
+  }
+
+  const label = WORKFLOW_STAGE_LABELS[target] ?? target;
+  await db.insert(dealActivity).values({
+    dealId,
+    kind: "workflow_sync",
+    body: created
+      ? `Auto-synced: created workflow record at "${label}" (from CRM stage ${newStage.replace(/_/g, " ")}).`
+      : `Auto-synced to workflow: ${label} (from CRM stage ${newStage.replace(/_/g, " ")}).`,
+    metadata: { workflowStage: target, workOrderId: wo!.id, source: "crm_stage_change" },
+  });
+
+  return { ok: true, workOrderId: wo!.id, workflowStage: target, created };
 }
