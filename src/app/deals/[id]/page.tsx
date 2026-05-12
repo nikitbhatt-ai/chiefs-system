@@ -23,6 +23,8 @@ import {
 } from "@/lib/tracks";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { categoryForKind } from "@/lib/customerDocuments";
+import { parseMentions } from "@/lib/mentions";
+import { notify, notifyMany } from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +79,63 @@ export default async function DealEntityPage({
     if (!session?.user) return;
     const body = String(formData.get("body") ?? "").trim();
     if (!body) return;
-    await db.insert(dealActivity).values({ dealId: id, authorId: session.user.id, kind: "note", body });
+    const parentIdRaw = String(formData.get("parentId") ?? "").trim();
+    const parentId = parentIdRaw || null;
+
+    const allUsers = await db
+      .select({ id: users.id, username: users.username, name: users.name, email: users.email })
+      .from(users)
+      .where(eq(users.active, true));
+    const { userIds: mentionedIds } = parseMentions(body, allUsers);
+
+    const [inserted] = await db
+      .insert(dealActivity)
+      .values({
+        dealId: id,
+        authorId: session.user.id,
+        kind: parentId ? "reply" : "note",
+        body,
+        parentId,
+        mentions: mentionedIds,
+      })
+      .returning({ id: dealActivity.id });
+
+    const customerName = customer?.name ?? "Deal";
+    const link = `/deals/${id}?tab=activity`;
+    const actorName = (session.user as { name?: string; email?: string }).name ?? (session.user as { email?: string }).email ?? "Someone";
+
+    if (mentionedIds.length > 0) {
+      await notifyMany(
+        mentionedIds.filter((uid) => uid !== session.user!.id),
+        {
+          kind: "mention",
+          title: `${actorName} mentioned you on ${customerName}`,
+          body: body.slice(0, 200),
+          link,
+          dealId: id,
+          actorId: session.user.id,
+        },
+      );
+    }
+
+    if (parentId) {
+      const [parent] = await db
+        .select({ authorId: dealActivity.authorId })
+        .from(dealActivity)
+        .where(eq(dealActivity.id, parentId));
+      if (parent?.authorId && parent.authorId !== session.user.id && !mentionedIds.includes(parent.authorId)) {
+        await notify(parent.authorId, {
+          kind: "comment_reply",
+          title: `${actorName} replied to your comment on ${customerName}`,
+          body: body.slice(0, 200),
+          link,
+          dealId: id,
+          actorId: session.user.id,
+        });
+      }
+    }
+
+    void inserted;
     revalidatePath(`/deals/${id}`);
   }
 
@@ -214,15 +272,28 @@ export default async function DealEntityPage({
     const title = String(formData.get("title") ?? "").trim();
     if (!title) return;
     const dueRaw = String(formData.get("dueDate") ?? "").trim();
+    const assignedTo = String(formData.get("assignedTo") ?? "").trim() || null;
     await db.insert(dealTasks).values({
       dealId: id,
       title,
       description: String(formData.get("description") ?? "").trim() || null,
-      assignedTo: String(formData.get("assignedTo") ?? "").trim() || null,
+      assignedTo,
       department: String(formData.get("department") ?? "").trim() || null,
       dueDate: dueRaw ? new Date(dueRaw) : null,
       createdBy: session.user.id,
     });
+    if (assignedTo && assignedTo !== session.user.id) {
+      const actorName = (session.user as { name?: string; email?: string }).name ?? (session.user as { email?: string }).email ?? "Someone";
+      const customerName = customer?.name ?? "a deal";
+      await notify(assignedTo, {
+        kind: "task_assigned",
+        title: `${actorName} assigned you a task on ${customerName}`,
+        body: title,
+        link: `/deals/${id}?tab=tasks`,
+        dealId: id,
+        actorId: session.user.id,
+      });
+    }
     revalidatePath(`/deals/${id}`);
   }
 
@@ -582,27 +653,69 @@ export default async function DealEntityPage({
         );
       })()}
 
-      {tab === "activity" && (
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
-        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
-        <form action={postNote} className="flex gap-2">
-          <textarea name="body" rows={2} placeholder="Post an internal note (visible to staff)…" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs font-body text-white placeholder:text-zinc-500" />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 self-start">Post</button>
-        </form>
-        {activity.length === 0 ? (<p className="text-xs text-zinc-500 font-body">No activity yet.</p>) : (
-          <ul className="space-y-2">
-            {activity.map((a) => (
-              <li key={a.id} className="bg-black/30 border border-white/5 rounded-md p-2.5 text-xs font-body">
-                <div className="flex items-center justify-between mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                  <span>{a.kind} · {(a.authorId && authorMap.get(a.authorId)) ?? "system"} · {new Date(a.createdAt).toLocaleString()}</span>
+      {tab === "activity" && (() => {
+        // Build a thread tree: top-level rows (parentId == null) ordered newest
+        // first; replies hung under their parent in chronological order.
+        const byParent = new Map<string, typeof activity>();
+        const roots: typeof activity = [];
+        for (const a of activity) {
+          if (a.parentId) {
+            const arr = byParent.get(a.parentId) ?? [];
+            arr.push(a);
+            byParent.set(a.parentId, arr);
+          } else {
+            roots.push(a);
+          }
+        }
+        for (const [, arr] of byParent) arr.sort((x, y) => new Date(x.createdAt).getTime() - new Date(y.createdAt).getTime());
+        const renderNote = (a: (typeof activity)[number], depth: number) => {
+          const replies = byParent.get(a.id) ?? [];
+          const mentions = Array.isArray(a.mentions) ? (a.mentions as string[]) : [];
+          return (
+            <li key={a.id} className={`bg-black/30 border border-white/5 rounded-md p-2.5 text-xs font-body ${depth > 0 ? "ml-4 md:ml-6" : ""}`}>
+              <div className="flex items-center justify-between mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
+                <span>{a.kind} · {(a.authorId && authorMap.get(a.authorId)) ?? "system"} · {new Date(a.createdAt).toLocaleString()}</span>
+              </div>
+              {a.body && (<div className="whitespace-pre-wrap text-white">{a.body}</div>)}
+              {mentions.length > 0 && (
+                <div className="mt-1 text-[10px] text-amber-300 font-body">
+                  @{mentions.map((m) => authorMap.get(m) ?? "user").join(", @")}
                 </div>
-                {a.body && (<div className="whitespace-pre-wrap text-white">{a.body}</div>)}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      )}
+              )}
+              {(a.kind === "note" || a.kind === "reply") && (
+                <details className="mt-2">
+                  <summary className="text-[10px] uppercase tracking-wider text-zinc-500 hover:text-amber-300 cursor-pointer">Reply</summary>
+                  <form action={postNote} className="flex gap-2 mt-1.5">
+                    <input type="hidden" name="parentId" value={a.id} />
+                    <textarea name="body" rows={2} placeholder="Reply… @mention someone with @username" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-1.5 text-xs font-body text-white placeholder:text-zinc-500" />
+                    <button type="submit" className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1 self-start">Post reply</button>
+                  </form>
+                </details>
+              )}
+              {replies.length > 0 && (
+                <ul className="space-y-2 mt-2">
+                  {replies.map((r) => renderNote(r, depth + 1))}
+                </ul>
+              )}
+            </li>
+          );
+        };
+
+        return (
+          <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+            <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
+            <form action={postNote} className="flex gap-2">
+              <textarea name="body" rows={2} placeholder="Post an internal note (@mention someone with @username)…" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs font-body text-white placeholder:text-zinc-500" />
+              <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 self-start">Post</button>
+            </form>
+            {roots.length === 0 ? (
+              <p className="text-xs text-zinc-500 font-body">No activity yet.</p>
+            ) : (
+              <ul className="space-y-2">{roots.map((a) => renderNote(a, 0))}</ul>
+            )}
+          </div>
+        );
+      })()}
 
       {tab === "tasks" && (
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">

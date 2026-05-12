@@ -376,6 +376,70 @@ Behaviour:
 - One-way: moving the deal back out of Won does NOT reverse the
   quote workflow or delete the work order.
 
+## Communication & cross-departmental tools
+
+The biggest pain: people not knowing what's happening on a deal. Goal is
+real-time visibility across sales / shop / parts.
+
+### What this PR adds (PR 15)
+
+- [x] **Notifications table** — `notifications` (user_id, kind, title,
+      body, link, deal_id, actor_id, read_at, created_at). Bell icon
+      in the global header with unread-count badge. `/notifications`
+      page lists everything, mark-as-read per row, mark-all-as-read,
+      delete.
+- [x] **@mention parser** — `src/lib/mentions.ts` matches `@username`
+      (case-insensitive) against `users.username`, falls back to
+      compact name forms (`first.last`, `firstlast`, `first`). Parsed
+      mention IDs land on `deal_activity.mentions` (jsonb) and a
+      `mention` notification fires for each matched user, linking to
+      `/deals/[id]?tab=activity`.
+- [x] **Threaded comments** — `deal_activity.parent_id` already
+      existed; activity tab now groups roots vs replies, indents
+      replies under their parent, and exposes a per-comment Reply
+      `<details>` form that posts with the parent's `id`. Replying to
+      a comment also fires a `comment_reply` notification to the
+      parent's author (unless they were already in the mention list
+      or they're the same person).
+- [x] **Task-assignment notifications** — `createTask` now fires a
+      `task_assigned` notification to the assignee.
+- [x] **Doc-reminder notifications** — when PR 14's
+      `maybeCreateDocReminder` drops a task, the assignee also gets a
+      `doc_reminder` notification.
+- [x] **"My open tasks" panel** on the home dashboard — lists every
+      open `deal_tasks` row where `assigned_to = current user`, with
+      customer name, vehicle, due date, overdue flagging, and a link
+      back to the deal's Tasks tab.
+
+### Schema additions (PR 15)
+
+```sql
+ALTER TABLE deal_activity ADD COLUMN IF NOT EXISTS mentions jsonb DEFAULT '[]'::jsonb;
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  kind text NOT NULL,
+  title text NOT NULL,
+  body text,
+  link text,
+  deal_id uuid REFERENCES deals(id) ON DELETE CASCADE,
+  actor_id uuid REFERENCES users(id),
+  read_at timestamp,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id);
+CREATE INDEX IF NOT EXISTS notifications_unread_idx ON notifications (user_id, read_at);
+```
+
+### Deferred (next PR)
+
+- `notification_rules` table + admin UI to configure (from_stage,
+  to_stage, customer_type, recipient_role) routing for stage changes.
+- Per-stage required-field validation (422 with missing fields).
+- Vercel Cron daily SLA scan + alert.
+- Email delivery (Resend or similar) for in-app notifications.
+
 ## Deals (not yet built)
 
 - [ ] Pipeline / kanban view with drag-and-drop between stages.
