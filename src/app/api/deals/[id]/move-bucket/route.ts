@@ -93,9 +93,18 @@ export async function POST(
     });
   }
 
-  const promotion = await maybePromoteWonDeal(id, targetStage, d.stage);
-  const reminder = await maybeCreateDocReminder(id, targetStage, d.stage);
-  const sync = await syncDealToWorkflow(id, targetStage, d.stage);
+  const promotion = await maybePromoteWonDeal(id, targetStage, d.stage).catch((err) => {
+    console.error("maybePromoteWonDeal failed:", err);
+    return { ok: false as const, reason: "no_quote" as const };
+  });
+  const reminder = await maybeCreateDocReminder(id, targetStage, d.stage).catch((err) => {
+    console.error("maybeCreateDocReminder failed:", err);
+    return { created: false, taskId: null };
+  });
+  const sync = await syncDealToWorkflow(id, targetStage, d.stage).catch((err) => {
+    console.error("syncDealToWorkflow failed:", err);
+    return { ok: false as const, reason: "no_deal" as const };
+  });
 
   return NextResponse.json({
     ok: true,
