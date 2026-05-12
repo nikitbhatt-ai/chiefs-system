@@ -1,12 +1,10 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { deals, customers, users, dealCredentials, customerDocuments } from "@/db/schema";
-import { and } from "drizzle-orm";
+import { deals, customers, users, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { isCredentialActive } from "@/lib/credentials";
-import { docForPipeline } from "@/lib/documentTemplates";
-import { maybePromoteWonDeal } from "@/lib/dealTriggers";
+import { maybeCreateDocReminder, maybePromoteWonDeal } from "@/lib/dealTriggers";
 import {
   PIPELINES,
   PIPELINE_SLUGS,
@@ -83,23 +81,7 @@ async function changeStage(formData: FormData) {
     .where(eq(dealCredentials.dealId, id));
   const hasActiveCredential = creds.some((c) => isCredentialActive(c));
 
-  const docSpec = docForPipeline(d.pipeline);
-  let hasPipelineDocument = true;
-  if (docSpec) {
-    const docRows = await db
-      .select({ id: customerDocuments.id })
-      .from(customerDocuments)
-      .where(and(eq(customerDocuments.associatedDealId, id), eq(customerDocuments.kind, docSpec.slug), eq(customerDocuments.isCurrentVersion, true)))
-      .limit(1);
-    hasPipelineDocument = docRows.length > 0;
-  }
-
-  const transition = canAdvanceTo(d.pipeline, d.stage, requested, {
-    hasActiveCredential,
-    hasPipelineDocument,
-    pipelineDocumentRequiredBeforeStage: docSpec?.requiredBeforeStage,
-    pipelineDocumentLabel: docSpec?.label,
-  });
+  const transition = canAdvanceTo(d.pipeline, d.stage, requested, { hasActiveCredential });
   if (!transition.ok) {
     throw new Error(transition.reason);
   }
@@ -109,6 +91,7 @@ async function changeStage(formData: FormData) {
     .set({ stage: requested as DealStage, currentStageEnteredAt: new Date(), updatedAt: new Date() })
     .where(eq(deals.id, id));
   await maybePromoteWonDeal(id, requested, d.stage);
+  await maybeCreateDocReminder(id, requested, d.stage);
   revalidatePath("/deals");
   revalidatePath(`/deals/${id}`);
   revalidatePath("/workflow");

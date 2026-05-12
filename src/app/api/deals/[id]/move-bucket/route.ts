@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { deals, dealCredentials, customerDocuments } from "@/db/schema";
+import { deals, dealCredentials } from "@/db/schema";
 import { canAdvanceTo, type DealStage } from "@/lib/pipelines";
 import { isCredentialActive } from "@/lib/credentials";
-import { docForPipeline } from "@/lib/documentTemplates";
 import { stageForBucket, type BucketSlug, PIPELINE_BUCKETS } from "@/lib/pipelineBuckets";
-import { maybePromoteWonDeal } from "@/lib/dealTriggers";
+import { maybeCreateDocReminder, maybePromoteWonDeal } from "@/lib/dealTriggers";
 
 export const dynamic = "force-dynamic";
 
@@ -41,34 +40,13 @@ export async function POST(
     return NextResponse.json({ ok: true, stage: d.stage });
   }
 
-  // Resolve gate context the same way /deals changeStage does.
   const creds = await db
     .select({ verifiedAt: dealCredentials.verifiedAt, expiresAt: dealCredentials.expiresAt })
     .from(dealCredentials)
     .where(eq(dealCredentials.dealId, id));
   const hasActiveCredential = creds.some((c) => isCredentialActive(c));
 
-  const docSpec = docForPipeline(d.pipeline);
-  let hasPipelineDocument = true;
-  if (docSpec) {
-    const docRows = await db
-      .select({ id: customerDocuments.id })
-      .from(customerDocuments)
-      .where(and(
-        eq(customerDocuments.associatedDealId, id),
-        eq(customerDocuments.kind, docSpec.slug),
-        eq(customerDocuments.isCurrentVersion, true),
-      ))
-      .limit(1);
-    hasPipelineDocument = docRows.length > 0;
-  }
-
-  const transition = canAdvanceTo(d.pipeline, d.stage, targetStage, {
-    hasActiveCredential,
-    hasPipelineDocument,
-    pipelineDocumentRequiredBeforeStage: docSpec?.requiredBeforeStage,
-    pipelineDocumentLabel: docSpec?.label,
-  });
+  const transition = canAdvanceTo(d.pipeline, d.stage, targetStage, { hasActiveCredential });
   if (!transition.ok) {
     return NextResponse.json({ error: transition.reason }, { status: 400 });
   }
@@ -79,11 +57,13 @@ export async function POST(
     .where(eq(deals.id, id));
 
   const promotion = await maybePromoteWonDeal(id, targetStage, d.stage);
+  const reminder = await maybeCreateDocReminder(id, targetStage, d.stage);
 
   return NextResponse.json({
     ok: true,
     stage: targetStage,
     promotedQuoteId: promotion.ok ? promotion.promotedQuoteId : null,
     createdWorkOrderId: promotion.ok ? promotion.createdWorkOrderId : null,
+    reminderTaskId: reminder.taskId,
   });
 }

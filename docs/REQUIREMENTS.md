@@ -103,16 +103,19 @@ is reachable from anywhere.
       Credential track only appears for pipelines with a hard gate.
       Build track sources its current stage from the latest quote's
       `workflowStage` (or "not started" if no quote yet).
-- [x] **Per-pipeline document templates** (PR 4): three docs defined in
-      `src/lib/documentTemplates.ts` — Government PO Intake, Walk-In
-      Credential Intake, Commercial Deposit Receipt. Each has a
-      generate (print-friendly HTML at
+- [x] **Per-pipeline document templates** (PR 4, softened in PR 14):
+      three docs defined in `src/lib/documentTemplates.ts` — Government
+      PO Intake, Walk-In Credential Intake, Commercial Deposit Receipt.
+      Each has a generate (print-friendly HTML at
       `/deals/[id]/documents/[kind]/print`) and upload action on the
       deal page's Documents panel. Uploaded copies go to Vercel Blob
-      and a `files` row with `kind = pipeline_doc:<slug>`. Stage gate:
-      `canAdvanceTo` rejects advancement to/past
-      `pipelineDocumentRequiredBeforeStage` unless a matching `files`
-      row exists. Generic "other attachments" upload also available.
+      and land in `customer_documents` with
+      `kind = pipeline_doc:<slug>`. Originally a hard `canAdvanceTo`
+      gate; in PR 14 this became a **soft reminder**: when the deal
+      crosses into the doc's required-by stage without it attached,
+      `maybeCreateDocReminder` drops an open task on the deal
+      (assigned to the deal's assignee, department=sales) instead of
+      blocking the move. Deduped so re-saves don't spam.
 
 ### Schema additions (PR 1)
 

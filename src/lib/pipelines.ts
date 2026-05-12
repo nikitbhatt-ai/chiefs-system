@@ -164,18 +164,11 @@ export function canAdvanceTo(
     }
   }
 
-  if (context.pipelineDocumentRequiredBeforeStage) {
-    const docGateIdx = pipeline.stages.indexOf(
-      context.pipelineDocumentRequiredBeforeStage as DealStage,
-    );
-    if (docGateIdx >= 0 && toIdx >= docGateIdx && !context.hasPipelineDocument) {
-      const docLabel = context.pipelineDocumentLabel ?? "pipeline document";
-      return {
-        ok: false,
-        reason: `${pipeline.label} requires the ${docLabel} to be attached before advancing to ${stageLabel(context.pipelineDocumentRequiredBeforeStage)}. Generate or upload it from the deal's Documents panel.`,
-      };
-    }
-  }
+  // Pipeline-document requirement is enforced as a soft reminder instead
+  // of a hard gate — see `maybeCreateDocReminder` in src/lib/dealTriggers.ts.
+  // Sales reps need to be able to move deals forward even when the
+  // associated paperwork hasn't been filed yet; the reminder task chases
+  // it down rather than blocking the workflow.
 
   return { ok: true };
 }
