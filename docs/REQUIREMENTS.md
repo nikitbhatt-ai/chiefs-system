@@ -201,14 +201,63 @@ the team can pull up the full history in seconds.
       expiry: already expired, within 30 days, 30–60, 60–90. Each
       entry jumps to its deal. Primary contacts list deferred — no
       customer-contacts table exists yet.
-- [ ] **Role-based access control** — later. Sales = quotes / POs /
-      correspondence; Shop = spec approvals / WO / photos; Manager+
-      sees credentials / contracts / financials.
-- [ ] **Audit log** of upload / view / download / edit / delete actions
-      with `user_id`, `ip_address`, timestamp — later.
-- [ ] **Expiration alerts** scheduled scan for credentials & contracts
-      approaching expiration, dashboard surface + email to account
-      owner — later.
+- [x] **Role-based access control** (PR 20). `CATEGORY_ROLE_ACCESS` in
+      `src/lib/customerDocuments.ts` maps each of the 10 categories to
+      the roles that can read AND write it. Defaults from the spec:
+      - sales + accountant: quotes, POs, correspondence (sales only)
+      - warehouse + tech: spec_approvals, photos_build
+      - accountant: invoices (also manager+)
+      - manager + admin: all categories — credentials, contracts,
+        invoices, compliance are manager+ only
+      Enforced on the `/crm/[id]` page (`docFilters` narrowed by
+      `visibleCategoriesFor(role)`; upload + search dropdowns filtered
+      to allowed categories) and re-checked in both the
+      `uploadCustomerDoc` and `deleteCustomerDoc` server actions so
+      the server can't be bypassed by a hand-crafted POST. The
+      `/api/customer-documents/[id]/download` route checks too.
+- [x] **Audit log** (PR 20). New `document_audit_log` table
+      `(id, document_id, customer_id, user_id, action, ip_address,
+      created_at)`, indexed on customer_id + document_id. Logged on
+      upload (with `action = upload` or `upload_new_version` when
+      versioning kicks in), delete, and download (the new
+      `/api/customer-documents/[id]/download` wrapper records the
+      view + redirects to the blob URL). IP is best-effort from
+      `x-forwarded-for`. Document list links go through the
+      download wrapper instead of the raw blob URL so normal
+      in-app usage is captured.
+- [x] **Expiration alerts** (PR 20). Daily Vercel Cron at 13:00 UTC
+      hits `/api/cron/expiring-credentials`. The endpoint scans
+      `deal_credentials` for rows whose `expires_at` is within 30
+      days (or already past), filtered by
+      `expiration_notified_at IS NULL OR < now − 7 days` for dedup.
+      For each hit it fires a `doc_reminder` notification to the
+      deal's `assigned_to` (with credential type, customer name,
+      and days remaining or "expired"), then stamps
+      `expiration_notified_at` so the same row only fires once per
+      week as the deadline approaches. Authorization: rejects
+      anything missing `Authorization: Bearer ${CRON_SECRET}`.
+      `vercel.json` registers the schedule.
+
+### Schema additions (PR 20)
+
+```sql
+ALTER TABLE deal_credentials ADD COLUMN IF NOT EXISTS expiration_notified_at timestamp;
+
+CREATE TABLE IF NOT EXISTS document_audit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_id uuid REFERENCES customer_documents(id) ON DELETE SET NULL,
+  customer_id uuid REFERENCES customers(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES users(id),
+  action text NOT NULL,
+  ip_address text,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS document_audit_log_customer_idx ON document_audit_log (customer_id);
+CREATE INDEX IF NOT EXISTS document_audit_log_document_idx ON document_audit_log (document_id);
+```
+
+Also set `CRON_SECRET` on Vercel (Settings → Environment Variables);
+Vercel attaches it as `Authorization: Bearer …` on scheduled hits.
 
 ### Schema migration (PR 8)
 

@@ -368,6 +368,22 @@ export const customerDocuments = pgTable("customer_documents", {
   index("customer_documents_kind_idx").on(t.kind),
 ]);
 
+// Audit trail for every action on a customer_documents row. Captures
+// upload / view / download / delete with the actor and (best-effort)
+// IP. Surfaces on the customer entity page under the document folder.
+export const documentAuditLog = pgTable("document_audit_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  documentId: uuid("document_id").references(() => customerDocuments.id, { onDelete: "set null" }),
+  customerId: uuid("customer_id").references(() => customers.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").references(() => users.id),
+  action: text("action").notNull(),
+  ipAddress: text("ip_address"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("document_audit_log_customer_idx").on(t.customerId),
+  index("document_audit_log_document_idx").on(t.documentId),
+]);
+
 export const agentLogs = pgTable("agent_logs", {
   id: uuid("id").defaultRandom().primaryKey(),
   department: text("department").notNull(),
@@ -482,6 +498,7 @@ export const dealCredentials = pgTable("deal_credentials", {
   documentUrl: text("document_url"),
   notes: text("notes"),
   restrictedEquipment: jsonb("restricted_equipment"),
+  expirationNotifiedAt: timestamp("expiration_notified_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("deal_credentials_deal_idx").on(t.dealId)]);
