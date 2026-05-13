@@ -38,15 +38,41 @@ async function moveQuoteStage(formData: FormData) {
   const stage = String(formData.get("stage") ?? "");
   if (!id || !STAGE_KEYS.includes(stage)) return;
 
-  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
-  if (!q) return;
+  // Whole body wrapped — any throw here would otherwise surface as a
+  // generic Next.js application error after the revalidation. Logging
+  // the root cause lets us debug from Vercel logs without showing the
+  // user a useless crash screen.
+  try {
+    const [q] = await db
+      .select({
+        id: quotes.id,
+        quoteNumber: quotes.quoteNumber,
+        customerId: quotes.customerId,
+        dealId: quotes.dealId,
+        lineItems: quotes.lineItems,
+        workflowStage: quotes.workflowStage,
+      })
+      .from(quotes)
+      .where(eq(quotes.id, id));
+    if (!q) return;
 
-  let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
-  const prevWorkflowStage = wo?.status ?? null;
-  if (!wo && stage !== "estimate") {
-    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
-    const inserted = await db
-      .insert(workOrders)
+    let [wo] = await db
+      .select({
+        id: workOrders.id,
+        woNumber: workOrders.woNumber,
+        customerId: workOrders.customerId,
+        quoteId: workOrders.quoteId,
+        dealId: workOrders.dealId,
+        status: workOrders.status,
+        partsConsumed: workOrders.partsConsumed,
+      })
+      .from(workOrders)
+      .where(eq(workOrders.quoteId, id));
+    const prevWorkflowStage = wo?.status ?? null;
+    if (!wo && stage !== "estimate") {
+      const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+      const inserted = await db
+        .insert(workOrders)
       .values({
         woNumber,
         customerId: q.customerId ?? null,
@@ -125,6 +151,12 @@ async function moveQuoteStage(formData: FormData) {
   revalidatePath("/inventory");
   revalidatePath("/work-orders");
   if (wo?.dealId) revalidatePath(`/deals/${wo.dealId}`);
+  } catch (err) {
+    console.error("moveQuoteStage failed:", err);
+    // Best-effort revalidate so the user sees whatever state did persist
+    // rather than stale data with an error overlay.
+    try { revalidatePath("/workflow"); } catch {}
+  }
 }
 
 function fmtMoney(v: string | null | undefined) {
@@ -135,7 +167,24 @@ function fmtMoney(v: string | null | undefined) {
 }
 
 export default async function WorkflowPage() {
-  const quoteRows = await db.select().from(quotes).orderBy(desc(quotes.createdAt));
+  // Explicit column projection so a schema column missing from the live
+  // database (e.g. a future ALTER not yet run) can't break the render.
+  // Only project what the page actually uses.
+  const quoteRows = await db
+    .select({
+      id: quotes.id,
+      quoteNumber: quotes.quoteNumber,
+      customerId: quotes.customerId,
+      dealId: quotes.dealId,
+      status: quotes.status,
+      grandTotal: quotes.grandTotal,
+      lineItems: quotes.lineItems,
+      workflowStage: quotes.workflowStage,
+      notes: quotes.notes,
+      createdAt: quotes.createdAt,
+    })
+    .from(quotes)
+    .orderBy(desc(quotes.createdAt));
 
   const customerIds = Array.from(
     new Set(quoteRows.map((r) => r.customerId).filter(Boolean) as string[]),
