@@ -277,11 +277,20 @@ function DealModal({
   onClose: () => void;
   onChangeStage: (stage: string) => Promise<void>;
 }) {
+  const router = useRouter();
+  const [, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
   const [stage, setStage] = useState(card.stage);
   const [saving, setSaving] = useState(false);
   return (
     <ModalShell title={`${card.customerName}${card.vehicle ? ` — ${card.vehicle}` : ""}`} onClose={onClose}>
       <div className="space-y-3 text-xs font-body text-zinc-300">
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/40 text-red-200 rounded-md px-3 py-2 flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="text-red-300 hover:text-red-100">dismiss</button>
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Pipeline" value={card.pipelineLabel} />
           <Field label="Stage" value={card.stage.replace(/_/g, " ")} />
@@ -343,12 +352,49 @@ function DealModal({
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
-        <div className="border-t border-white/5 pt-3 flex items-center justify-between text-[11px]">
-          <a href={`/deals/${card.id}`} className="text-amber-400 hover:text-amber-300 font-body font-semibold">
+        <div className="border-t border-white/5 pt-3 flex items-center justify-between gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={async () => {
+              setSaving(true);
+              setError(null);
+              try {
+                const res = await fetch("/api/quotes", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    customerId: card.customerId,
+                    dealId: card.id,
+                    status: "draft",
+                  }),
+                });
+                if (!res.ok) {
+                  const body = await res.json().catch(() => ({}));
+                  setError((body as { error?: string }).error ?? `Quote create failed (${res.status})`);
+                  setSaving(false);
+                  return;
+                }
+                const created = (await res.json()) as { id?: string };
+                if (created?.id) {
+                  router.push(`/quotes/${created.id}`);
+                  return;
+                }
+                startTransition(() => router.refresh());
+              } catch (e) {
+                setError(e instanceof Error ? e.message : "Network error");
+              }
+              setSaving(false);
+            }}
+            disabled={saving}
+            className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1.5 disabled:opacity-40"
+          >
+            {saving ? "Working…" : "+ Create quote"}
+          </button>
+          <a href={`/deals/${card.id}`} className="text-amber-400 hover:text-amber-300 font-body font-semibold text-[11px]">
             Open full deal page →
           </a>
           {card.customerId && (
-            <a href={`/crm/${card.customerId}`} className="text-zinc-400 hover:text-white font-body">
+            <a href={`/crm/${card.customerId}`} className="text-zinc-400 hover:text-white font-body text-[11px]">
               Customer folder
             </a>
           )}
