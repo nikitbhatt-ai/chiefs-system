@@ -3,6 +3,7 @@ import { desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { quotes } from "@/db/schema";
+import { upsertQuoteLink } from "@/lib/customerDocLinks";
 
 export async function GET() {
   const session = await auth();
@@ -30,5 +31,14 @@ export async function POST(req: Request) {
       grandTotal: body.grandTotal != null ? String(body.grandTotal) : "0",
     })
     .returning();
+  // Auto-link the new quote into the customer folder so it appears under
+  // 'Quotes & Estimates' immediately (matches saveQuote behavior).
+  if (row?.id) {
+    try {
+      await upsertQuoteLink(row.id);
+    } catch (err) {
+      console.error("upsertQuoteLink on create failed:", err);
+    }
+  }
   return NextResponse.json(row, { status: 201 });
 }

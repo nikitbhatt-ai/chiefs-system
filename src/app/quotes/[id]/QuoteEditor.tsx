@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type PartOption = {
   id: string;
@@ -150,6 +150,15 @@ export function QuoteEditor({
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
   const [taxRate, setTaxRate] = useState("0");
+  // Controlled status mirrors the prop so the select reflects the latest
+  // value after a save → revalidate cycle. With an uncontrolled
+  // defaultValue, React keeps the original DOM value across re-renders
+  // even after the underlying record changes — that's the 'reverts to
+  // draft' visual bug.
+  const [statusValue, setStatusValue] = useState<typeof status>(status);
+  useEffect(() => {
+    setStatusValue(status);
+  }, [status]);
 
   const totals = useMemo(() => {
     let subtotal = 0;
@@ -239,7 +248,8 @@ export function QuoteEditor({
         </select>
         <select
           name="status"
-          defaultValue={status}
+          value={statusValue}
+          onChange={(e) => setStatusValue(e.target.value as typeof status)}
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         >
           <option value="draft">Draft</option>
