@@ -208,18 +208,32 @@ export function QuoteEditor({
     if (!partId) return;
     const part = parts.find((p) => p.id === partId);
     if (!part) return;
-    setLines((p) => [
-      ...p,
-      {
-        kind: "item",
-        description: `${part.sku} — ${part.name}`,
-        quantity: 1,
-        unitPrice: part.price ? Number(part.price) : 0,
-        discount: 0,
-        discountKind: "pct",
-        partId: part.id,
-      },
-    ]);
+    setLines((prev) => {
+      // If this part is already on the quote as an item line, bump its
+      // quantity by 1 instead of appending a duplicate row.
+      const existingIdx = prev.findIndex(
+        (l) => l.kind === "item" && l.partId === part.id,
+      );
+      if (existingIdx >= 0) {
+        return prev.map((l, i) =>
+          i === existingIdx && l.kind === "item"
+            ? { ...l, quantity: (l.quantity || 0) + 1 }
+            : l,
+        );
+      }
+      return [
+        ...prev,
+        {
+          kind: "item",
+          description: `${part.sku} — ${part.name}`,
+          quantity: 1,
+          unitPrice: part.price ? Number(part.price) : 0,
+          discount: 0,
+          discountKind: "pct",
+          partId: part.id,
+        },
+      ];
+    });
   }
   function addFee(fixed = false) {
     setLines((p) => [

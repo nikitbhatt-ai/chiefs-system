@@ -8,6 +8,8 @@ import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { credentialCoversPart } from "@/lib/credentials";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
 
+export const dynamic = "force-dynamic";
+
 async function saveQuote(formData: FormData) {
   "use server";
   const id = String(formData.get("id") ?? "");
