@@ -4,6 +4,73 @@ This is the running spec of what each module needs. Consult this document
 whenever building or extending a feature. Items marked ✅ are done; others
 are pending and should be addressed when their owning module is built.
 
+## Role-based dashboards (PR 25, Phase 1)
+
+Landing page (`/`) routes to one of three dashboard views based on
+`session.user.role`. Admin / manager / accountant default to Admin
+and can switch views via `?view=sales|operations|admin`; everyone
+else is locked to the default for their role.
+
+Default mapping:
+- `admin`, `manager`, `accountant` → Admin
+- `sales` → Sales
+- `warehouse`, `tech` → Operations
+
+Each view follows the spec layout: top-row KPIs (6 cards), action
+items row, and the shared "My open tasks" panel at the bottom.
+Charts, drill-through links, customization, polling, and
+industry-specific deep-dives are deferred to Phase 2+.
+
+### KPIs (with proxies where data isn't tracked yet)
+
+| View | Cards |
+| --- | --- |
+| Sales | Open Deals · Pipeline Value · Closed This Month · Revenue This Month (proxy: converted quotes) · Win Rate (90d) · Avg Deal Cycle |
+| Operations | Active Builds · Scheduled This Week · Ready for Delivery · Avg Build Days (90d) · On-Time % (proxy: target+30d) · Past Due |
+| Admin | Monthly Revenue (proxy: converted quotes) · Monthly Expenses (proxy: received POs) · Net Profit · Outstanding Receivables (proxy: open won-bucket deals) · Avg Days to Payment (proxy: lead→won) · Avg Time Per Upfit |
+
+Proxy badges (`hint=` on the card) tell the user the metric is an
+approximation until invoicing / payment / delivery-date columns
+land.
+
+### Action items
+
+| View | Panels |
+| --- | --- |
+| Sales | Stalled deals (assigned to me, >14d in stage) · Quotes awaiting response (sent, >5d) · Tasks due today |
+| Operations | Builds awaiting parts · POs arriving this week · QC pending · Late vendor deliveries |
+| Admin | Invoices past due (proxy: converted quotes >30d, deal not delivered) · Large open deals (top 5 by latest-quote value) · Expiring credentials (next 60d) · Inactive customers (delivered but no activity in 6mo) |
+
+Every item links to the underlying entity page.
+
+### Implementation
+
+- `src/lib/dashboard/metrics.ts` — server-side resolvers, one
+  function per (view, section). Pure, no caching layer yet — the
+  spec's TTL caching is Phase 2.
+- `src/components/dashboard/KpiCard.tsx` — reusable metric card,
+  optional `href` makes the whole card clickable.
+- `src/components/dashboard/{Sales,Operations,Admin}Dashboard.tsx`
+  — server components that render their view's KPI row + action
+  items.
+- `src/app/page.tsx` picks the view from role + `?view=` and
+  renders the matching component, then renders the shared "My
+  open tasks" panel below it.
+
+### Deferred (post PR 25)
+
+- **Charts / visualizations** (Phase 3) — pipeline funnel, build
+  status distribution, revenue trend, etc. Will pull a charting
+  dep like recharts when we get there.
+- **Industry-specific deep-dives** (Phase 4) — gov fiscal year
+  pipeline, cooperative contract utilization, vehicle storage
+  aging, build estimation accuracy, top customers / vendors,
+  CLV/CAC.
+- **Customization** (Phase 5) — hide / reorder cards, per-user
+  preferences in `user_dashboard_preferences`.
+- **Polling refresh** (60-90s) + cache TTLs per spec.
+- **Activity feed** per role (live event stream).
+
 ## Cross-cutting requirements (apply to every module)
 
 - [x] **Top navigation** grouped into 5 tabs: Dashboard, Workflow, CRM
