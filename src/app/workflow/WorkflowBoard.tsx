@@ -66,7 +66,9 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setCards(prev);
-        setError((body as { error?: string })?.error ?? `Move rejected (${res.status})`);
+        const b = body as { error?: string; detail?: string };
+        const msg = b.detail ? `${b.error ?? "Move failed"}: ${b.detail}` : b.error ?? `Move rejected (${res.status})`;
+        setError(msg);
         return;
       }
       startTransition(() => router.refresh());
@@ -160,9 +162,13 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
                             {q.status}
                           </span>
                         </div>
-                        <div className="text-xs text-white font-body line-clamp-2">{q.notes ?? "Quote"}</div>
                         {q.customerName ? (
-                          <div className="text-[11px] text-zinc-400 font-body">{q.customerName}</div>
+                          <div className="text-xs text-white font-body font-semibold line-clamp-1">{q.customerName}</div>
+                        ) : (
+                          <div className="text-xs text-zinc-500 italic font-body">No customer linked</div>
+                        )}
+                        {q.notes ? (
+                          <div className="text-[11px] text-zinc-300 font-body line-clamp-2">{q.notes}</div>
                         ) : null}
                         {q.dealId && q.crmStage ? (
                           <a

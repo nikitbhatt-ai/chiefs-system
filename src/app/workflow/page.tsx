@@ -1,6 +1,10 @@
 import { desc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { workOrders, quotes, customers, vehicles, deals } from "@/db/schema";
+
+function joinNonEmpty(parts: (string | number | null | undefined)[], sep: string) {
+  return parts.filter((p) => p != null && String(p).trim() !== "").join(sep);
+}
 import { AppShell } from "@/components/AppShell";
 import { STAGE_COLORS } from "@/lib/pipelines";
 import { WorkflowBoard, type WorkflowCard } from "./WorkflowBoard";
@@ -36,7 +40,7 @@ export default async function WorkflowPage() {
     .from(quotes)
     .orderBy(desc(quotes.createdAt));
 
-  const customerIds = Array.from(new Set(quoteRows.map((r) => r.customerId).filter(Boolean) as string[]));
+  const customerIdsFromQuotes = quoteRows.map((r) => r.customerId).filter(Boolean) as string[];
   const linkedWOs = await db
     .select({ id: workOrders.id, quoteId: workOrders.quoteId, vehicleId: workOrders.vehicleId })
     .from(workOrders);
@@ -45,9 +49,27 @@ export default async function WorkflowPage() {
 
   const dealIds = Array.from(new Set(quoteRows.map((r) => r.dealId).filter(Boolean) as string[]));
   const dealRows = dealIds.length
-    ? await db.select({ id: deals.id, stage: deals.stage }).from(deals).where(inArray(deals.id, dealIds))
+    ? await db
+        .select({
+          id: deals.id,
+          stage: deals.stage,
+          customerId: deals.customerId,
+          vehicleYear: deals.vehicleYear,
+          vehicleMake: deals.vehicleMake,
+          vehicleModel: deals.vehicleModel,
+          vin: deals.vin,
+        })
+        .from(deals)
+        .where(inArray(deals.id, dealIds))
     : [];
-  const dealStageMap = new Map(dealRows.map((d) => [d.id, d.stage]));
+  const dealMap = new Map(dealRows.map((d) => [d.id, d]));
+
+  const customerIds = Array.from(
+    new Set([
+      ...customerIdsFromQuotes,
+      ...(dealRows.map((d) => d.customerId).filter(Boolean) as string[]),
+    ]),
+  );
 
   const [customerRows, vehicleRows] = await Promise.all([
     customerIds.length
@@ -65,18 +87,31 @@ export default async function WorkflowPage() {
 
   const cards: WorkflowCard[] = quoteRows.map((q) => {
     const wo = woByQuote.get(q.id);
-    const vehicle = wo?.vehicleId ? vehicleMap.get(wo.vehicleId) : null;
-    const crmStage = q.dealId ? dealStageMap.get(q.dealId) ?? null : null;
+    const woVehicle = wo?.vehicleId ? vehicleMap.get(wo.vehicleId) : null;
+    const deal = q.dealId ? dealMap.get(q.dealId) ?? null : null;
+    const crmStage = deal?.stage ?? null;
+    // Prefer the deal's customer + vehicle (the canonical CRM record).
+    // Fall back to the quote's customer / linked WO vehicle when no deal
+    // is linked yet (e.g. quote-only entries on the shop board).
+    const customerId = deal?.customerId ?? q.customerId ?? null;
+    const customerName = customerId ? customerMap.get(customerId) ?? null : null;
+    const dealVehicleStr = deal
+      ? joinNonEmpty([deal.vehicleYear, deal.vehicleMake, deal.vehicleModel], " ") || null
+      : null;
+    const woVehicleStr = woVehicle
+      ? `${joinNonEmpty([woVehicle.year, woVehicle.make, woVehicle.model], " ") || "—"}${woVehicle.vin ? ` · ${woVehicle.vin}` : ""}`
+      : null;
+    const vehicleStr = dealVehicleStr
+      ? `${dealVehicleStr}${deal?.vin ? ` · ${deal.vin}` : ""}`
+      : woVehicleStr;
     return {
       id: q.id,
       quoteNumber: q.quoteNumber,
       status: q.status,
       workflowStage: q.workflowStage,
       notes: q.notes,
-      customerName: q.customerId ? customerMap.get(q.customerId) ?? null : null,
-      vehicle: vehicle
-        ? `${[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") || "—"}${vehicle.vin ? ` · ${vehicle.vin}` : ""}`
-        : null,
+      customerName,
+      vehicle: vehicleStr,
       grandTotal: q.grandTotal,
       dealId: q.dealId,
       crmStage,
