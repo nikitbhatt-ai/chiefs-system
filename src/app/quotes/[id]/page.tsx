@@ -25,51 +25,11 @@ async function saveQuote(formData: FormData) {
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) return;
 
-  if (q.dealId) {
-    const [deal] = await db.select().from(deals).where(eq(deals.id, q.dealId));
-    if (deal?.pipeline === "walk_in_credentialed") {
-      const partIds = Array.from(
-        new Set(
-          lines
-            .filter((l): l is Extract<QuoteLine, { kind: "item" }> => l.kind === "item")
-            .map((l) => l.partId)
-            .filter(Boolean) as string[],
-        ),
-      );
-      if (partIds.length > 0) {
-        const partRows = await db
-          .select({
-            id: parts.id,
-            sku: parts.sku,
-            name: parts.name,
-            restricted: parts.restricted,
-            restrictionCategory: parts.restrictionCategory,
-          })
-          .from(parts)
-          .where(inArray(parts.id, partIds));
-        const restrictedParts = partRows.filter((p) => p.restricted);
-        if (restrictedParts.length > 0) {
-          const creds = await db
-            .select({
-              verifiedAt: dealCredentials.verifiedAt,
-              expiresAt: dealCredentials.expiresAt,
-              restrictedEquipment: dealCredentials.restrictedEquipment,
-            })
-            .from(dealCredentials)
-            .where(eq(dealCredentials.dealId, deal.id));
-          const uncovered = restrictedParts.filter(
-            (p) => !creds.some((c) => credentialCoversPart(c, p)),
-          );
-          if (uncovered.length > 0) {
-            const list = uncovered.map((p) => `${p.sku} ${p.name}`).join(", ");
-            throw new Error(
-              `This Walk-In Credentialed deal has no credential covering the following restricted parts: ${list}. Add or verify a credential that covers each part's restriction category before saving.`,
-            );
-          }
-        }
-      }
-    }
-  }
+  // NOTE: The restricted-part credential coverage gate that lived here was
+  // removed in tandem with PR #23 (which dropped the canAdvanceTo hard
+  // gate on the Walk-In Credentialed pipeline). Credential checks are no
+  // longer enforced anywhere — they were blocking saves silently and
+  // surfacing as a "status revert to draft" on the quote editor.
 
   let subtotal = 0;
   let discountTotal = 0;
