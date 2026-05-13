@@ -43,10 +43,31 @@ async function moveQuoteStage(formData: FormData) {
   // the root cause lets us debug from Vercel logs without showing the
   // user a useless crash screen.
   try {
-    const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
+    const [q] = await db
+      .select({
+        id: quotes.id,
+        quoteNumber: quotes.quoteNumber,
+        customerId: quotes.customerId,
+        dealId: quotes.dealId,
+        lineItems: quotes.lineItems,
+        workflowStage: quotes.workflowStage,
+      })
+      .from(quotes)
+      .where(eq(quotes.id, id));
     if (!q) return;
 
-    let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
+    let [wo] = await db
+      .select({
+        id: workOrders.id,
+        woNumber: workOrders.woNumber,
+        customerId: workOrders.customerId,
+        quoteId: workOrders.quoteId,
+        dealId: workOrders.dealId,
+        status: workOrders.status,
+        partsConsumed: workOrders.partsConsumed,
+      })
+      .from(workOrders)
+      .where(eq(workOrders.quoteId, id));
     const prevWorkflowStage = wo?.status ?? null;
     if (!wo && stage !== "estimate") {
       const woNumber = `WO-${Date.now().toString().slice(-7)}`;
@@ -146,7 +167,24 @@ function fmtMoney(v: string | null | undefined) {
 }
 
 export default async function WorkflowPage() {
-  const quoteRows = await db.select().from(quotes).orderBy(desc(quotes.createdAt));
+  // Explicit column projection so a schema column missing from the live
+  // database (e.g. a future ALTER not yet run) can't break the render.
+  // Only project what the page actually uses.
+  const quoteRows = await db
+    .select({
+      id: quotes.id,
+      quoteNumber: quotes.quoteNumber,
+      customerId: quotes.customerId,
+      dealId: quotes.dealId,
+      status: quotes.status,
+      grandTotal: quotes.grandTotal,
+      lineItems: quotes.lineItems,
+      workflowStage: quotes.workflowStage,
+      notes: quotes.notes,
+      createdAt: quotes.createdAt,
+    })
+    .from(quotes)
+    .orderBy(desc(quotes.createdAt));
 
   const customerIds = Array.from(
     new Set(quoteRows.map((r) => r.customerId).filter(Boolean) as string[]),
