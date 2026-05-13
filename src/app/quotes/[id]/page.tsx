@@ -65,7 +65,14 @@ async function saveQuote(formData: FormData) {
       updatedAt: new Date(),
     })
     .where(eq(quotes.id, id));
-  await upsertQuoteLink(id);
+  // Auto-link is best-effort: the quote already saved by the time we get
+  // here, so an upstream failure in customer_documents must not bubble
+  // up and make the save appear broken to the user.
+  try {
+    await upsertQuoteLink(id);
+  } catch (err) {
+    console.error("upsertQuoteLink failed:", err);
+  }
   revalidatePath("/quotes");
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/workflow");
