@@ -212,6 +212,56 @@ Optional env vars to customize branding without code changes:
 - [ ] Filters + tags + archive (cross-cutting).
 - [ ] Internal notes.
 
+### Universal lead-capture API (PR 34, Phase 1)
+
+`POST /api/leads/capture` is the single endpoint every external
+source (Shopify webhook, main-site contact form, trade-show iPad,
+chatbot, SMS opt-in service, …) calls to drop a new lead into the
+CRM. Any new source plugs in by hitting the same URL with the
+shared body shape — no per-source code path.
+
+- **Auth**: shared secret in `LEAD_CAPTURE_SECRET` env var, sent
+  as `Authorization: Bearer <secret>` OR `X-Webhook-Secret:
+  <secret>`. If the env var is unset, the endpoint always 401s
+  (avoids accidental open endpoint in dev).
+- **Body** (all optional except `source` + `name`):
+  ```json
+  {
+    "source": "shopify",
+    "name": "Jane Doe",
+    "email": "jane@example.com",
+    "phone": "555-1212",
+    "customerType": "government" | "walk_in_credentialed" | "commercial" | "retail",
+    "subSource": "lightbar inquiry",
+    "notes": "Wants pricing on 12 patrol upfits.",
+    "metadata": { /* any JSON; merged into leads.sub_source_meta */ }
+  }
+  ```
+- **Behavior**: inserts a `leads` row with `status='new'`. Stamps
+  `sub_source_meta` with the request's metadata plus capture
+  timestamp, IP, and user-agent for traceability. Best-effort
+  notification to every active `role='sales'` user.
+- **Response**: `201 { ok: true, id }` on success, `401` on bad
+  secret, `400` on invalid payload.
+
+### Required env var
+
+`LEAD_CAPTURE_SECRET` — generate with `openssl rand -hex 32` and
+set on Vercel (Production + Preview). Used as the shared secret.
+
+### Deferred (next PRs)
+
+- **Real-time lead arrival on /leads** (polling or SSE so the
+  list refreshes without a page reload).
+- **Per-source API keys** + admin page to revoke individual
+  channels without rotating the global secret.
+- **Communication threads** (email ingest via Resend, SMS via
+  Twilio, unified chronological view) — Capability 2.
+- **Full real-time** (WebSockets via Pusher, presence
+  indicators, browser push, multi-channel notifications) —
+  Capability 3.
+
+
 ## Pipeline templates (in progress, phased)
 
 Three pipeline templates drive how a deal flows from prospect to delivered.
