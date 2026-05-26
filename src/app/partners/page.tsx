@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { partners } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { fmtDateTime } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -62,12 +63,13 @@ export default async function PartnersPage() {
               <th className="px-3 py-2.5">Type</th>
               <th className="px-3 py-2.5">Email</th>
               <th className="px-3 py-2.5">Phone</th>
+              <th className="px-3 py-2.5">Created</th>
               <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
-              <tr><td colSpan={5} className="px-4 py-8 text-center text-xs text-zinc-500">No partners yet. Add Sames as your first partner above.</td></tr>
+              <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">No partners yet. Add Sames as your first partner above.</td></tr>
             ) : (
               rows.map((p) => (
                 <tr key={p.id} className="border-t border-white/5">
@@ -75,6 +77,7 @@ export default async function PartnersPage() {
                   <td className="px-3 py-2 capitalize text-xs">{p.type}</td>
                   <td className="px-3 py-2 text-xs">{p.email ?? "—"}</td>
                   <td className="px-3 py-2 text-xs">{p.phone ?? "—"}</td>
+                  <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(p.createdAt)}</td>
                   <td className="px-3 py-2 text-right whitespace-nowrap">
                     <a href={`/partners/${p.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 mr-3">Open</a>
                     <form action={deletePartner} className="inline">

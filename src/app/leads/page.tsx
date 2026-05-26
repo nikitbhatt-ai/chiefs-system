@@ -4,6 +4,7 @@ import { leads, lookups, partners, partnerContacts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { NewLeadForm } from "./NewLeadForm";
 import { convertLeadAction, deleteLeadAction } from "./actions";
+import { fmtDateTime } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -47,12 +48,13 @@ export default async function LeadsPage() {
               <th className="px-4 py-2.5">Status</th>
               <th className="px-4 py-2.5">Source</th>
               <th className="px-4 py-2.5">Sub-source</th>
+              <th className="px-4 py-2.5">Created</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">No leads yet — add your first one above.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-zinc-500">No leads yet — add your first one above.</td></tr>
             ) : (
               rows.map((l) => (
                 <tr key={l.id} className="border-t border-white/5">
@@ -61,6 +63,7 @@ export default async function LeadsPage() {
                   <td className="px-4 py-2.5"><span className={`inline-block text-[10px] uppercase tracking-wider font-semibold rounded border px-2 py-0.5 ${STATUS_COLORS[l.status]}`}>{l.status}</span></td>
                   <td className="px-4 py-2.5 text-xs">{l.source ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs">{l.subSource ?? "—"}</td>
+                  <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(l.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     {l.status !== "converted" ? (<form action={convertLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><button type="submit" className="text-[11px] text-green-400 hover:text-green-300 font-body mr-3">Convert</button></form>) : null}
                     <a href={`/leads/${l.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3">Edit</a>

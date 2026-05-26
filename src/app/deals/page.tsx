@@ -4,6 +4,7 @@ import { db } from "@/db";
 import { deals, customers, users, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { isCredentialActive } from "@/lib/credentials";
+import { fmtDateTime } from "@/lib/datetime";
 import { maybeCreateDocReminder, maybePromoteWonDeal } from "@/lib/dealTriggers";
 import {
   PIPELINES,
@@ -146,12 +147,13 @@ export default async function DealsPage() {
               <th className="px-3 py-2.5">Stage</th>
               <th className="px-3 py-2.5">Assigned</th>
               <th className="px-3 py-2.5">Referral</th>
+              <th className="px-3 py-2.5">Created</th>
               <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {dealRows.length === 0 ? (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-zinc-500">No deals yet — create your first one above.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-xs text-zinc-500">No deals yet — create your first one above.</td></tr>
             ) : (
               dealRows.map((d) => {
                 const pipeline = getPipeline(d.pipeline);
@@ -177,6 +179,7 @@ export default async function DealsPage() {
                     </td>
                     <td className="px-3 py-2 text-xs">{d.assignedTo ? userMap.get(d.assignedTo) ?? "—" : (d.salesRep ?? "—")}</td>
                     <td className="px-3 py-2 text-xs">{d.referralSource ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(d.createdAt)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <a href={`/deals/${d.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 mr-3">Open</a>
                       <a href={`/deals/${d.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 mr-3">Edit</a>

@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { fmtDateTime } from "@/lib/datetime";
 
 async function createCustomer(formData: FormData) {
   "use server";
@@ -67,12 +68,13 @@ export default async function CrmPage() {
               <th className="px-4 py-2.5">Email</th>
               <th className="px-4 py-2.5">Phone</th>
               <th className="px-4 py-2.5">Tax</th>
+              <th className="px-4 py-2.5">Created</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">No customers yet — add your first one above.</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-xs text-zinc-500">No customers yet — add your first one above.</td></tr>
             ) : (
               rows.map((c) => (
                 <tr key={c.id} className="border-t border-white/5">
@@ -81,6 +83,7 @@ export default async function CrmPage() {
                   <td className="px-4 py-2.5 text-xs">{c.email ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs">{c.phone ?? "—"}</td>
                   <td className="px-4 py-2.5 text-xs">{c.taxExempt ? "Exempt" : "—"}</td>
+                  <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(c.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right">
                     <a href={`/crm/${c.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 font-body mr-3">Open</a>
                     <a href={`/crm/${c.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3">Edit</a>
