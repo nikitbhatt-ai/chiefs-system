@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { fmtDateTime } from "@/lib/datetime";
 
 async function createVendor(formData: FormData) {
   "use server";
@@ -102,13 +103,14 @@ export default async function VendorsPage() {
               <th className="px-4 py-2.5">Email</th>
               <th className="px-4 py-2.5">Phone</th>
               <th className="px-4 py-2.5">Discount</th>
+              <th className="px-4 py-2.5">Created</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-xs text-zinc-500">
                   No vendors yet — add your first one above.
                 </td>
               </tr>
@@ -122,6 +124,7 @@ export default async function VendorsPage() {
                   <td className="px-4 py-2.5 text-xs">
                     {v.discountPct != null ? `${v.discountPct}%` : "—"}
                   </td>
+                  <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(v.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right">
                     <a
                       href={`/vendors/${v.id}/edit`}

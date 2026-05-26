@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { quotes, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
+import { fmtDateTime } from "@/lib/datetime";
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
@@ -111,13 +112,14 @@ export default async function QuotesPage() {
               <th className="px-4 py-2.5">Customer</th>
               <th className="px-4 py-2.5">Status</th>
               <th className="px-4 py-2.5 text-right">Total</th>
+              <th className="px-4 py-2.5">Created</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-xs text-zinc-500">
+                <td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">
                   No quotes yet — create your first draft above.
                 </td>
               </tr>
@@ -139,6 +141,9 @@ export default async function QuotesPage() {
                   </td>
                   <td className="px-4 py-2.5 text-xs text-right">
                     {fmtMoney(q.grandTotal)}
+                  </td>
+                  <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">
+                    {fmtDateTime(q.createdAt)}
                   </td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <a

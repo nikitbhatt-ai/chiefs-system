@@ -3,6 +3,7 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { fmtDateTime } from "@/lib/datetime";
 import {
   buildPartPlan,
   criticalPathForPlan,
@@ -217,13 +218,14 @@ export default async function WorkOrdersPage() {
               <th className="px-3 py-2.5">Target start</th>
               <th className="px-3 py-2.5">Parts consumed</th>
               <th className="px-3 py-2.5 text-right">Quote total</th>
+              <th className="px-3 py-2.5">Created</th>
               <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-xs text-zinc-500">
+                <td colSpan={11} className="px-4 py-8 text-center text-xs text-zinc-500">
                   No work orders yet — they're auto-created when a quote moves
                   past Estimate on the Workflow board.
                 </td>
@@ -334,6 +336,7 @@ export default async function WorkOrdersPage() {
                     <td className="px-3 py-2 text-xs text-right">
                       {q ? fmt(q.grandTotal) : "—"}
                     </td>
+                    <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(w.createdAt)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       {w.quoteId ? (
                         <a

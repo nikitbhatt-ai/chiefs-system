@@ -3,6 +3,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { vehicles } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { fmtDateTime } from "@/lib/datetime";
 import { VehicleAddForm } from "./VehicleAddForm";
 
 const LOTS = ["on-site", "dealership", "upfitting", "sames-dropoff"] as const;
@@ -72,13 +73,14 @@ export default async function VehiclesPage() {
               <th className="px-4 py-2.5">Lot</th>
               <th className="px-4 py-2.5">Status</th>
               <th className="px-4 py-2.5">Mileage</th>
+              <th className="px-4 py-2.5">Created</th>
               <th className="px-4 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-xs text-zinc-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-xs text-zinc-500">
                   No vehicles yet — add one above (decode by VIN or enter manually).
                 </td>
               </tr>
@@ -107,6 +109,7 @@ export default async function VehiclesPage() {
                   <td className="px-4 py-2.5 text-xs">
                     {v.mileage != null ? v.mileage.toLocaleString() : "—"}
                   </td>
+                  <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(v.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <a
                       href={`/vehicles/${v.id}/edit`}
