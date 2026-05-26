@@ -55,7 +55,12 @@ export const authConfig: NextAuthConfig = {
       const isPublicRoute =
         path.startsWith("/signin") ||
         path.startsWith("/setup") ||
-        path.startsWith("/api/auth");
+        path.startsWith("/api/auth") ||
+        // Public endpoints authed by shared secret instead of a user
+        // session: the lead-capture webhook target and Vercel Cron hits.
+        // The route handlers themselves enforce the secret.
+        path === "/api/leads/capture" ||
+        path.startsWith("/api/cron/");
       if (isPublicRoute) return true;
       return isLoggedIn;
     },
