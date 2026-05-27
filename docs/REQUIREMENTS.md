@@ -1071,6 +1071,26 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
    (Estimates → Delivered). Phase 2: drag-and-drop, search/filter,
    tags on cards, photo thumbnails, bulk actions.
 
+## VIN → Shopify car listings (`vinToShopify/`)
+
+Standalone, dependency-free Node.js ES-module (not part of the Next.js
+app) that creates Shopify car listings from a VIN.
+
+- `createCarListing(input)` pipeline:
+  validate VIN → decode via NHTSA vPIC → build product → create in Shopify.
+- Input: `vin`, `price`, optional `condition`, `mileage`, `photoUrls`,
+  `notes`, `productType` (default "Used Vehicle"), `status` (default "draft").
+- VIN validation: 17 chars, no I/O/Q. NHTSA `ErrorCode` must be "0"/"0,…".
+- Shopify Admin REST `2024-10`; credentials from `SHOPIFY_STORE_DOMAIN`
+  and `SHOPIFY_ADMIN_TOKEN` env vars (never hardcoded).
+- Variant: SKU = VIN, inventory_management "shopify", quantity 1,
+  requires_shipping true, weight 0.
+- Returns `{ status, productId, adminUrl, storefrontUrl, title, decoded }`
+  or `{ status: "error", stage, error }`.
+- Deferred (noted in module README): update-by-SKU, local photo uploads,
+  explicit InventoryLevels per location, `orders/create` sold-car webhook,
+  GraphQL Admin API migration.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW
