@@ -49,12 +49,21 @@ Then edit `.env`:
 
 ```
 SHOPIFY_STORE_DOMAIN=your-store.myshopify.com
-SHOPIFY_ADMIN_TOKEN=shpat_xxxxxxxxxxxxxxxxxxxx
+SHOPIFY_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+SHOPIFY_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-Get the token from **Shopify admin → Settings → Apps and sales channels →
-Develop apps → (your app) → API credentials**. Give it the `write_products`
-Admin API scope.
+Get those from the **Dev Dashboard** (`dev.shopify.com/dashboard`) → your app →
+**Settings** → **Credentials**. The app must also be **installed on your
+store** (App overview → Installs → **Install app**) with the `write_products`
+scope.
+
+Our code uses those credentials to do a `client_credentials` OAuth exchange
+against `/admin/oauth/access_token`. Shopify returns a short-lived (24h)
+admin access token, which we cache in memory and send as
+`X-Shopify-Access-Token` on the actual product-create request. You never copy
+or paste a long-lived "admin token" yourself — that's the old Custom-App
+flow, and Dev Dashboard apps don't use it.
 
 ## Usage
 
