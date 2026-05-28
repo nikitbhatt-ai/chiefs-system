@@ -3,18 +3,21 @@
 // Talks to the free NHTSA vPIC API to turn a 17-character VIN into a tidy object
 // of the vehicle attributes we actually care about.
 //
-// The raw API returns ~130 "variables" in a flat array, most of which we don't
-// need. This file's job is to (a) make the request, (b) confirm the VIN decoded
-// successfully, and (c) hand back a small, predictable object. Everything that
-// knows about NHTSA's quirks lives here and nowhere else.
+// We use the "DecodeVinValues" endpoint specifically (not "DecodeVin"). Both
+// decode the same VIN, but the response shapes differ:
+//   - DecodeVin       -> Results is an array of ~130 { Variable, Value } items
+//                        where Variable names have spaces ("Model Year").
+//   - DecodeVinValues -> Results is a one-element array whose single object is
+//                        already flat, with no-space keys ("ModelYear",
+//                        "BodyClass", "ErrorCode"). Much simpler to parse, and
+//                        matches the field names listed in our spec.
 // -----------------------------------------------------------------------------
 
-// The vPIC "DecodeVin" endpoint. {VIN} gets swapped in below.
-const NHTSA_URL = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin";
+// The vPIC "DecodeVinValues" endpoint. {VIN} gets swapped in below.
+const NHTSA_URL = "https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues";
 
-// The exact variable names (as NHTSA spells them) that we want to pull out of
-// the big Results array. Keeping this list in one place makes it easy to add or
-// remove fields later.
+// The fields we want to keep from the flat result object. Anything not in this
+// list is dropped so downstream code only sees what it actually uses.
 const FIELDS_WE_WANT = [
   "Make",
   "Model",
@@ -82,21 +85,17 @@ export async function decodeVin(vin) {
     };
   }
 
-  // The data we need lives under payload.Results — an array of
-  // { Variable, Value } objects. Bail out if it's missing or empty.
-  const results = payload?.Results;
-  if (!Array.isArray(results) || results.length === 0) {
+  // DecodeVinValues returns Results as a one-element array; the single item is
+  // already a flat object of { ModelYear: "...", Make: "...", ... }.
+  const flat = payload?.Results?.[0];
+  if (!flat || typeof flat !== "object") {
     return { ok: false, error: "NHTSA API response was empty or malformed." };
   }
 
-  // Flatten the array into a simple { Make: "Honda", Model: "Civic", ... } map,
-  // keeping only the fields we listed above.
+  // Copy across only the fields we care about, normalizing empty/null to "".
   const data = {};
-  for (const item of results) {
-    if (FIELDS_WE_WANT.includes(item.Variable)) {
-      // NHTSA uses empty strings (or null) for unknown fields; normalize to "".
-      data[item.Variable] = item.Value ?? "";
-    }
+  for (const field of FIELDS_WE_WANT) {
+    data[field] = flat[field] ?? "";
   }
 
   // ErrorCode "0" (or a comma-list starting with "0", e.g. "0,1,...") means the
