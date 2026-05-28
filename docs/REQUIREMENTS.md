@@ -1099,29 +1099,84 @@ from a VIN.
   explicit InventoryLevels per location, `orders/create` sold-car webhook,
   GraphQL Admin API migration.
 
-### ERP form: `/shopify/list-car`
+### Publish from Vehicles (`/vehicles`)
 
-A server-rendered page in the Next.js app that exposes the
-`createCarListing` pipeline as a form. Linked from the top nav under
-Operations → "List car on Shopify".
+Vehicles is the single source of truth for what we own. To publish a
+car to Shopify, the car must exist in `/vehicles` first — no
+duplicate-entry standalone form. Each row on `/vehicles` has a
+"Publish" inline action.
 
-- **Role gate**: admin or manager only. Other roles see a "no
-  permission" banner; the server action also re-checks the role.
-- Fields: VIN (required, 17 chars), price (required), mileage,
-  condition (Used - Excellent / Used - Good / Used - Fair / New),
-  status (draft / active — defaults to draft), photo URLs (one per
-  line), notes.
-- The server action calls `createCarListing` and redirects back to
-  the same page with the result encoded in the querystring
-  (`?status=success&productId=…&adminUrl=…&storefrontUrl=…` or
-  `?status=error&stage=…&error=…`). The page renders the matching
-  banner.
-- Success banner links to the Shopify admin product URL and (if the
-  listing was active) the storefront URL.
-- Requires `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_CLIENT_ID`, and
-  `SHOPIFY_CLIENT_SECRET` in the Vercel project env (and `.env.local`
-  for local dev). These are the same vars the standalone CLI uses;
-  do not duplicate them.
+**Schema additions on `vehicles`** (live in Neon; same migration that
+ships this feature):
+
+- `condition text` — "Used - Excellent" / "Used - Good" / "Used - Fair"
+  / "New".
+- `shopify_product_id text unique` — set after a successful publish.
+  Null means the vehicle has never been published. Acts as the
+  duplicate-prevention guard.
+- `shopify_status text` — "draft" or "active", mirroring what we sent
+  to Shopify at publish time.
+- `shopify_published_at timestamptz` — when we hit Shopify
+  successfully. Useful for audit.
+
+(`list_price`, `purchase_price`, and `photos jsonb` already existed on
+the table and are now exposed in the add/edit forms.)
+
+**Photo uploads**: handled via Vercel Blob with client-side direct
+upload, so we bypass the 4.5 MB serverless body limit and don't proxy
+files through our function. Wired in:
+
+- `src/components/VehiclePhotos.tsx` — client component on the edit
+  page. Renders thumbnail grid + "Add photos" file picker (multi-file,
+  jpeg/png/webp/heic up to 15 MB each). Photos are persisted by
+  appending to `vehicles.photos` (jsonb string[]).
+- `src/app/api/blob/upload/route.ts` — token-issuing endpoint using
+  `handleUpload` from `@vercel/blob/client`. Auth-gated to any signed-in
+  user.
+- `src/lib/vehiclePhotoActions.ts` — server actions
+  `addVehiclePhoto(vehicleId, url)` / `removeVehiclePhoto(vehicleId,
+  url)`. Remove also best-effort-deletes the blob via `del()`.
+
+**Publish action** (`publishToShopify` in `src/app/vehicles/page.tsx`):
+
+- Role gate: admin or manager only.
+- Pre-flight: requires `vin`, `list_price`, and at least one photo.
+  The row UI hides the publish button and shows the reason inline if
+  any of those are missing.
+- Body: calls `createCarListing` with the vehicle's stored fields
+  (vin, list_price → price, condition, mileage, photos → photoUrls,
+  notes) plus the form's chosen status (draft default / active).
+- On success: stores `shopify_product_id`, `shopify_status`,
+  `shopify_published_at` on the row and redirects to
+  `/vehicles?published=1&publishId=<id>`, rendering a green banner
+  with a link to the Shopify admin product URL.
+- On failure: redirects to
+  `/vehicles?publishError=<message>&publishId=<id>`, rendering a red
+  banner. The vehicle row is unchanged so the user can fix and retry.
+- `vehicles_shopify_product_id_unique` constraint prevents accidental
+  republish via DB-level guarantee; the action also short-circuits
+  with a friendly error.
+
+**Shopify column** on the `/vehicles` table shows current state:
+
+- Published: badge with `shopify_status` and a "View →" link to the
+  Shopify admin URL (constructed at render time from
+  `process.env.SHOPIFY_STORE_DOMAIN`).
+- Ready to publish: inline `Draft|Active` select + "Publish" button
+  (admin/manager only).
+- Missing data: short inline hint ("Add a VIN to publish.", etc.)
+  with no button.
+
+**Env vars required**: `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_CLIENT_ID`,
+`SHOPIFY_CLIENT_SECRET` (already documented above) **plus**
+`BLOB_READ_WRITE_TOKEN`, which Vercel auto-injects after creating a
+Blob store under Project → Storage → Create → Blob. No manual
+copy-paste needed.
+
+**Deferred**: update/re-publish to Shopify when vehicle data changes
+(currently one-shot create), unpublish/archive on Shopify when a
+vehicle is sold, reordering photos, designating a "cover" photo,
+image compression / thumbnail variants.
 
 ## Notes on building order
 

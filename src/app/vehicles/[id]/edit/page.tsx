@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { vehicles } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { VehiclePhotos } from "@/components/VehiclePhotos";
 
 const LOTS = ["on-site", "dealership", "upfitting", "sames-dropoff"];
 const LOT_LABELS: Record<string, string> = {
@@ -26,6 +27,7 @@ export default async function EditVehiclePage({
     "use server";
     const yearRaw = String(formData.get("year") ?? "").trim();
     const mileageRaw = String(formData.get("mileage") ?? "").trim();
+    const listPriceRaw = String(formData.get("listPrice") ?? "").trim();
     await db
       .update(vehicles)
       .set({
@@ -36,6 +38,8 @@ export default async function EditVehiclePage({
         trim: String(formData.get("trim") ?? "").trim() || null,
         color: String(formData.get("color") ?? "").trim() || null,
         mileage: mileageRaw ? Number(mileageRaw) : null,
+        listPrice: listPriceRaw || null,
+        condition: String(formData.get("condition") ?? "").trim() || null,
         status: String(formData.get("status") ?? "new") as
           | "new"
           | "received"
@@ -56,9 +60,11 @@ export default async function EditVehiclePage({
       title="Edit vehicle"
       subtitle={[v.year, v.make, v.model].filter(Boolean).join(" ") || v.vin || v.id}
     >
+      <div className="space-y-4 max-w-4xl">
+      <VehiclePhotos vehicleId={v.id} photos={v.photos ?? []} />
       <form
         action={update}
-        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-4xl"
+        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
       >
         <input
           name="vin"
@@ -104,6 +110,26 @@ export default async function EditVehiclePage({
           type="number"
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
         />
+        <input
+          name="listPrice"
+          defaultValue={v.listPrice ?? ""}
+          placeholder="List price (USD)"
+          type="number"
+          step="0.01"
+          min="0"
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+        />
+        <select
+          name="condition"
+          defaultValue={v.condition ?? ""}
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        >
+          <option value="">Condition (none)</option>
+          <option value="Used - Excellent">Used - Excellent</option>
+          <option value="Used - Good">Used - Good</option>
+          <option value="Used - Fair">Used - Fair</option>
+          <option value="New">New</option>
+        </select>
         <select
           name="lotLocation"
           defaultValue={v.lotLocation ?? ""}
@@ -149,6 +175,7 @@ export default async function EditVehiclePage({
           </button>
         </div>
       </form>
+      </div>
     </AppShell>
   );
 }

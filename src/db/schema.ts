@@ -101,8 +101,12 @@ export const vehicles = pgTable("vehicles", {
   lotLocation: text("lot_location"),
   purchasePrice: numeric("purchase_price", { precision: 12, scale: 2 }),
   listPrice: numeric("list_price", { precision: 12, scale: 2 }),
+  condition: text("condition"),
   photos: jsonb("photos").$type<string[]>().default([]),
   notes: text("notes"),
+  shopifyProductId: text("shopify_product_id").unique(),
+  shopifyStatus: text("shopify_status"),
+  shopifyPublishedAt: timestamp("shopify_published_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("vehicles_status_idx").on(t.status)]);

@@ -114,6 +114,25 @@ export function VehicleAddForm({
           type="number"
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
         />
+        <input
+          name="listPrice"
+          placeholder="List price (USD)"
+          type="number"
+          step="0.01"
+          min="0"
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+        />
+        <select
+          name="condition"
+          defaultValue=""
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        >
+          <option value="">Condition (none)</option>
+          <option value="Used - Excellent">Used - Excellent</option>
+          <option value="Used - Good">Used - Good</option>
+          <option value="Used - Fair">Used - Fair</option>
+          <option value="New">New</option>
+        </select>
         <select
           name="lotLocation"
           defaultValue=""
