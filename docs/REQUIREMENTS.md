@@ -1073,23 +1073,55 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
 
 ## VIN → Shopify car listings (`vinToShopify/`)
 
-Standalone, dependency-free Node.js ES-module (not part of the Next.js
-app) that creates Shopify car listings from a VIN.
+Standalone, dependency-free Node.js ES-module (lives at the repo root,
+also imported by the Next.js app) that creates Shopify car listings
+from a VIN.
 
 - `createCarListing(input)` pipeline:
   validate VIN → decode via NHTSA vPIC → build product → create in Shopify.
 - Input: `vin`, `price`, optional `condition`, `mileage`, `photoUrls`,
   `notes`, `productType` (default "Used Vehicle"), `status` (default "draft").
 - VIN validation: 17 chars, no I/O/Q. NHTSA `ErrorCode` must be "0"/"0,…".
-- Shopify Admin REST `2024-10`; credentials from `SHOPIFY_STORE_DOMAIN`
-  and `SHOPIFY_ADMIN_TOKEN` env vars (never hardcoded).
+- Shopify Admin REST `2024-10`. Auth uses the Dev Dashboard OAuth
+  `client_credentials` flow (short-lived ~24h access token, cached in
+  memory). Credentials read from `SHOPIFY_STORE_DOMAIN`,
+  `SHOPIFY_CLIENT_ID`, and `SHOPIFY_CLIENT_SECRET` env vars (never
+  hardcoded). The installed Dev Dashboard app must have the
+  `write_products` scope.
 - Variant: SKU = VIN, inventory_management "shopify", quantity 1,
   requires_shipping true, weight 0.
 - Returns `{ status, productId, adminUrl, storefrontUrl, title, decoded }`
   or `{ status: "error", stage, error }`.
+- TypeScript types for the module live in `vinToShopify/index.d.ts`
+  (the JS files themselves stay plain ES modules so the CLI keeps
+  working with `node --env-file=vinToShopify/.env vinToShopify/example.js`).
 - Deferred (noted in module README): update-by-SKU, local photo uploads,
   explicit InventoryLevels per location, `orders/create` sold-car webhook,
   GraphQL Admin API migration.
+
+### ERP form: `/shopify/list-car`
+
+A server-rendered page in the Next.js app that exposes the
+`createCarListing` pipeline as a form. Linked from the top nav under
+Operations → "List car on Shopify".
+
+- **Role gate**: admin or manager only. Other roles see a "no
+  permission" banner; the server action also re-checks the role.
+- Fields: VIN (required, 17 chars), price (required), mileage,
+  condition (Used - Excellent / Used - Good / Used - Fair / New),
+  status (draft / active — defaults to draft), photo URLs (one per
+  line), notes.
+- The server action calls `createCarListing` and redirects back to
+  the same page with the result encoded in the querystring
+  (`?status=success&productId=…&adminUrl=…&storefrontUrl=…` or
+  `?status=error&stage=…&error=…`). The page renders the matching
+  banner.
+- Success banner links to the Shopify admin product URL and (if the
+  listing was active) the storefront URL.
+- Requires `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_CLIENT_ID`, and
+  `SHOPIFY_CLIENT_SECRET` in the Vercel project env (and `.env.local`
+  for local dev). These are the same vars the standalone CLI uses;
+  do not duplicate them.
 
 ## Notes on building order
 
