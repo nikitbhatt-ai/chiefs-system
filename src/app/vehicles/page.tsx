@@ -33,25 +33,38 @@ async function createVehicle(formData: FormData) {
   const yearRaw = String(formData.get("year") ?? "").trim();
   const mileageRaw = String(formData.get("mileage") ?? "").trim();
   const listPriceRaw = String(formData.get("listPrice") ?? "").trim();
-  await db.insert(vehicles).values({
-    vin: vin || null,
-    year: yearRaw ? Number(yearRaw) : null,
-    make: String(formData.get("make") ?? "").trim() || null,
-    model: String(formData.get("model") ?? "").trim() || null,
-    trim: String(formData.get("trim") ?? "").trim() || null,
-    color: String(formData.get("color") ?? "").trim() || null,
-    mileage: mileageRaw ? Number(mileageRaw) : null,
-    listPrice: listPriceRaw || null,
-    condition: String(formData.get("condition") ?? "").trim() || null,
-    status: String(formData.get("status") ?? "new") as
-      | "new"
-      | "received"
-      | "ready_for_pickup"
-      | "delivered"
-      | "sold",
-    lotLocation: String(formData.get("lotLocation") ?? "").trim() || null,
-    notes: String(formData.get("notes") ?? "").trim() || null,
-  });
+  try {
+    await db.insert(vehicles).values({
+      vin: vin || null,
+      year: yearRaw ? Number(yearRaw) : null,
+      make: String(formData.get("make") ?? "").trim() || null,
+      model: String(formData.get("model") ?? "").trim() || null,
+      trim: String(formData.get("trim") ?? "").trim() || null,
+      color: String(formData.get("color") ?? "").trim() || null,
+      mileage: mileageRaw ? Number(mileageRaw) : null,
+      listPrice: listPriceRaw || null,
+      condition: String(formData.get("condition") ?? "").trim() || null,
+      status: String(formData.get("status") ?? "new") as
+        | "new"
+        | "received"
+        | "ready_for_pickup"
+        | "delivered"
+        | "sold",
+      lotLocation: String(formData.get("lotLocation") ?? "").trim() || null,
+      notes: String(formData.get("notes") ?? "").trim() || null,
+    });
+  } catch (err: unknown) {
+    const e = err as {
+      code?: string;
+      constraint_name?: string;
+      message?: string;
+    };
+    let msg = e.message ?? "Could not save vehicle.";
+    if (e.code === "23505" && e.constraint_name === "vehicles_vin_unique") {
+      msg = `A vehicle with VIN ${vin} already exists — edit that row instead of adding a new one.`;
+    }
+    redirect(`/vehicles?addError=${encodeURIComponent(msg)}`);
+  }
   revalidatePath("/vehicles");
 }
 
@@ -148,6 +161,7 @@ export default async function VehiclesPage({
     published?: string;
     publishId?: string;
     publishError?: string;
+    addError?: string;
   }>;
 }) {
   const session = await auth();
@@ -166,6 +180,11 @@ export default async function VehiclesPage({
 
   return (
     <AppShell title="Vehicles" subtitle="Lot inventory across all locations">
+      {sp.addError ? (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
+          {sp.addError}
+        </div>
+      ) : null}
       {sp.publishError ? (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 text-sm text-red-300">
           Publish failed: {sp.publishError}
