@@ -13,6 +13,22 @@ type UploadingItem = {
   error?: string;
 };
 
+// Replace anything outside printable ASCII so the file name is safe to
+// stuff into the Content-Disposition header that XHR builds for us.
+// Non-ASCII chars (e.g., →, é, smart quotes) trip the browser's
+// ByteString check and the whole upload throws before sending.
+function safeFilename(name: string): string {
+  const cleaned = name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[^\x20-\x7E]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return cleaned || "photo";
+}
+
 // Re-encode any image down to maxDim on the longest side, JPEG ~quality,
 // so 5-8 MB phone photos become ~500 KB and slip under the serverless
 // request limit. Returns a new File; falls back to the original if the
@@ -46,7 +62,7 @@ async function shrinkImage(
     canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
   );
   if (!blob) return file;
-  const baseName = file.name.replace(/\.[^.]+$/, "");
+  const baseName = safeFilename(file.name.replace(/\.[^.]+$/, ""));
   return new File([blob], `${baseName}.jpg`, {
     type: "image/jpeg",
     lastModified: Date.now(),
@@ -119,14 +135,19 @@ export function VehiclePhotos({
         const name = items[idx].name;
         try {
           const shrunk = await shrinkImage(file);
+          const safeName = safeFilename(shrunk.name);
+          const toUpload =
+            safeName === shrunk.name
+              ? shrunk
+              : new File([shrunk], safeName, { type: shrunk.type });
           setUploading((u) =>
             u.map((x) =>
               x.name === name ? { ...x, phase: "uploading", progress: 0 } : x
             )
           );
           const blob = await uploadOne(
-            shrunk,
-            `vehicles/${vehicleId}/${shrunk.name}`,
+            toUpload,
+            `vehicles/${vehicleId}/${safeName}`,
             (pct) => {
               setUploading((u) =>
                 u.map((x) => (x.name === name ? { ...x, progress: pct } : x))
