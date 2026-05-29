@@ -1,0 +1,13 @@
+{
+  "name": "vin-to-shopify",
+  "version": "1.0.0",
+  "description": "Decode a VIN via the NHTSA vPIC API and create a car listing in Shopify.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "example": "node example.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
