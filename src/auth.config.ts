@@ -60,6 +60,10 @@ export const authConfig: NextAuthConfig = {
         // session: the lead-capture webhook target and Vercel Cron hits.
         // The route handlers themselves enforce the secret.
         path === "/api/leads/capture" ||
+        // Public 3D upfit builder (Shopify hero) + its browser-called lead
+        // endpoint. The endpoint is honeypot-protected, not session-gated.
+        path.startsWith("/embed") ||
+        path === "/api/upfit/lead" ||
         path.startsWith("/api/cron/");
       if (isPublicRoute) return true;
       return isLoggedIn;

@@ -1047,12 +1047,105 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
       reports. Needs a cron + email service.
 - [ ] All exports must use the branded PDF format.
 
-## Upfit Builder (not yet built)
+## Upfit Builder (3D, PR 35, Phase 1)
 
-- [ ] Lives inside the CRM as a tab on a deal AND as a standalone tool.
-- [ ] Upfit configs save to the customer entity for historical record.
-- [ ] CAD design attachable to the upfit config.
-- [ ] Build packages upload-able to both CRM and inventory parts list.
+A full-screen, interactive **3D police-vehicle upfit builder** that doubles
+as a lead generator. Embeds into the Shopify storefront homepage as a hero
+(iframe) and also runs as an internal tool inside the ERP. Built with
+`three` + `@react-three/fiber` + `@react-three/drei`. Vehicles are rendered
+**procedurally** from primitives (no licensed CAD assets) — each model has a
+`dims` block driving its silhouette. Real GLTF/CAD models can be dropped in
+later behind the same component API.
+
+- [x] **Catalog** — `src/lib/upfit/catalog.ts` is the single source of truth
+      for everything below (shared by the 3D renderer, the configurator UI,
+      the lead payload, and the internal CRM view).
+- [x] **5 models**: Tahoe PPV, PIU (Ford Police Interceptor Utility),
+      Durango Pursuit (SUV silhouettes), Silverado SSV, F-150 SSV (truck
+      silhouettes — short crew cab + open bed). Each has a ballpark
+      `basePrice` for lead qualification.
+- [x] **3 emergency-lighting packages** (mutually exclusive, animated
+      red/blue flash via `useFrame`): **Full Lightbar** (roof bar + glow),
+      **Surface-Mount** (grille / mirror / rear-deck heads, no roof bar),
+      **Slick-Top (covert)** (visor + grille only, no bar).
+- [x] **3 interior options** (toggle, shown in the Interior/cutaway view
+      where the body goes translucent): **Prisoner Partition** (cage),
+      **Center Console**, **Rear Storage Box**.
+- [x] **Body color** picker (6 patrol colors).
+- [x] **Interactive 3D** — orbit/zoom (`OrbitControls`), auto-rotate on the
+      exterior view, contact shadows, Exterior ↔ Interior toggle. Live
+      running price estimate. `UpfitScene` is dynamically imported with
+      `ssr:false`.
+- [x] **Lead generation** — `POST /api/upfit/lead` (PUBLIC, browser-called,
+      so it does NOT use `LEAD_CAPTURE_SECRET`; protected by a hidden
+      honeypot + strict validation). Writes a `leads` row
+      (`source = "upfit_builder"`, `customerType` mapped from the agency
+      type) plus an `upfit_configs` row with the exact selection, then
+      notifies every active `role='sales'` user. Estimate is recomputed
+      server-side (client total is never trusted).
+- [x] **Public embed** — `/embed/upfit-builder` renders the builder
+      chrome-free in its own minimal `embed/layout.tsx` (no AppShell, no
+      auth). Allowlisted in `auth.config.ts` (`/embed` + `/api/upfit/lead`).
+      Framing permitted via a `frame-ancestors` CSP header on
+      `/embed/:path*` in `next.config.ts`, configurable through
+      `UPFIT_EMBED_ALLOWED_ORIGINS` (always allows `*.myshopify.com`).
+- [x] **Internal tool** — `/upfit-builder` (under CRM nav, auth-gated):
+      runs the builder in `mode="internal"`, shows a copyable Shopify embed
+      snippet, and lists the 25 most recent `upfit_configs` submissions.
+
+### Deferred (post PR 35)
+
+- [ ] **Deal tab**: surface the builder inside `/deals/[id]` and stamp the
+      saved config's `deal_id` / `customer_id`.
+- [ ] **Save to customer entity** from the internal tool for historical
+      record (table + FKs already exist).
+- [ ] **CAD design attachable** to an upfit config (Vercel Blob).
+- [ ] **Build packages** upload-able to both CRM and the inventory parts
+      list; map selected options to real `parts` for auto-quoting.
+- [ ] **Real GLTF/CAD vehicle models** swapped in behind `PoliceVehicle`.
+- [ ] **iframe auto-resize** (postMessage height) for the Shopify embed.
+
+### Schema additions (PR 35)
+
+```sql
+CREATE TABLE IF NOT EXISTS upfit_configs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  deal_id uuid REFERENCES deals(id) ON DELETE SET NULL,
+  lead_id uuid REFERENCES leads(id) ON DELETE SET NULL,
+  model_slug text NOT NULL,
+  model_name text NOT NULL,
+  vehicle_type text,
+  body_color text,
+  light_package text,
+  interior_options jsonb DEFAULT '[]'::jsonb,
+  estimate_total integer,
+  config jsonb NOT NULL DEFAULT '{}'::jsonb,
+  source text,
+  contact_name text,
+  contact_email text,
+  contact_phone text,
+  agency text,
+  agency_type text,
+  notes text,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS upfit_configs_customer_idx ON upfit_configs (customer_id);
+CREATE INDEX IF NOT EXISTS upfit_configs_lead_idx ON upfit_configs (lead_id);
+CREATE INDEX IF NOT EXISTS upfit_configs_created_idx ON upfit_configs (created_at);
+```
+
+The lead endpoint inserts the `upfit_configs` row best-effort (wrapped in
+try/catch), so leads are still captured even before this table is created.
+
+### Env vars (PR 35)
+
+- `UPFIT_EMBED_ALLOWED_ORIGINS` — space/comma-separated storefront origins
+  allowed to iframe the builder, e.g.
+  `https://chiefspursuitsurplus.com https://www.chiefspursuitsurplus.com`.
+  `*.myshopify.com` and `'self'` are always allowed.
+- `NEXT_PUBLIC_APP_URL` (optional) — used to render the absolute iframe
+  `src` in the internal embed snippet (falls back to the Vercel URL).
 
 ## Users (not yet built)
 

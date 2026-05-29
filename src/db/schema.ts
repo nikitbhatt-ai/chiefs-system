@@ -565,6 +565,37 @@ export const customerMessages = pgTable("customer_messages", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("customer_messages_deal_idx").on(t.dealId)]);
 
+// Upfit Builder configurations. Each row is one saved/submitted vehicle
+// configuration from the public 3D builder (Shopify hero) or the internal
+// tool. Linked to a lead on capture, and optionally to a customer/deal when
+// promoted in the CRM. The full selection lives in `config` (jsonb).
+export const upfitConfigs = pgTable("upfit_configs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+  leadId: uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+  modelSlug: text("model_slug").notNull(),
+  modelName: text("model_name").notNull(),
+  vehicleType: text("vehicle_type"),
+  bodyColor: text("body_color"),
+  lightPackage: text("light_package"),
+  interiorOptions: jsonb("interior_options").default([]),
+  estimateTotal: integer("estimate_total"),
+  config: jsonb("config").notNull().default({}),
+  source: text("source"),
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  contactPhone: text("contact_phone"),
+  agency: text("agency"),
+  agencyType: text("agency_type"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("upfit_configs_customer_idx").on(t.customerId),
+  index("upfit_configs_lead_idx").on(t.leadId),
+  index("upfit_configs_created_idx").on(t.createdAt),
+]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one, many }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }), comms: many(dealComms) }));
