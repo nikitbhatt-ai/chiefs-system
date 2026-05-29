@@ -49,9 +49,10 @@ export async function removeVehiclePhoto(vehicleId: string, url: string) {
     .where(eq(vehicles.id, vehicleId));
 
   // Best-effort delete from Blob storage. If it fails (already gone, ACL,
-  // etc.) we still want the DB row to reflect the removal.
+  // etc.) we still want the DB row to reflect the removal. Vehicle photos
+  // live in the public store, not the default private one.
   try {
-    await del(url);
+    await del(url, { token: process.env.VEHICLE_PHOTOS_BLOB_TOKEN });
   } catch {}
 
   revalidatePath(`/vehicles/${vehicleId}/edit`);
