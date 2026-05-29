@@ -1,6 +1,5 @@
 "use client";
 
-import { upload } from "@vercel/blob/client";
 import { useState, useTransition } from "react";
 import {
   addVehiclePhoto,
@@ -12,6 +11,46 @@ type UploadingItem = {
   progress: number;
   error?: string;
 };
+
+function uploadOne(
+  file: File,
+  pathname: string,
+  onProgress: (pct: number) => void
+): Promise<{ url: string }> {
+  return new Promise((resolve, reject) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("pathname", pathname);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", "/api/blob/upload");
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress((e.loaded / e.total) * 100);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText));
+        } catch {
+          reject(new Error("Bad response from server."));
+        }
+      } else {
+        let msg = `Upload failed (HTTP ${xhr.status})`;
+        try {
+          const body = JSON.parse(xhr.responseText) as { error?: string };
+          if (body.error) msg = body.error;
+        } catch {}
+        reject(new Error(msg));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload."));
+    xhr.send(formData);
+  });
+}
 
 export function VehiclePhotos({
   vehicleId,
@@ -35,35 +74,26 @@ export function VehiclePhotos({
 
     await Promise.all(
       Array.from(files).map(async (file, idx) => {
+        const name = items[idx].name;
         try {
-          const blob = await upload(
-            `vehicles/${vehicleId}/${file.name}`,
+          const blob = await uploadOne(
             file,
-            {
-              access: "public",
-              handleUploadUrl: "/api/blob/upload",
-              onUploadProgress: (e) => {
-                setUploading((u) => {
-                  const copy = [...u];
-                  const target = copy.find((x) => x.name === items[idx].name);
-                  if (target) target.progress = e.percentage;
-                  return copy;
-                });
-              },
+            `vehicles/${vehicleId}/${file.name}`,
+            (pct) => {
+              setUploading((u) =>
+                u.map((x) => (x.name === name ? { ...x, progress: pct } : x))
+              );
             }
           );
           await addVehiclePhoto(vehicleId, blob.url);
           setPhotos((p) => (p.includes(blob.url) ? p : [...p, blob.url]));
+          setUploading((u) => u.filter((x) => x.name !== name));
         } catch (err) {
-          setUploading((u) => {
-            const copy = [...u];
-            const target = copy.find((x) => x.name === items[idx].name);
-            if (target) target.error = (err as Error).message;
-            return copy;
-          });
-          return;
+          const msg = (err as Error).message || "Upload failed.";
+          setUploading((u) =>
+            u.map((x) => (x.name === name ? { ...x, error: msg } : x))
+          );
         }
-        setUploading((u) => u.filter((x) => x.name !== items[idx].name));
       })
     );
   }
@@ -79,6 +109,10 @@ export function VehiclePhotos({
     });
   }
 
+  function dismissError(name: string) {
+    setUploading((u) => u.filter((x) => x.name !== name));
+  }
+
   return (
     <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -89,7 +123,7 @@ export function VehiclePhotos({
           + Add photos
           <input
             type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+            accept="image/jpeg,image/png,image/webp"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -99,6 +133,11 @@ export function VehiclePhotos({
           />
         </label>
       </div>
+
+      <p className="text-[11px] text-zinc-500">
+        JPEG / PNG / WebP, up to 4 MB each. HEIC isn't supported — on iPhone,
+        Settings → Camera → Formats → Most Compatible.
+      </p>
 
       {photos.length === 0 && uploading.length === 0 ? (
         <p className="text-xs text-zinc-500">
@@ -130,10 +169,19 @@ export function VehiclePhotos({
         {uploading.map((u) => (
           <div
             key={u.name}
-            className="aspect-square bg-black/40 border border-white/10 border-dashed rounded flex flex-col items-center justify-center text-[10px] text-zinc-400 p-2 text-center"
+            className="relative aspect-square bg-black/40 border border-white/10 border-dashed rounded flex flex-col items-center justify-center text-[10px] text-zinc-400 p-2 text-center"
           >
             {u.error ? (
-              <span className="text-red-400">{u.error}</span>
+              <>
+                <span className="text-red-400 break-words">{u.error}</span>
+                <button
+                  type="button"
+                  onClick={() => dismissError(u.name)}
+                  className="mt-1 text-[10px] text-zinc-500 hover:text-zinc-200 underline"
+                >
+                  dismiss
+                </button>
+              </>
             ) : (
               <>
                 <span className="truncate w-full">{u.name}</span>
