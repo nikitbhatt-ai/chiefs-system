@@ -9,8 +9,65 @@ import {
 type UploadingItem = {
   name: string;
   progress: number;
+  phase: "preparing" | "uploading";
   error?: string;
 };
+
+// Replace anything outside printable ASCII so the file name is safe to
+// stuff into the Content-Disposition header that XHR builds for us.
+// Non-ASCII chars (e.g., →, é, smart quotes) trip the browser's
+// ByteString check and the whole upload throws before sending.
+function safeFilename(name: string): string {
+  const cleaned = name
+    .normalize("NFKD")
+    .replace(/[̀-ͯ]/g, "")
+    // eslint-disable-next-line no-control-regex
+    .replace(/[^\x20-\x7E]/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return cleaned || "photo";
+}
+
+// Re-encode any image down to maxDim on the longest side, JPEG ~quality,
+// so 5-8 MB phone photos become ~500 KB and slip under the serverless
+// request limit. Returns a new File; falls back to the original if the
+// browser fails to decode the source (e.g., an unusual format).
+async function shrinkImage(
+  file: File,
+  maxDim = 2048,
+  quality = 0.85
+): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const w = Math.max(1, Math.round(bitmap.width * scale));
+  const h = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close();
+    return file;
+  }
+  ctx.drawImage(bitmap, 0, 0, w, h);
+  bitmap.close();
+  const blob: Blob | null = await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b), "image/jpeg", quality)
+  );
+  if (!blob) return file;
+  const baseName = safeFilename(file.name.replace(/\.[^.]+$/, ""));
+  return new File([blob], `${baseName}.jpg`, {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+}
 
 function uploadOne(
   file: File,
@@ -69,6 +126,7 @@ export function VehiclePhotos({
     const items: UploadingItem[] = Array.from(files).map((f) => ({
       name: f.name,
       progress: 0,
+      phase: "preparing" as const,
     }));
     setUploading((u) => [...u, ...items]);
 
@@ -76,9 +134,20 @@ export function VehiclePhotos({
       Array.from(files).map(async (file, idx) => {
         const name = items[idx].name;
         try {
+          const shrunk = await shrinkImage(file);
+          const safeName = safeFilename(shrunk.name);
+          const toUpload =
+            safeName === shrunk.name
+              ? shrunk
+              : new File([shrunk], safeName, { type: shrunk.type });
+          setUploading((u) =>
+            u.map((x) =>
+              x.name === name ? { ...x, phase: "uploading", progress: 0 } : x
+            )
+          );
           const blob = await uploadOne(
-            file,
-            `vehicles/${vehicleId}/${file.name}`,
+            toUpload,
+            `vehicles/${vehicleId}/${safeName}`,
             (pct) => {
               setUploading((u) =>
                 u.map((x) => (x.name === name ? { ...x, progress: pct } : x))
@@ -135,8 +204,9 @@ export function VehiclePhotos({
       </div>
 
       <p className="text-[11px] text-zinc-500">
-        JPEG / PNG / WebP, up to 4 MB each. HEIC isn't supported — on iPhone,
-        Settings → Camera → Formats → Most Compatible.
+        JPEG / PNG / WebP. Photos are auto-resized to 2048px and saved as
+        JPEG. HEIC isn't supported — on iPhone, Settings → Camera → Formats
+        → Most Compatible.
       </p>
 
       {photos.length === 0 && uploading.length === 0 ? (
@@ -185,7 +255,11 @@ export function VehiclePhotos({
             ) : (
               <>
                 <span className="truncate w-full">{u.name}</span>
-                <span className="mt-1">{Math.round(u.progress)}%</span>
+                <span className="mt-1">
+                  {u.phase === "preparing"
+                    ? "Resizing…"
+                    : `${Math.round(u.progress)}%`}
+                </span>
               </>
             )}
           </div>
