@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import {
   addVehiclePhoto,
   removeVehiclePhoto,
+  reorderVehiclePhotos,
 } from "@/lib/vehiclePhotoActions";
 
 type UploadingItem = {
@@ -182,6 +183,28 @@ export function VehiclePhotos({
     setUploading((u) => u.filter((x) => x.name !== name));
   }
 
+  // Drag-and-drop reorder. `dragIndex` is the slot the user grabbed;
+  // `overIndex` is the slot the pointer is currently over. On drop we
+  // splice the dragged item into the new position and persist.
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [overIndex, setOverIndex] = useState<number | null>(null);
+
+  function commitReorder(from: number, to: number) {
+    if (from === to) return;
+    const before = photos;
+    const next = [...photos];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setPhotos(next);
+    startTransition(async () => {
+      try {
+        await reorderVehiclePhotos(vehicleId, next);
+      } catch {
+        setPhotos(before);
+      }
+    });
+  }
+
   return (
     <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -206,7 +229,8 @@ export function VehiclePhotos({
       <p className="text-[11px] text-zinc-500">
         JPEG / PNG / WebP. Photos are auto-resized to 2048px and saved as
         JPEG. HEIC isn't supported — on iPhone, Settings → Camera → Formats
-        → Most Compatible.
+        → Most Compatible. Drag to reorder; the first photo is the cover on
+        Shopify.
       </p>
 
       {photos.length === 0 && uploading.length === 0 ? (
@@ -216,26 +240,63 @@ export function VehiclePhotos({
       ) : null}
 
       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-        {photos.map((url) => (
-          <div
-            key={url}
-            className="relative group aspect-square bg-black/40 border border-white/5 rounded overflow-hidden"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={url}
-              alt=""
-              className="w-full h-full object-cover"
-            />
-            <button
-              type="button"
-              onClick={() => handleRemove(url)}
-              className="absolute top-1 right-1 text-[10px] bg-black/70 hover:bg-red-600 text-white rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+        {photos.map((url, idx) => {
+          const isOver = overIndex === idx && dragIndex !== null && dragIndex !== idx;
+          const isDragging = dragIndex === idx;
+          return (
+            <div
+              key={url}
+              draggable
+              onDragStart={(e) => {
+                setDragIndex(idx);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                if (dragIndex === null) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (overIndex !== idx) setOverIndex(idx);
+              }}
+              onDragLeave={() => {
+                if (overIndex === idx) setOverIndex(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (dragIndex !== null) commitReorder(dragIndex, idx);
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              onDragEnd={() => {
+                setDragIndex(null);
+                setOverIndex(null);
+              }}
+              className={`relative group aspect-square bg-black/40 border rounded overflow-hidden cursor-grab active:cursor-grabbing transition-opacity ${
+                isOver ? "border-amber-400" : "border-white/5"
+              } ${isDragging ? "opacity-40" : ""}`}
+              title={idx === 0 ? "Cover photo (first on Shopify)" : `Photo #${idx + 1}`}
             >
-              Remove
-            </button>
-          </div>
-        ))}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={url}
+                alt=""
+                className="w-full h-full object-cover pointer-events-none"
+                draggable={false}
+              />
+              {idx === 0 ? (
+                <span className="absolute bottom-1 left-1 text-[9px] uppercase tracking-wider bg-amber-500/90 text-black rounded px-1 py-0.5 font-semibold">
+                  Cover
+                </span>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => handleRemove(url)}
+                className="absolute top-1 right-1 text-[10px] bg-black/70 hover:bg-red-600 text-white rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                Remove
+              </button>
+            </div>
+          );
+        })}
         {uploading.map((u) => (
           <div
             key={u.name}

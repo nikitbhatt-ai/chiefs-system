@@ -103,6 +103,7 @@ export const vehicles = pgTable("vehicles", {
   listPrice: numeric("list_price", { precision: 12, scale: 2 }),
   condition: text("condition"),
   photos: jsonb("photos").$type<string[]>().default([]),
+  description: text("description"),
   notes: text("notes"),
   shopifyProductId: text("shopify_product_id").unique(),
   shopifyStatus: text("shopify_status"),
