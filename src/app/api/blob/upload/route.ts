@@ -4,26 +4,10 @@ import { auth } from "@/auth";
 
 const MAX_BYTES = 4 * 1024 * 1024; // Stay below Vercel's 4.5 MB serverless limit.
 
-// Vehicle photos go in the *public* Blob store so Shopify's CDN can fetch
-// them — the default BLOB_READ_WRITE_TOKEN points at the private store
-// (customer documents). Set VEHICLE_PHOTOS_BLOB_TOKEN to the read/write
-// token of the public Blob store.
-const VEHICLE_PHOTOS_TOKEN = process.env.VEHICLE_PHOTOS_BLOB_TOKEN;
-
 export async function POST(request: Request): Promise<NextResponse> {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!VEHICLE_PHOTOS_TOKEN) {
-    return NextResponse.json(
-      {
-        error:
-          "Photo upload is not configured: set VEHICLE_PHOTOS_BLOB_TOKEN in the project env to the public Blob store's read/write token.",
-      },
-      { status: 500 }
-    );
   }
 
   let formData: FormData;
@@ -55,11 +39,12 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   try {
+    // The library picks up VERCEL_OIDC_TOKEN + BLOB_STORE_ID automatically
+    // at runtime — no explicit token needed for OIDC-connected stores.
     const blob = await put(pathname, file, {
       access: "public",
       addRandomSuffix: true,
       contentType: file.type || undefined,
-      token: VEHICLE_PHOTOS_TOKEN,
     });
     return NextResponse.json({ url: blob.url });
   } catch (err) {
