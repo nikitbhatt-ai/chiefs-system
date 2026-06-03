@@ -58,3 +58,35 @@ export async function removeVehiclePhoto(vehicleId: string, url: string) {
   revalidatePath(`/vehicles/${vehicleId}/edit`);
   revalidatePath("/vehicles");
 }
+
+export async function reorderVehiclePhotos(
+  vehicleId: string,
+  newOrder: string[]
+) {
+  const session = await auth();
+  if (!session?.user) throw new Error("Unauthorized");
+
+  const [v] = await db
+    .select({ photos: vehicles.photos })
+    .from(vehicles)
+    .where(eq(vehicles.id, vehicleId));
+  if (!v) throw new Error("Vehicle not found");
+
+  const current = v.photos ?? [];
+  // Only persist if the new list is a permutation of what's stored — guards
+  // against stale client state silently dropping a photo.
+  if (
+    newOrder.length !== current.length ||
+    !newOrder.every((u) => current.includes(u))
+  ) {
+    throw new Error("Photo reorder rejected: list no longer matches storage.");
+  }
+
+  await db
+    .update(vehicles)
+    .set({ photos: newOrder, updatedAt: new Date() })
+    .where(eq(vehicles.id, vehicleId));
+
+  revalidatePath(`/vehicles/${vehicleId}/edit`);
+  revalidatePath("/vehicles");
+}

@@ -1111,6 +1111,9 @@ ships this feature):
 
 - `condition text` — "Used - Excellent" / "Used - Good" / "Used - Fair"
   / "New".
+- `description text` — public-facing Shopify product description. The
+  publish action prefers this over the internal `notes` field when
+  sending to Shopify; `notes` stays internal-only.
 - `shopify_product_id text unique` — set after a successful publish.
   Null means the vehicle has never been published. Acts as the
   duplicate-prevention guard.
@@ -1135,24 +1138,37 @@ files through our function. Wired in:
   user.
 - `src/lib/vehiclePhotoActions.ts` — server actions
   `addVehiclePhoto(vehicleId, url)` / `removeVehiclePhoto(vehicleId,
-  url)`. Remove also best-effort-deletes the blob via `del()`.
+  url)` / `reorderVehiclePhotos(vehicleId, newOrder)`. Remove also
+  best-effort-deletes the blob via `del()`. Reorder validates that
+  the new list is a permutation of what's stored, then writes the
+  ordered array back. The first entry in the array is the cover
+  photo on Shopify.
+- Drag-and-drop reordering uses native HTML5 drag events (no extra
+  dependency) — the user drags a tile onto another tile and the
+  client optimistically swaps order, then persists; on failure the
+  optimistic state is rolled back.
 
-**Publish action** (`publishToShopify` in `src/app/vehicles/page.tsx`):
+**Publish action** (`publishVehicleAction` in `src/lib/publishVehicle.ts`):
 
 - Role gate: admin or manager only.
 - Pre-flight: requires `vin`, `list_price`, and at least one photo.
   The row UI hides the publish button and shows the reason inline if
   any of those are missing.
 - Body: calls `createCarListing` with the vehicle's stored fields
-  (vin, list_price → price, condition, mileage, photos → photoUrls,
-  notes) plus the form's chosen status (draft default / active).
+  (vin, list_price → price, condition, mileage, photos → photoUrls
+  in their ordered DB position, `description ?? notes` → notes)
+  plus the form's chosen status (draft default / active).
+- Callable from both `/vehicles` (list-row inline publish) and
+  `/vehicles/[id]/edit` (panel at the bottom). The form posts a
+  `returnTo` hidden field so the result banner appears on whichever
+  page launched it.
 - On success: stores `shopify_product_id`, `shopify_status`,
-  `shopify_published_at` on the row and redirects to
-  `/vehicles?published=1&publishId=<id>`, rendering a green banner
-  with a link to the Shopify admin product URL.
-- On failure: redirects to
-  `/vehicles?publishError=<message>&publishId=<id>`, rendering a red
-  banner. The vehicle row is unchanged so the user can fix and retry.
+  `shopify_published_at` on the row and redirects with
+  `?published=1&publishId=<id>`, rendering a green banner with a link
+  to the Shopify admin product URL.
+- On failure: redirects with `?publishError=<message>&publishId=<id>`,
+  rendering a red banner. The vehicle row is unchanged so the user
+  can fix and retry.
 - `vehicles_shopify_product_id_unique` constraint prevents accidental
   republish via DB-level guarantee; the action also short-circuits
   with a friendly error.

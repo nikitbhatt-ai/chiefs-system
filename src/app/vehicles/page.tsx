@@ -6,7 +6,7 @@ import { vehicles } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 import { auth } from "@/auth";
-import { createCarListing } from "../../../vinToShopify/index.js";
+import { publishVehicleAction } from "@/lib/publishVehicle";
 import { VehicleAddForm } from "./VehicleAddForm";
 
 const LOTS = ["on-site", "dealership", "upfitting", "sames-dropoff"] as const;
@@ -69,66 +69,6 @@ async function createVehicle(formData: FormData) {
 }
 
 const ALLOWED_PUBLISH_ROLES = ["admin", "manager"] as const;
-
-async function publishToShopify(formData: FormData) {
-  "use server";
-  const id = String(formData.get("id") ?? "");
-  const status = (String(formData.get("status") ?? "draft") === "active"
-    ? "active"
-    : "draft") as "draft" | "active";
-  if (!id) return;
-
-  const fail = (msg: string): never => {
-    redirect(
-      `/vehicles?publishId=${id}&publishError=${encodeURIComponent(msg)}`
-    );
-  };
-
-  const session = await auth();
-  if (!session?.user) fail("Unauthorized.");
-  if (
-    !ALLOWED_PUBLISH_ROLES.includes(
-      session!.user.role as (typeof ALLOWED_PUBLISH_ROLES)[number]
-    )
-  ) {
-    fail("Only admin or manager can publish to Shopify.");
-  }
-
-  const [v] = await db.select().from(vehicles).where(eq(vehicles.id, id));
-  if (!v) fail("Vehicle not found.");
-  if (v!.shopifyProductId) fail("Vehicle is already published.");
-  if (!v!.vin) fail("VIN is required to publish.");
-  if (!v!.listPrice) fail("List price is required to publish.");
-  const photos = v!.photos ?? [];
-  if (photos.length === 0) fail("At least one photo is required to publish.");
-
-  const result = await createCarListing({
-    vin: v!.vin!,
-    price: v!.listPrice!,
-    condition: v!.condition ?? undefined,
-    mileage: v!.mileage ?? undefined,
-    photoUrls: photos,
-    notes: v!.notes ?? undefined,
-    status,
-  });
-
-  if (result.status === "error") {
-    fail(`Shopify (${result.stage}): ${result.error}`);
-  }
-
-  await db
-    .update(vehicles)
-    .set({
-      shopifyProductId: String((result as { productId: string | number }).productId),
-      shopifyStatus: status,
-      shopifyPublishedAt: new Date(),
-      updatedAt: new Date(),
-    })
-    .where(eq(vehicles.id, id));
-
-  revalidatePath("/vehicles");
-  redirect(`/vehicles?publishId=${id}&published=1`);
-}
 
 async function deleteVehicle(formData: FormData) {
   "use server";
@@ -303,8 +243,9 @@ export default async function VehiclesPage({
                           {blocker}
                         </span>
                       ) : (
-                        <form action={publishToShopify} className="flex items-center gap-1">
+                        <form action={publishVehicleAction} className="flex items-center gap-1">
                           <input type="hidden" name="id" value={v.id} />
+                          <input type="hidden" name="returnTo" value="/vehicles" />
                           <select
                             name="status"
                             defaultValue="draft"
