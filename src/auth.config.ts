@@ -56,10 +56,10 @@ export const authConfig: NextAuthConfig = {
         path.startsWith("/signin") ||
         path.startsWith("/setup") ||
         path.startsWith("/api/auth") ||
-        // Public endpoints authed by shared secret instead of a user
-        // session: the lead-capture webhook target and Vercel Cron hits.
-        // The route handlers themselves enforce the secret.
-        path === "/api/leads/capture" ||
+        // Public endpoints authed by shared secret (or by Origin
+        // allowlist on the /web variant) instead of a user session.
+        // The route handlers themselves enforce the relevant check.
+        path.startsWith("/api/leads/capture") ||
         path.startsWith("/api/cron/");
       if (isPublicRoute) return true;
       return isLoggedIn;
