@@ -92,15 +92,21 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true }, { status: 200, headers: cors });
   }
 
-  const name = String(b.name ?? "").trim();
+  // Length caps prevent a permitted-origin form from stuffing megabytes
+  // of text into our DB. Trim then slice. Reasonable inquiry-form caps:
+  // short for contact fields, long for the free-text message.
+  const cap = (v: unknown, max: number): string =>
+    String(v ?? "").trim().slice(0, max);
+
+  const name = cap(b.name, 200);
   if (!name) return NextResponse.json({ error: "name is required" }, { status: 400, headers: cors });
 
-  const email = String(b.email ?? "").trim() || null;
-  const phone = String(b.phone ?? "").trim() || null;
-  const message = String(b.message ?? "").trim() || null;
-  const customerTypeRaw = String(b.customerType ?? "").trim();
+  const email = cap(b.email, 200) || null;
+  const phone = cap(b.phone, 50) || null;
+  const message = cap(b.message, 5000) || null;
+  const customerTypeRaw = cap(b.customerType, 50);
   const customerType = ALLOWED_CUSTOMER_TYPES.has(customerTypeRaw) ? customerTypeRaw : null;
-  const source = String(b.source ?? "").trim() || "shopify_storefront";
+  const source = cap(b.source, 100) || "shopify_storefront";
 
   const subSourceMeta: Record<string, unknown> = {
     capturedAt: new Date().toISOString(),
