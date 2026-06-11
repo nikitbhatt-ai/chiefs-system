@@ -65,40 +65,51 @@ export async function convertLeadAction(formData: FormData) {
   const customerTypeValue = toCustomerType(lead.customerType);
   const pipeline = pipelineForCustomerType(lead.customerType);
 
-  const [customer] = await db
-    .insert(customers)
-    .values({
-      name: lead.name,
-      type: customerTypeValue,
-      email: lead.email,
-      phone: lead.phone,
-    })
-    .returning();
+  // All-or-nothing: previously this did three sequential writes without a
+  // transaction, so a mid-flight failure left orphan customer or orphan
+  // customer+deal rows tied to a still-"new" lead. Wrap in db.transaction
+  // so either every row is created or none are.
+  try {
+    await db.transaction(async (tx) => {
+      const [customer] = await tx
+        .insert(customers)
+        .values({
+          name: lead.name,
+          type: customerTypeValue,
+          email: lead.email,
+          phone: lead.phone,
+        })
+        .returning();
 
-  const [deal] = await db
-    .insert(deals)
-    .values({
-      customerId: customer.id,
-      pipeline,
-      stage: "prospect",
-      source: lead.source,
-      subSource: lead.subSource,
-      subSourceMeta: lead.subSourceMeta,
-      partnerId: lead.partnerId,
-      partnerContactId: lead.partnerContactId,
-      notes: lead.notes,
-    })
-    .returning();
+      const [deal] = await tx
+        .insert(deals)
+        .values({
+          customerId: customer.id,
+          pipeline,
+          stage: "prospect",
+          source: lead.source,
+          subSource: lead.subSource,
+          subSourceMeta: lead.subSourceMeta,
+          partnerId: lead.partnerId,
+          partnerContactId: lead.partnerContactId,
+          notes: lead.notes,
+        })
+        .returning();
 
-  await db
-    .update(leads)
-    .set({
-      status: "converted",
-      convertedCustomerId: customer.id,
-      convertedDealId: deal.id,
-      updatedAt: new Date(),
-    })
-    .where(eq(leads.id, id));
+      await tx
+        .update(leads)
+        .set({
+          status: "converted",
+          convertedCustomerId: customer.id,
+          convertedDealId: deal.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(leads.id, id));
+    });
+  } catch (err) {
+    console.error("convertLeadAction failed:", err);
+    return;
+  }
   revalidatePath("/leads");
   revalidatePath("/crm");
   revalidatePath("/deals");

@@ -22,7 +22,10 @@ const DEDUP_DAYS = 7;
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
   const expected = process.env.CRON_SECRET;
-  if (expected && auth !== `Bearer ${expected}`) {
+  // Fail closed: if CRON_SECRET is unset OR the header doesn't match, 401.
+  // Previously `if (expected && …)` left the endpoint wide open when the
+  // env var was missing.
+  if (!expected || auth !== `Bearer ${expected}`) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

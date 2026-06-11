@@ -101,6 +101,16 @@ jobs:
 
 All schema changes have been applied via SQL run manually in Neon's SQL Editor. If you ever stand up a fresh database, run the cumulative block below in order. Every statement uses `IF NOT EXISTS` / `ON CONFLICT DO NOTHING` so it's safe to re-run.
 
+> ⚠️ **Doc drift warning** — this SQL block has fallen behind `src/db/schema.ts`. It covers the historical `ALTER TABLE` migrations we hit during development but does **not** reproduce every table from scratch. For a fresh database, treat `src/db/schema.ts` as the source of truth (or run `drizzle-kit generate` against an empty DB) and reconcile with this block only for the `ALTER` history.
+>
+> To audit drift against the live Neon DB, run this query in the Neon SQL Editor and diff the output against `src/db/schema.ts`:
+> ```sql
+> SELECT table_name, column_name, data_type
+> FROM information_schema.columns
+> WHERE table_schema = 'public'
+> ORDER BY table_name, ordinal_position;
+> ```
+
 ```sql
 -- PR 1: pipeline templates
 ALTER TYPE customer_type ADD VALUE IF NOT EXISTS 'walk_in_credentialed';
@@ -111,9 +121,9 @@ ALTER TYPE deal_stage ADD VALUE IF NOT EXISTS 'deposit_received';
 ALTER TABLE parts ADD COLUMN IF NOT EXISTS restricted boolean NOT NULL DEFAULT false;
 ALTER TABLE parts ADD COLUMN IF NOT EXISTS restriction_category text;
 
--- PR 4: pipeline-doc kind column on files
-ALTER TABLE files ADD COLUMN IF NOT EXISTS kind text;
-CREATE INDEX IF NOT EXISTS files_kind_idx ON files (kind);
+-- PR 4: pipeline-doc kind column on customer_documents (was originally
+-- on a `files` table that has since been renamed)
+CREATE INDEX IF NOT EXISTS customer_documents_kind_idx ON customer_documents (kind);
 
 -- PR 15: notifications + activity mentions
 ALTER TABLE deal_activity ADD COLUMN IF NOT EXISTS mentions jsonb DEFAULT '[]'::jsonb;
