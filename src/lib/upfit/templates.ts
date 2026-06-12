@@ -22,8 +22,16 @@ export const VIEW_LABELS: Record<ViewKey, string> = {
 export const VIEW_ORDER: ViewKey[] = ["top", "front", "rear", "side_left", "side_right"];
 
 export type VehicleView = {
-  // Path data, drawn against a 1000x600 viewBox at strokeWidth=2.
-  paths: string[];
+  // Background image for this view. Files live in
+  // `public/upfit-templates/<slug>/<view>.png` (PNG / JPG). The editor and
+  // PDF both fetch via the URL form below; missing files render as an
+  // empty white panel + the SVG-path fallback below.
+  imageUrl: string;
+  // Optional SVG path fallback drawn behind the image when the image is
+  // missing. Strokes against a 1000x600 viewBox at strokeWidth=2. Kept
+  // around so the page still shows *something* recognizable when a
+  // template image hasn't been uploaded yet.
+  fallbackPaths: string[];
 };
 
 export type VehicleTemplate = {
@@ -40,7 +48,8 @@ const SUV: VehicleTemplate = {
   label: "SUV (Tahoe / Suburban / Explorer)",
   views: {
     top: {
-      paths: [
+      imageUrl: "/upfit-templates/suv/top.png",
+      fallbackPaths: [
         // Body outline
         "M 250 80 L 750 80 Q 820 80 850 130 L 870 200 L 870 400 L 850 470 Q 820 520 750 520 L 250 520 Q 180 520 150 470 L 130 400 L 130 200 L 150 130 Q 180 80 250 80 Z",
         // Windshield
@@ -65,7 +74,8 @@ const SUV: VehicleTemplate = {
       ],
     },
     front: {
-      paths: [
+      imageUrl: "/upfit-templates/suv/front.png",
+      fallbackPaths: [
         // Body
         "M 200 200 L 800 200 L 820 350 L 850 360 L 850 480 L 800 500 L 200 500 L 150 480 L 150 360 L 180 350 Z",
         // Hood / windshield
@@ -89,7 +99,8 @@ const SUV: VehicleTemplate = {
       ],
     },
     rear: {
-      paths: [
+      imageUrl: "/upfit-templates/suv/rear.png",
+      fallbackPaths: [
         // Body
         "M 200 200 L 800 200 L 820 350 L 850 360 L 850 480 L 800 500 L 200 500 L 150 480 L 150 360 L 180 350 Z",
         // Rear window
@@ -112,7 +123,8 @@ const SUV: VehicleTemplate = {
       ],
     },
     side_left: {
-      paths: [
+      imageUrl: "/upfit-templates/suv/side_left.png",
+      fallbackPaths: [
         // Body
         "M 100 280 Q 130 220 200 200 L 330 180 L 360 140 L 700 140 L 740 180 L 870 200 Q 920 230 920 290 L 920 420 L 100 420 Z",
         // Greenhouse split
@@ -142,7 +154,8 @@ const SUV: VehicleTemplate = {
       ],
     },
     side_right: {
-      paths: [
+      imageUrl: "/upfit-templates/suv/side_right.png",
+      fallbackPaths: [
         // (Mirror of side_left)
         "M 900 280 Q 870 220 800 200 L 670 180 L 640 140 L 300 140 L 260 180 L 130 200 Q 80 230 80 290 L 80 420 L 900 420 Z",
         "M 640 140 L 620 280 L 280 280 L 300 140",
@@ -170,7 +183,8 @@ const PICKUP: VehicleTemplate = {
   label: "Pickup (Silverado / F-Series)",
   views: {
     top: {
-      paths: [
+      imageUrl: "/upfit-templates/pickup/top.png",
+      fallbackPaths: [
         // Body outline
         "M 200 80 L 800 80 Q 860 80 880 140 L 880 460 Q 860 520 800 520 L 200 520 Q 140 520 120 460 L 120 140 Q 140 80 200 80 Z",
         // Hood
@@ -195,7 +209,8 @@ const PICKUP: VehicleTemplate = {
       ],
     },
     front: {
-      paths: [
+      imageUrl: "/upfit-templates/pickup/front.png",
+      fallbackPaths: [
         // Body
         "M 200 220 L 800 220 L 820 360 L 850 370 L 850 490 L 800 510 L 200 510 L 150 490 L 150 370 L 180 360 Z",
         // Hood
@@ -218,7 +233,8 @@ const PICKUP: VehicleTemplate = {
       ],
     },
     rear: {
-      paths: [
+      imageUrl: "/upfit-templates/pickup/rear.png",
+      fallbackPaths: [
         // Body
         "M 200 200 L 800 200 L 820 360 L 850 370 L 850 490 L 800 510 L 200 510 L 150 490 L 150 370 L 180 360 Z",
         // Tailgate panel
@@ -240,7 +256,8 @@ const PICKUP: VehicleTemplate = {
       ],
     },
     side_left: {
-      paths: [
+      imageUrl: "/upfit-templates/pickup/side_left.png",
+      fallbackPaths: [
         // Body silhouette
         "M 80 280 Q 110 220 180 200 L 280 180 L 300 130 L 580 130 L 600 180 L 920 200 L 920 430 L 80 430 Z",
         // Cab back
@@ -272,7 +289,8 @@ const PICKUP: VehicleTemplate = {
       ],
     },
     side_right: {
-      paths: [
+      imageUrl: "/upfit-templates/pickup/side_right.png",
+      fallbackPaths: [
         "M 920 280 Q 890 220 820 200 L 720 180 L 700 130 L 420 130 L 400 180 L 80 200 L 80 430 L 920 430 Z",
         "M 400 180 L 400 430",
         "M 680 180 L 560 180 L 560 430",
@@ -301,7 +319,8 @@ const SEDAN: VehicleTemplate = {
   label: "Sedan (Charger / Patrol cruiser)",
   views: {
     top: {
-      paths: [
+      imageUrl: "/upfit-templates/sedan/top.png",
+      fallbackPaths: [
         "M 180 100 L 820 100 Q 870 110 880 160 L 880 440 Q 870 490 820 500 L 180 500 Q 130 490 120 440 L 120 160 Q 130 110 180 100 Z",
         "M 220 170 L 780 170 L 760 270 L 240 270 Z",
         "M 240 270 L 760 270 L 760 360 L 240 360 Z",
@@ -317,7 +336,8 @@ const SEDAN: VehicleTemplate = {
       ],
     },
     front: {
-      paths: [
+      imageUrl: "/upfit-templates/sedan/front.png",
+      fallbackPaths: [
         "M 180 280 L 820 280 L 850 410 L 870 420 L 870 490 L 820 510 L 180 510 L 130 490 L 130 420 L 150 410 Z",
         "M 230 280 L 770 280 L 790 220 L 210 220 Z",
         "M 270 220 L 730 220 L 730 160 L 270 160 Z",
@@ -330,7 +350,8 @@ const SEDAN: VehicleTemplate = {
       ],
     },
     rear: {
-      paths: [
+      imageUrl: "/upfit-templates/sedan/rear.png",
+      fallbackPaths: [
         "M 180 280 L 820 280 L 850 410 L 870 420 L 870 490 L 820 510 L 180 510 L 130 490 L 130 420 L 150 410 Z",
         "M 220 280 L 780 280 L 800 220 L 200 220 Z",
         "M 270 220 L 730 220 L 730 160 L 270 160 Z",
@@ -343,7 +364,8 @@ const SEDAN: VehicleTemplate = {
       ],
     },
     side_left: {
-      paths: [
+      imageUrl: "/upfit-templates/sedan/side_left.png",
+      fallbackPaths: [
         "M 80 350 Q 110 280 180 260 L 280 240 L 320 180 L 680 180 L 720 240 L 920 260 L 920 410 L 80 410 Z",
         "M 320 180 L 340 280 L 660 280 L 680 180",
         "M 340 280 L 360 240 L 360 410",
@@ -361,7 +383,8 @@ const SEDAN: VehicleTemplate = {
       ],
     },
     side_right: {
-      paths: [
+      imageUrl: "/upfit-templates/sedan/side_right.png",
+      fallbackPaths: [
         "M 920 350 Q 890 280 820 260 L 720 240 L 680 180 L 320 180 L 280 240 L 80 260 L 80 410 L 920 410 Z",
         "M 680 180 L 660 280 L 340 280 L 320 180",
         "M 660 280 L 640 240 L 640 410",
@@ -394,6 +417,15 @@ export const BODY_STYLES = Object.values(VEHICLE_TEMPLATES).map((t) => ({
 
 export function getTemplate(bodyStyle: string): VehicleTemplate {
   return VEHICLE_TEMPLATES[bodyStyle] ?? SUV;
+}
+
+// Translate a view's image URL into a server-side public/ filesystem
+// path. Used by the PDF renderer which has to embed the image as bytes
+// rather than fetch over HTTP. Returns null when the URL isn't one of
+// our managed `/upfit-templates/...` paths.
+export function localImagePath(imageUrl: string): string | null {
+  if (!imageUrl.startsWith("/upfit-templates/")) return null;
+  return `public${imageUrl}`;
 }
 
 // 12 high-contrast pin colors. The builder cycles through these so each

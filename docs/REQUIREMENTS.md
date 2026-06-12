@@ -1056,12 +1056,24 @@ sees and the techs build to. One upfit per quote.
 
 - [x] **Tab on `/quotes/[id]`** (`QuoteTabs`) — Quote / Upfit builder.
       Upfit page lives at `/quotes/[id]/upfit`.
-- [x] **Vehicle templates** defined as SVG path data in
-      `src/lib/upfit/templates.ts`. Each body style ships five views
-      (top, front, rear, side_left, side_right) on a shared 1000×600
-      viewBox. Phase-1 styles: SUV, pickup, sedan. Pin (x, y) is stored
-      as fraction 0..1 within whichever view it was placed on, so the
-      same coordinates render identically in the editor and in the PDF.
+- [x] **Vehicle templates** are image-backed. `src/lib/upfit/templates.ts`
+      defines each body style with five views (top, front, rear,
+      side_left, side_right). Each view has an `imageUrl` pointing at
+      `public/upfit-templates/<slug>/<view>.png` (the editor renders it
+      via `<image>` in the SVG; the PDF reads the file as a Buffer and
+      embeds via React-PDF `<Image>`). A `fallbackPaths` SVG line-art
+      drawing is kept as a graceful fallback when the image isn't on
+      disk yet — the page still loads, just with stylized line art
+      instead of the real template. Pin (x, y) is stored as fraction
+      0..1 of the shared 1000×600 viewBox so the same coordinate is
+      identical on screen and in print. Phase-1 styles: SUV, pickup,
+      sedan.
+- [x] **Template image contract** — drop PNG/JPG files at
+      `public/upfit-templates/<slug>/<view>.png` where `<slug>` is one
+      of `suv` / `pickup` / `sedan` and `<view>` is one of
+      `top` / `front` / `rear` / `side_left` / `side_right`. ~5:3 aspect
+      reads cleanly; missing files fall back to the SVG line art with
+      no error. No rebuild required — files are read on each render.
 - [x] **Per-diagram vehicle label** — every diagram view (editor +
       PDF) is headed with the specific make/model, e.g. "2024
       Chevrolet Tahoe". `upfit_configs.vehicle_label` stores it;
@@ -1071,9 +1083,16 @@ sees and the techs build to. One upfit per quote.
       so a spec can target a different unit than the deal record.
 - [x] **Builder UI** (`src/components/UpfitBuilder.tsx`, client) —
       body-style dropdown, part-from-inventory picker OR free-text
-      label, click-to-place pins, per-pin placement note, autocolor
-      from a 12-color palette, build notes textarea. "Save upfit"
-      persists via a server action on the page.
+      label, click-to-place pins, **pointer-drag to reposition placed
+      pins** (5-svg-unit threshold separates click-to-select from
+      drag-to-move), per-pin placement note, autocolor from a 12-color
+      palette, build notes textarea. "Save upfit" persists via a server
+      action on the page.
+- [x] **Place same part multiple times** — picking a part (or typing a
+      label) enters "placement mode" and stays in it across clicks, so
+      the same SKU can be placed on every corner/pillar of the vehicle
+      without re-selecting. Explicit "Stop placing" button on the hint
+      banner clears the selection when done.
 - [x] **Persistence** — `upfit_configs(quoteId UNIQUE, body_style,
       pins jsonb, notes)`. One row per quote, upserted on save. Cascade
       deletes when the quote is deleted.
@@ -1083,13 +1102,17 @@ sees and the techs build to. One upfit per quote.
       (# · label · SKU · view · placement note) + build notes. Streamed
       from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
       `record_type = upfit`). Download button on the upfit tab.
-- [ ] **Customer-folder auto-link** — drop the generated spec PDF into
-      `customer_documents` under "Spec Approvals" (deferred).
+- [x] **Customer-folder auto-link** — `upsertUpfitLink(quoteId)` in
+      `src/lib/customerDocLinks.ts` writes one stable
+      `customer_documents` row keyed by `kind = auto_link:upfit:<quoteId>`
+      into the customer folder under the **Photos / Build Documentation**
+      category. The row's `blob_url` points at `/api/pdf/upfit/<quoteId>`
+      and its `mime_type` is `application/pdf`, so the customer-folder
+      list link streams the live spec PDF rather than a stale snapshot.
+      Called on every save; purged when the quote has no customer.
 - [ ] **Standalone tool** outside the quote context (deferred).
 - [ ] **CAD upload** attachable to the upfit config (deferred).
 - [ ] **Build packages** uploadable to inventory parts list (deferred).
-- [ ] **Reorder / drag pins** to fix mistakes without re-placing
-      (deferred — today, "remove" then re-place).
 - [ ] **Per-vehicle photos** as an alternative to the templates
       (deferred — pin coords are template-relative today).
 

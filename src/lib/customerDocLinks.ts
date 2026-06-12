@@ -71,3 +71,64 @@ export async function unlinkQuote(quoteId: string) {
     .delete(customerDocuments)
     .where(eq(customerDocuments.kind, quoteKind(quoteId)));
 }
+
+// Upfit-builder spec sheet auto-link. Lands in the customer folder
+// under "Photos / Build Documentation" so the shop has the placement
+// diagram alongside the rest of the build artifacts. Points to the live
+// PDF endpoint — every click renders the current state, so edits to
+// the upfit are immediately reflected without versioning churn.
+function upfitKind(quoteId: string) {
+  return `auto_link:upfit:${quoteId}`;
+}
+
+export async function upsertUpfitLink(quoteId: string) {
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return;
+  const kind = upfitKind(quoteId);
+
+  if (!q.customerId) {
+    await db.delete(customerDocuments).where(eq(customerDocuments.kind, kind));
+    return;
+  }
+
+  const baseName = q.quoteNumber ?? `Quote ${q.id.slice(0, 8)}`;
+  const fileName = `${baseName} (upfit spec)`;
+  const blobUrl = `/api/pdf/upfit/${q.id}`;
+  const associatedDealId = q.dealId ?? null;
+
+  const [existing] = await db
+    .select({ id: customerDocuments.id })
+    .from(customerDocuments)
+    .where(and(eq(customerDocuments.kind, kind), eq(customerDocuments.isCurrentVersion, true)))
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(customerDocuments)
+      .set({
+        customerId: q.customerId,
+        category: "photos_build" as CustomerDocCategory,
+        fileName,
+        blobUrl,
+        associatedDealId,
+      })
+      .where(eq(customerDocuments.id, existing.id));
+  } else {
+    await db.insert(customerDocuments).values({
+      customerId: q.customerId,
+      category: "photos_build" as CustomerDocCategory,
+      fileName,
+      blobUrl,
+      mimeType: "application/pdf",
+      associatedDealId,
+      kind,
+      notes: "Auto-linked upfit spec sheet. Opens the live PDF.",
+    });
+  }
+}
+
+export async function unlinkUpfit(quoteId: string) {
+  await db
+    .delete(customerDocuments)
+    .where(eq(customerDocuments.kind, upfitKind(quoteId)));
+}
