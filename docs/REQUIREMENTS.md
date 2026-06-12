@@ -1062,6 +1062,13 @@ sees and the techs build to. One upfit per quote.
       viewBox. Phase-1 styles: SUV, pickup, sedan. Pin (x, y) is stored
       as fraction 0..1 within whichever view it was placed on, so the
       same coordinates render identically in the editor and in the PDF.
+- [x] **Per-diagram vehicle label** — every diagram view (editor +
+      PDF) is headed with the specific make/model, e.g. "2024
+      Chevrolet Tahoe". `upfit_configs.vehicle_label` stores it;
+      defaults from the linked deal's vehicle fields (or the deal's
+      `vehicleId` → `vehicles` row) via `resolveVehicleLabel()` in
+      `src/lib/upfit/vehicleLabel.ts`, and is editable in the builder
+      so a spec can target a different unit than the deal record.
 - [x] **Builder UI** (`src/components/UpfitBuilder.tsx`, client) —
       body-style dropdown, part-from-inventory picker OR free-text
       label, click-to-place pins, per-pin placement note, autocolor
@@ -1095,12 +1102,19 @@ CREATE TABLE IF NOT EXISTS upfit_configs (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   quote_id uuid NOT NULL REFERENCES quotes(id) ON DELETE CASCADE UNIQUE,
   body_style text NOT NULL DEFAULT 'suv',
+  vehicle_label text,
   pins jsonb NOT NULL DEFAULT '[]'::jsonb,
   notes text,
   created_at timestamp NOT NULL DEFAULT now(),
   updated_at timestamp NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS upfit_configs_quote_idx ON upfit_configs (quote_id);
+```
+
+If the table already exists from an earlier deploy, add the column:
+
+```sql
+ALTER TABLE upfit_configs ADD COLUMN IF NOT EXISTS vehicle_label text;
 ```
 
 ## Users (not yet built)

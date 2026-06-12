@@ -16,6 +16,7 @@ import type { UpfitPin } from "@/db/schema";
 export type UpfitBuilderProps = {
   quoteId: string;
   initialBodyStyle: string;
+  initialVehicleLabel: string;
   initialPins: UpfitPin[];
   initialNotes: string;
   parts: { id: string; sku: string; name: string }[];
@@ -31,12 +32,14 @@ function randomId(): string {
 export function UpfitBuilder({
   quoteId,
   initialBodyStyle,
+  initialVehicleLabel,
   initialPins,
   initialNotes,
   parts,
   action,
 }: UpfitBuilderProps) {
   const [bodyStyle, setBodyStyle] = useState(initialBodyStyle);
+  const [vehicleLabel, setVehicleLabel] = useState(initialVehicleLabel);
   const [pins, setPins] = useState<UpfitPin[]>(initialPins);
   const [notes, setNotes] = useState(initialNotes);
   const [selectedPartId, setSelectedPartId] = useState<string>("");
@@ -100,6 +103,7 @@ export function UpfitBuilder({
     const fd = new FormData();
     fd.set("quoteId", quoteId);
     fd.set("bodyStyle", bodyStyle);
+    fd.set("vehicleLabel", vehicleLabel);
     fd.set("pins", JSON.stringify(pins));
     fd.set("notes", notes);
     startTransition(async () => {
@@ -114,8 +118,8 @@ export function UpfitBuilder({
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[200px_1fr_1fr_auto] gap-3 items-end">
+      {/* Vehicle identity */}
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[200px_1fr] gap-3 items-end">
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
           Body style
           <select
@@ -131,6 +135,19 @@ export function UpfitBuilder({
           </select>
         </label>
 
+        <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+          Vehicle (make &amp; model — printed on every diagram)
+          <input
+            value={vehicleLabel}
+            onChange={(e) => setVehicleLabel(e.target.value)}
+            placeholder="e.g. 2024 Chevrolet Tahoe PPV"
+            className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+          />
+        </label>
+      </div>
+
+      {/* Equipment toolbar */}
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
           Pick a part from inventory
           <select
@@ -194,6 +211,7 @@ export function UpfitBuilder({
             <UpfitView
               key={view}
               view={view}
+              vehicleLabel={vehicleLabel}
               paths={template.views[view].paths}
               pins={pins.filter((p) => p.view === view)}
               activePinId={activePinId}
@@ -278,6 +296,7 @@ export function UpfitBuilder({
 
 function UpfitView({
   view,
+  vehicleLabel,
   paths,
   pins,
   activePinId,
@@ -286,6 +305,7 @@ function UpfitView({
   onSelect,
 }: {
   view: ViewKey;
+  vehicleLabel: string;
   paths: string[];
   pins: UpfitPin[];
   activePinId: string | null;
@@ -310,8 +330,13 @@ function UpfitView({
 
   return (
     <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
-        {VIEW_LABELS[view]}
+      <div className="mb-2">
+        <div className="text-xs font-body font-semibold text-white">
+          {vehicleLabel.trim() || "Vehicle (unset)"}
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+          {VIEW_LABELS[view]}
+        </div>
       </div>
       <svg
         ref={svgRef}

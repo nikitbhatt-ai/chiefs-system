@@ -10,10 +10,11 @@ import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, purchaseOrders, vendors, upfitConfigs, deals, vehicles } from "@/db/schema";
+import { quotes, customers, purchaseOrders, vendors, upfitConfigs } from "@/db/schema";
 import { QuoteDocument, type QuoteData, type QuoteLine } from "./templates/quote";
 import { PurchaseOrderDocument, type PurchaseOrderData, type POLine } from "./templates/purchaseOrder";
 import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
+import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
 
 export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit";
 
@@ -80,31 +81,15 @@ async function resolveUpfit(quoteId: string): Promise<UpfitPdfData | null> {
     ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0] ?? null
     : null;
 
-  let vehicleSummary: string | null = null;
-  if (q.dealId) {
-    const [deal] = await db.select().from(deals).where(eq(deals.id, q.dealId));
-    if (deal) {
-      const parts: string[] = [];
-      if (deal.vehicleYear) parts.push(String(deal.vehicleYear));
-      if (deal.vehicleMake) parts.push(deal.vehicleMake);
-      if (deal.vehicleModel) parts.push(deal.vehicleModel);
-      if (parts.length) vehicleSummary = parts.join(" ");
-      else if (deal.vehicleId) {
-        const [v] = await db.select().from(vehicles).where(eq(vehicles.id, deal.vehicleId));
-        if (v) {
-          const vparts = [v.year, v.make, v.model].filter(Boolean) as (string | number)[];
-          if (vparts.length) vehicleSummary = vparts.join(" ");
-        }
-      }
-    }
-  }
+  // Stored override on the config wins; otherwise derive from the deal.
+  const vehicleSummary = config?.vehicleLabel?.trim() || (await resolveVehicleLabel(q));
 
   return {
     quoteId: q.id,
     quoteNumber: q.quoteNumber,
     createdAt: q.createdAt,
     customerName: customer?.name ?? null,
-    vehicleSummary,
+    vehicleSummary: vehicleSummary || null,
     bodyStyle: config?.bodyStyle ?? "suv",
     pins: config?.pins ?? [],
     notes: config?.notes ?? null,

@@ -29,13 +29,16 @@ function ViewPanel({
   view,
   paths,
   pins,
+  vehicleLabel,
 }: {
   view: ViewKey;
   paths: string[];
   pins: UpfitPin[];
+  vehicleLabel: string;
 }) {
   return (
     <View style={{ width: "48%", marginBottom: 12, padding: 6, borderWidth: 1, borderColor: "#cccccc" }}>
+      <Text style={{ fontSize: 9, fontWeight: 700, marginBottom: 1 }}>{vehicleLabel}</Text>
       <Text style={{ fontSize: 8, color: BRANDING.mutedColor, marginBottom: 4, textTransform: "uppercase" }}>
         {VIEW_LABELS[view]}
       </Text>
@@ -77,6 +80,7 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
   const styles = sharedStyles;
   const template = getTemplate(data.bodyStyle);
   const docNumber = data.quoteNumber ?? `Q-${data.quoteId.slice(0, 8)}`;
+  const vehicleLabel = data.vehicleSummary ?? template.label;
   const generated = new Date();
 
   return (
@@ -127,6 +131,7 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
               view={view}
               paths={template.views[view].paths}
               pins={data.pins.filter((p) => p.view === view)}
+              vehicleLabel={vehicleLabel}
             />
           ))}
         </View>

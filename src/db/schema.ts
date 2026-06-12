@@ -587,6 +587,10 @@ export const upfitConfigs = pgTable("upfit_configs", {
   id: uuid("id").defaultRandom().primaryKey(),
   quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "cascade" }).unique(),
   bodyStyle: text("body_style").notNull().default("suv"),
+  // Human-readable make/model the diagram represents, e.g. "2024
+  // Chevrolet Tahoe". Defaults from the linked deal/vehicle but is
+  // editable so a spec can target a different unit than the deal record.
+  vehicleLabel: text("vehicle_label"),
   pins: jsonb("pins").$type<UpfitPin[]>().notNull().default([]),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
