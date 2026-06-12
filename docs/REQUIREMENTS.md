@@ -1049,31 +1049,30 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
 
 ## Upfit Builder
 
-Visual spec sheet for sales: sales picks a vehicle body style, drags
-numbered pins onto top/front/rear/driver/passenger views, labels each
-pin (free text or part from inventory), and prints a PDF the customer
-sees and the techs build to. One upfit per quote.
+Visual spec sheet for sales: sales picks a vehicle body style, drops
+numbered pins anywhere on the vehicle blueprint image, labels each pin
+(free text or part from inventory), and prints a PDF the customer sees
+and the techs build to. One upfit per quote.
 
 - [x] **Tab on `/quotes/[id]`** (`QuoteTabs`) — Quote / Upfit builder.
       Upfit page lives at `/quotes/[id]/upfit`.
-- [x] **Vehicle templates** are image-backed. `src/lib/upfit/templates.ts`
-      defines each body style with five views (top, front, rear,
-      side_left, side_right). Each view has an `imageUrl` pointing at
-      `public/upfit-templates/<slug>/<view>.png` (the editor renders it
-      via `<image>` in the SVG; the PDF reads the file as a Buffer and
-      embeds via React-PDF `<Image>`). A `fallbackPaths` SVG line-art
-      drawing is kept as a graceful fallback when the image isn't on
-      disk yet — the page still loads, just with stylized line art
-      instead of the real template. Pin (x, y) is stored as fraction
-      0..1 of the shared 1000×600 viewBox so the same coordinate is
-      identical on screen and in print. Phase-1 styles: SUV, pickup,
-      sedan.
-- [x] **Template image contract** — drop PNG/JPG files at
-      `public/upfit-templates/<slug>/<view>.png` where `<slug>` is one
-      of `suv` / `pickup` / `sedan` and `<view>` is one of
-      `top` / `front` / `rear` / `side_left` / `side_right`. ~5:3 aspect
-      reads cleanly; missing files fall back to the SVG line art with
-      no error. No rebuild required — files are read on each render.
+- [x] **Vehicle templates** are a single composite blueprint image per
+      body style — the multi-view picture (top / front / rear / sides
+      all in one image) sales already works from. `templates.ts` maps
+      each body-style slug to one `imageUrl` at
+      `public/upfit-templates/<slug>.png`. The editor renders it as an
+      `<img>`; the PDF reads the file as a Buffer and embeds via
+      React-PDF `<Image>`. Pins are placed freely anywhere on the image
+      and stored as fraction 0..1 of the image box, so the same
+      coordinate is identical on screen and in print regardless of the
+      image's aspect ratio. Phase-1 styles: SUV, pickup, sedan. (The
+      earlier five-separate-views model was dropped — `UpfitPin.view`
+      is retained optional for backward-compat only.)
+- [x] **Template image contract** — drop ONE PNG/JPG per body style at
+      `public/upfit-templates/<slug>.png` where `<slug>` is `suv` /
+      `pickup` / `sedan`. Any aspect ratio works (pins track the image
+      by percentage); a missing file degrades to a labeled empty box,
+      no crash. No rebuild required — files are read on each render.
 - [x] **Per-diagram vehicle label** — every diagram view (editor +
       PDF) is headed with the specific make/model, e.g. "2024
       Chevrolet Tahoe". `upfit_configs.vehicle_label` stores it;
@@ -1083,11 +1082,12 @@ sees and the techs build to. One upfit per quote.
       so a spec can target a different unit than the deal record.
 - [x] **Builder UI** (`src/components/UpfitBuilder.tsx`, client) —
       body-style dropdown, part-from-inventory picker OR free-text
-      label, click-to-place pins, **pointer-drag to reposition placed
-      pins** (5-svg-unit threshold separates click-to-select from
-      drag-to-move), per-pin placement note, autocolor from a 12-color
-      palette, build notes textarea. "Save upfit" persists via a server
-      action on the page.
+      label, click-to-place pins on the single blueprint image,
+      **pointer-drag to reposition placed pins** (1%-of-box threshold
+      separates click-to-select from drag-to-move), per-pin placement
+      note, autocolor from a 12-color palette, build notes textarea.
+      Pins are HTML overlays positioned by percentage over the `<img>`.
+      "Save upfit" persists via a server action on the page.
 - [x] **Place same part multiple times** — picking a part (or typing a
       label) enters "placement mode" and stays in it across clicks, so
       the same SKU can be placed on every corner/pillar of the vehicle
@@ -1097,10 +1097,10 @@ sees and the techs build to. One upfit per quote.
       pins jsonb, notes)`. One row per quote, upserted on save. Cascade
       deletes when the quote is deleted.
 - [x] **PDF spec sheet** — `src/lib/pdf/templates/upfit.tsx` renders
-      branded header + customer/vehicle block + 5-up diagram grid with
-      numbered pins on the same SVG paths + equipment table
-      (# · label · SKU · view · placement note) + build notes. Streamed
-      from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
+      branded header + customer/vehicle block + the full-width
+      blueprint image with numbered pins overlaid by percentage +
+      equipment table (# · label · SKU · placement note) + build notes.
+      Streamed from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
       `record_type = upfit`). Download button on the upfit tab.
 - [x] **Customer-folder auto-link** — `upsertUpfitLink(quoteId)` in
       `src/lib/customerDocLinks.ts` writes one stable

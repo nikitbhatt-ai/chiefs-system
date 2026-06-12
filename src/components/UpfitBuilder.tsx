@@ -3,12 +3,8 @@
 import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import {
   BODY_STYLES,
-  VIEW_LABELS,
-  VIEW_ORDER,
-  VIEW_VIEWBOX,
   getTemplate,
   nextPinColor,
-  type ViewKey,
 } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
@@ -28,10 +24,10 @@ function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
 
-// Below this distance threshold (in SVG units), a pointerdown is treated
-// as a click rather than a drag — lets users click a pin to select it
-// without nudging its position by a pixel or two.
-const DRAG_THRESHOLD_SVG = 5;
+// Below this distance (fraction of the image box) a pointerdown is
+// treated as a click-to-select rather than a drag, so tapping a pin to
+// select it doesn't nudge its position.
+const DRAG_THRESHOLD = 0.01;
 
 export function UpfitBuilder({
   quoteId,
@@ -54,10 +50,15 @@ export function UpfitBuilder({
 
   const template = useMemo(() => getTemplate(bodyStyle), [bodyStyle]);
 
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ pinId: string; startX: number; startY: number; moved: boolean } | null>(
+    null,
+  );
+
   // The next pin to be added when the user clicks on the diagram. We
   // deliberately do NOT clear this after each placement so a single
-  // selection can be placed multiple times (a common case: front + rear
-  // pillar light using the same SKU).
+  // selection can be placed multiple times (e.g. the same SKU on the
+  // front and rear of the vehicle).
   const pendingSelection: Selection | null = useMemo(() => {
     if (selectedPartId) {
       const p = parts.find((pp) => pp.id === selectedPartId);
@@ -76,32 +77,67 @@ export function UpfitBuilder({
   const renumber = (arr: UpfitPin[]): UpfitPin[] =>
     arr.map((p, idx) => ({ ...p, number: idx + 1 }));
 
-  const placePin = useCallback(
-    (view: ViewKey, x: number, y: number) => {
-      if (!pendingSelection) return;
-      const id = randomId();
-      setPins((cur) => {
-        const next: UpfitPin = {
-          id,
-          number: cur.length + 1,
-          view,
-          x,
-          y,
-          label: pendingSelection.label,
-          partId: pendingSelection.partId,
-          partSku: pendingSelection.partSku,
-          color: nextPinColor(cur.length),
-        };
-        return [...cur, next];
-      });
-      setActivePinId(id);
-    },
-    [pendingSelection],
-  );
+  // Convert a client (mouse) coordinate into a fractional 0..1 position
+  // inside the image box.
+  const toFractional = (clientX: number, clientY: number) => {
+    const box = boxRef.current;
+    if (!box) return null;
+    const rect = box.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+    };
+  };
 
-  const movePin = useCallback((id: string, x: number, y: number) => {
-    setPins((cur) => cur.map((p) => (p.id === id ? { ...p, x, y } : p)));
-  }, []);
+  const handleBoxClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pendingSelection) return;
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    const id = randomId();
+    setPins((cur) => [
+      ...cur,
+      {
+        id,
+        number: cur.length + 1,
+        x: f.x,
+        y: f.y,
+        label: pendingSelection.label,
+        partId: pendingSelection.partId,
+        partSku: pendingSelection.partSku,
+        color: nextPinColor(cur.length),
+      },
+    ]);
+    setActivePinId(id);
+  };
+
+  const handlePinPointerDown = (e: React.PointerEvent<HTMLButtonElement>, pin: UpfitPin) => {
+    e.stopPropagation();
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    dragRef.current = { pinId: pin.id, startX: f.x, startY: f.y, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePinPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    if (!drag.moved) {
+      if (Math.hypot(f.x - drag.startX, f.y - drag.startY) < DRAG_THRESHOLD) return;
+      drag.moved = true;
+    }
+    setPins((cur) => cur.map((p) => (p.id === drag.pinId ? { ...p, x: f.x, y: f.y } : p)));
+  };
+
+  const handlePinPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (!drag.moved) setActivePinId(drag.pinId);
+    dragRef.current = null;
+  };
 
   const removePin = (id: string) => {
     setPins((cur) => renumber(cur.filter((p) => p.id !== id)));
@@ -150,7 +186,7 @@ export function UpfitBuilder({
         </label>
 
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
-          Vehicle (make &amp; model — printed on every diagram)
+          Vehicle (make &amp; model — printed on the diagram)
           <input
             value={vehicleLabel}
             onChange={(e) => setVehicleLabel(e.target.value)}
@@ -214,8 +250,8 @@ export function UpfitBuilder({
       >
         <span>
           {pendingSelection
-            ? `Click on a vehicle view to place: ${pendingSelection.label}. Place multiple times for the same part. Drag any placed pin to move it.`
-            : "Pick a part or type a custom label, then click on a vehicle view to place a pin. Drag placed pins to move them."}
+            ? `Click on the diagram to place: ${pendingSelection.label}. Place it as many times as you need. Drag any placed pin to move it.`
+            : "Pick a part or type a custom label, then click on the diagram to place a pin. Drag placed pins to move them."}
           {saveMsg ? <span className="ml-3 text-zinc-300">{saveMsg}</span> : null}
         </span>
         {pendingSelection ? (
@@ -230,23 +266,56 @@ export function UpfitBuilder({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-        {/* Diagram grid */}
-        <div className="space-y-3">
-          {VIEW_ORDER.map((view) => (
-            <UpfitView
-              key={view}
-              view={view}
-              vehicleLabel={vehicleLabel}
-              imageUrl={template.views[view].imageUrl}
-              fallbackPaths={template.views[view].fallbackPaths}
-              pins={pins.filter((p) => p.view === view)}
-              activePinId={activePinId}
-              canPlace={!!pendingSelection}
-              onPlace={(x, y) => placePin(view, x, y)}
-              onSelect={(id) => setActivePinId(id)}
-              onMove={movePin}
+        {/* Diagram */}
+        <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+          <div className="mb-2">
+            <div className="text-xs font-body font-semibold text-white">
+              {vehicleLabel.trim() || "Vehicle (unset)"}
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+              {template.label}
+            </div>
+          </div>
+          <div
+            ref={boxRef}
+            onClick={handleBoxClick}
+            className="relative w-full bg-white rounded border border-white/10 overflow-hidden select-none"
+            style={{ cursor: pendingSelection ? "crosshair" : "default", touchAction: "none" }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={template.imageUrl}
+              alt={template.label}
+              className="w-full h-auto block pointer-events-none"
+              draggable={false}
             />
-          ))}
+            {pins.map((pin) => {
+              const isActive = activePinId === pin.id;
+              return (
+                <button
+                  key={pin.id}
+                  type="button"
+                  onPointerDown={(e) => handlePinPointerDown(e, pin)}
+                  onPointerMove={handlePinPointerMove}
+                  onPointerUp={handlePinPointerUp}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black text-black text-[11px] font-bold flex items-center justify-center"
+                  style={{
+                    left: `${pin.x * 100}%`,
+                    top: `${pin.y * 100}%`,
+                    width: isActive ? 26 : 22,
+                    height: isActive ? 26 : 22,
+                    backgroundColor: pin.color ?? "#f59e0b",
+                    cursor: "grab",
+                    touchAction: "none",
+                    boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
+                  }}
+                >
+                  {pin.number}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Pin list / sidebar */}
@@ -257,7 +326,7 @@ export function UpfitBuilder({
             </div>
             {pins.length === 0 ? (
               <p className="text-xs text-zinc-500 font-body italic">
-                No pins yet. Pick a part above and click on a view.
+                No pins yet. Pick a part above and click on the diagram.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -288,9 +357,6 @@ export function UpfitBuilder({
                         remove
                       </button>
                     </div>
-                    <div className="mt-1 text-[10px] text-zinc-500 font-body">
-                      {VIEW_LABELS[pin.view]}
-                    </div>
                     <input
                       value={pin.notes ?? ""}
                       onChange={(e) => updatePin(pin.id, { notes: e.target.value })}
@@ -317,179 +383,6 @@ export function UpfitBuilder({
           </label>
         </div>
       </div>
-    </div>
-  );
-}
-
-function UpfitView({
-  view,
-  vehicleLabel,
-  imageUrl,
-  fallbackPaths,
-  pins,
-  activePinId,
-  canPlace,
-  onPlace,
-  onSelect,
-  onMove,
-}: {
-  view: ViewKey;
-  vehicleLabel: string;
-  imageUrl: string;
-  fallbackPaths: string[];
-  pins: UpfitPin[];
-  activePinId: string | null;
-  canPlace: boolean;
-  onPlace: (x: number, y: number) => void;
-  onSelect: (id: string) => void;
-  onMove: (id: string, x: number, y: number) => void;
-}) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const dragRef = useRef<{
-    pinId: string;
-    startX: number;
-    startY: number;
-    moved: boolean;
-  } | null>(null);
-
-  const toFractional = (clientX: number, clientY: number) => {
-    const svg = svgRef.current;
-    if (!svg) return null;
-    const pt = svg.createSVGPoint();
-    pt.x = clientX;
-    pt.y = clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return null;
-    const local = pt.matrixTransform(ctm.inverse());
-    return {
-      x: Math.max(0, Math.min(1, local.x / VIEW_VIEWBOX.width)),
-      y: Math.max(0, Math.min(1, local.y / VIEW_VIEWBOX.height)),
-      localX: local.x,
-      localY: local.y,
-    };
-  };
-
-  // Click on background = place a new pin (if we're in placement mode).
-  // Pins capture their own pointer events so this doesn't double-fire.
-  const handleSvgClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!canPlace) return;
-    const f = toFractional(e.clientX, e.clientY);
-    if (!f) return;
-    onPlace(f.x, f.y);
-  };
-
-  // Per-pin pointer handlers: pointerdown captures, pointermove updates,
-  // pointerup commits. Below DRAG_THRESHOLD we treat it as a select; past
-  // it we treat it as a drag. We stopPropagation so the background's
-  // click handler doesn't also fire.
-  const handlePinPointerDown = (e: React.PointerEvent<SVGGElement>, pin: UpfitPin) => {
-    e.stopPropagation();
-    const f = toFractional(e.clientX, e.clientY);
-    if (!f) return;
-    dragRef.current = {
-      pinId: pin.id,
-      startX: f.localX,
-      startY: f.localY,
-      moved: false,
-    };
-    (e.currentTarget as Element).setPointerCapture(e.pointerId);
-  };
-
-  const handlePinPointerMove = (e: React.PointerEvent<SVGGElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    const f = toFractional(e.clientX, e.clientY);
-    if (!f) return;
-    if (!drag.moved) {
-      const dx = f.localX - drag.startX;
-      const dy = f.localY - drag.startY;
-      if (Math.hypot(dx, dy) < DRAG_THRESHOLD_SVG) return;
-      drag.moved = true;
-    }
-    onMove(drag.pinId, f.x, f.y);
-  };
-
-  const handlePinPointerUp = (e: React.PointerEvent<SVGGElement>) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    (e.currentTarget as Element).releasePointerCapture?.(e.pointerId);
-    if (!drag.moved) onSelect(drag.pinId);
-    dragRef.current = null;
-  };
-
-  return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
-      <div className="mb-2">
-        <div className="text-xs font-body font-semibold text-white">
-          {vehicleLabel.trim() || "Vehicle (unset)"}
-        </div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
-          {VIEW_LABELS[view]}
-        </div>
-      </div>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${VIEW_VIEWBOX.width} ${VIEW_VIEWBOX.height}`}
-        onClick={handleSvgClick}
-        style={{ cursor: canPlace ? "crosshair" : "default", touchAction: "none" }}
-        className="w-full h-auto bg-white rounded border border-white/10"
-      >
-        {/* Fallback line-art renders behind the image so a missing
-            template file still shows something recognizable. */}
-        <g
-          stroke="#cccccc"
-          strokeWidth={2}
-          fill="none"
-          strokeLinejoin="round"
-          strokeLinecap="round"
-        >
-          {fallbackPaths.map((d, i) => (
-            <path key={i} d={d} />
-          ))}
-        </g>
-        <image
-          href={imageUrl}
-          x={0}
-          y={0}
-          width={VIEW_VIEWBOX.width}
-          height={VIEW_VIEWBOX.height}
-          preserveAspectRatio="xMidYMid meet"
-        />
-        {pins.map((pin) => {
-          const cx = pin.x * VIEW_VIEWBOX.width;
-          const cy = pin.y * VIEW_VIEWBOX.height;
-          const isActive = activePinId === pin.id;
-          return (
-            <g
-              key={pin.id}
-              onPointerDown={(e) => handlePinPointerDown(e, pin)}
-              onPointerMove={handlePinPointerMove}
-              onPointerUp={handlePinPointerUp}
-              style={{ cursor: "grab", touchAction: "none" }}
-            >
-              <circle
-                cx={cx}
-                cy={cy}
-                r={isActive ? 22 : 18}
-                fill={pin.color ?? "#f59e0b"}
-                stroke="#000"
-                strokeWidth={2}
-              />
-              <text
-                x={cx}
-                y={cy + 6}
-                textAnchor="middle"
-                fontSize={18}
-                fontWeight={700}
-                fill="#000"
-                style={{ userSelect: "none", pointerEvents: "none" }}
-              >
-                {pin.number}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
     </div>
   );
 }

@@ -1,34 +1,11 @@
-import { Document, Page, Text, View, Svg, Path, Circle, G, Image as PdfImage } from "@react-pdf/renderer";
+import { Document, Page, Text, View, Image as PdfImage } from "@react-pdf/renderer";
 import React from "react";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { sharedStyles } from "../styles";
 import { BRANDING } from "../branding";
-import {
-  VIEW_LABELS,
-  VIEW_ORDER,
-  VIEW_VIEWBOX,
-  getTemplate,
-  localImagePath,
-  type ViewKey,
-} from "@/lib/upfit/templates";
+import { getTemplate, localImagePath } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
-
-// React-PDF embeds images by bytes, not URL — so we read the template
-// off disk at render time. Returns null when the file isn't present yet
-// (user hasn't uploaded that template image); the PDF then falls back to
-// drawing the SVG fallback paths in its place.
-function loadTemplateImage(imageUrl: string): Buffer | null {
-  const local = localImagePath(imageUrl);
-  if (!local) return null;
-  const abs = path.join(process.cwd(), local);
-  if (!existsSync(abs)) return null;
-  try {
-    return readFileSync(abs);
-  } catch {
-    return null;
-  }
-}
 
 export type UpfitPdfData = {
   quoteId: string;
@@ -41,85 +18,36 @@ export type UpfitPdfData = {
   notes: string | null;
 };
 
-// Render one diagram view. Pins are scaled into the SVG's own coordinate
-// space (1000x600), so the relative positions match the on-screen editor
-// without any conversion.
-function ViewPanel({
-  view,
-  imageBuffer,
-  fallbackPaths,
-  pins,
-  vehicleLabel,
-}: {
-  view: ViewKey;
-  imageBuffer: Buffer | null;
-  fallbackPaths: string[];
-  pins: UpfitPin[];
-  vehicleLabel: string;
-}) {
-  // PANEL_H scales the SVG viewBox onto the page. The image fills the
-  // SVG via an absolute-positioned PdfImage when present; pins stay in
-  // the SVG layer so coordinates match the editor exactly.
-  const PANEL_H = 140;
-  return (
-    <View style={{ width: "48%", marginBottom: 12, padding: 6, borderWidth: 1, borderColor: "#cccccc" }}>
-      <Text style={{ fontSize: 9, fontWeight: 700, marginBottom: 1 }}>{vehicleLabel}</Text>
-      <Text style={{ fontSize: 8, color: BRANDING.mutedColor, marginBottom: 4, textTransform: "uppercase" }}>
-        {VIEW_LABELS[view]}
-      </Text>
-      <View style={{ position: "relative", width: "100%", height: PANEL_H }}>
-        {imageBuffer ? (
-          <PdfImage
-            src={imageBuffer}
-            style={{ position: "absolute", top: 0, left: 0, width: "100%", height: PANEL_H, objectFit: "contain" }}
-          />
-        ) : null}
-        <Svg
-          viewBox={`0 0 ${VIEW_VIEWBOX.width} ${VIEW_VIEWBOX.height}`}
-          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: PANEL_H }}
-        >
-          {/* Fallback line-art renders only when the image is missing. */}
-          {!imageBuffer ? (
-            <G stroke="#222222" strokeWidth={3} fill="none">
-              {fallbackPaths.map((d, i) => (
-                <Path key={i} d={d} />
-              ))}
-            </G>
-          ) : null}
-          {pins.map((pin) => {
-            const cx = pin.x * VIEW_VIEWBOX.width;
-            const cy = pin.y * VIEW_VIEWBOX.height;
-            return (
-              <G key={pin.id}>
-                <Circle cx={cx} cy={cy} r={28} fill={pin.color ?? "#f59e0b"} stroke="#000000" strokeWidth={3} />
-                <Text
-                  x={cx}
-                  y={cy + 10}
-                  style={
-                    {
-                      fontSize: 28,
-                      fontWeight: 700,
-                      textAnchor: "middle",
-                      fill: "#000000",
-                    } as Record<string, unknown>
-                  }
-                >
-                  {String(pin.number)}
-                </Text>
-              </G>
-            );
-          })}
-        </Svg>
-      </View>
-    </View>
-  );
+// React-PDF embeds images by bytes, not URL — so we read the template
+// off disk at render time. Returns null when the file isn't present yet
+// (user hasn't uploaded that template image); the diagram then renders
+// as an empty labeled box.
+function loadTemplateImage(imageUrl: string): Buffer | null {
+  const local = localImagePath(imageUrl);
+  if (!local) return null;
+  const abs = path.join(process.cwd(), local);
+  if (!existsSync(abs)) return null;
+  try {
+    return readFileSync(abs);
+  } catch {
+    return null;
+  }
 }
+
+// The diagram is one composite image with pins overlaid by percentage
+// position. PANEL_W is the page content width (Letter minus the 48pt
+// horizontal padding from sharedStyles.page). Pin diameter is fixed in
+// points; positions are percent of the panel so they line up with the
+// editor regardless of the image's native aspect ratio.
+const PANEL_W = 612 - 96;
+const PIN_D = 16;
 
 export function UpfitDocument({ data }: { data: UpfitPdfData }) {
   const styles = sharedStyles;
   const template = getTemplate(data.bodyStyle);
   const docNumber = data.quoteNumber ?? `Q-${data.quoteId.slice(0, 8)}`;
   const vehicleLabel = data.vehicleSummary ?? template.label;
+  const imageBuffer = loadTemplateImage(template.imageUrl);
   const generated = new Date();
 
   return (
@@ -151,42 +79,65 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
           </View>
           <View style={{ width: "48%" }}>
             <Text style={styles.sectionTitle}>Vehicle</Text>
-            <Text style={styles.blockValue}>{data.vehicleSummary ?? template.label}</Text>
+            <Text style={styles.blockValue}>{vehicleLabel}</Text>
           </View>
         </View>
 
         <Text style={styles.sectionTitle}>Placement diagram</Text>
-        <View
-          style={{
-            flexDirection: "row",
-            flexWrap: "wrap",
-            justifyContent: "space-between",
-            marginTop: 4,
-          }}
-        >
-          {VIEW_ORDER.map((view) => {
-            const v = template.views[view];
-            return (
-              <ViewPanel
-                key={view}
-                view={view}
-                imageBuffer={loadTemplateImage(v.imageUrl)}
-                fallbackPaths={v.fallbackPaths}
-                pins={data.pins.filter((p) => p.view === view)}
-                vehicleLabel={vehicleLabel}
-              />
-            );
-          })}
+        <View style={{ position: "relative", width: PANEL_W, marginTop: 4 }}>
+          {imageBuffer ? (
+            <PdfImage src={imageBuffer} style={{ width: PANEL_W }} />
+          ) : (
+            <View
+              style={{
+                width: PANEL_W,
+                height: 240,
+                borderWidth: 1,
+                borderColor: "#cccccc",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ fontSize: 9, color: "#999999" }}>
+                Diagram image not uploaded ({template.imageUrl})
+              </Text>
+            </View>
+          )}
+          {/* Pins overlaid by percentage so they track the image at any
+              aspect ratio. Centered on the point via the -PIN_D/2 offset. */}
+          {data.pins.map((pin) => (
+            <View
+              key={pin.id}
+              style={{
+                position: "absolute",
+                left: `${pin.x * 100}%`,
+                top: `${pin.y * 100}%`,
+                width: PIN_D,
+                height: PIN_D,
+                marginLeft: -PIN_D / 2,
+                marginTop: -PIN_D / 2,
+                borderRadius: PIN_D / 2,
+                backgroundColor: pin.color ?? "#f59e0b",
+                borderWidth: 1.5,
+                borderColor: "#000000",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Text style={{ fontSize: 9, fontWeight: 700, color: "#000000" }}>
+                {String(pin.number)}
+              </Text>
+            </View>
+          ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Equipment & placement</Text>
+        <Text style={styles.sectionTitle}>Equipment &amp; placement</Text>
         <View style={styles.table}>
           <View style={[styles.tableRow, styles.tableHeader]}>
             <Text style={[styles.tableCell, styles.cellLeft, { width: "8%" }]}>#</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "42%" }]}>Equipment</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "12%" }]}>SKU</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>View</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>Placement note</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "52%" }]}>Equipment</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "15%" }]}>SKU</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>Placement note</Text>
           </View>
           {data.pins.length === 0 ? (
             <View style={styles.tableRowLast}>
@@ -202,14 +153,11 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
                   <Text style={[styles.tableCell, styles.cellLeft, { width: "8%", fontWeight: 700 }]}>
                     {pin.number}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "42%" }]}>{pin.label}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "12%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "52%" }]}>{pin.label}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "15%" }]}>
                     {pin.partSku ?? "—"}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>
-                    {VIEW_LABELS[pin.view]}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>
                     {pin.notes ?? ""}
                   </Text>
                 </View>
