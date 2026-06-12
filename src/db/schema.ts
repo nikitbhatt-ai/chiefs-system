@@ -566,6 +566,37 @@ export const customerMessages = pgTable("customer_messages", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("customer_messages_deal_idx").on(t.dealId)]);
 
+// Upfit configurations. One per quote: vehicle body-style choice plus a
+// jsonb array of pins (lights, sirens, equipment) placed onto the
+// vehicle diagram. Drives both the in-app builder and the PDF spec
+// sheet handed to techs.
+export type UpfitPin = {
+  id: string;
+  number: number;
+  view: "top" | "front" | "rear" | "side_left" | "side_right";
+  x: number;
+  y: number;
+  label: string;
+  partId?: string | null;
+  partSku?: string | null;
+  color?: string;
+  notes?: string;
+};
+
+export const upfitConfigs = pgTable("upfit_configs", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  quoteId: uuid("quote_id").notNull().references(() => quotes.id, { onDelete: "cascade" }).unique(),
+  bodyStyle: text("body_style").notNull().default("suv"),
+  // Human-readable make/model the diagram represents, e.g. "2024
+  // Chevrolet Tahoe". Defaults from the linked deal/vehicle but is
+  // editable so a spec can target a different unit than the deal record.
+  vehicleLabel: text("vehicle_label"),
+  pins: jsonb("pins").$type<UpfitPin[]>().notNull().default([]),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("upfit_configs_quote_idx").on(t.quoteId)]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one, many }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }), comms: many(dealComms) }));
