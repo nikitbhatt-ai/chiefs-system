@@ -1047,12 +1047,61 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
       reports. Needs a cron + email service.
 - [ ] All exports must use the branded PDF format.
 
-## Upfit Builder (not yet built)
+## Upfit Builder
 
-- [ ] Lives inside the CRM as a tab on a deal AND as a standalone tool.
-- [ ] Upfit configs save to the customer entity for historical record.
-- [ ] CAD design attachable to the upfit config.
-- [ ] Build packages upload-able to both CRM and inventory parts list.
+Visual spec sheet for sales: sales picks a vehicle body style, drags
+numbered pins onto top/front/rear/driver/passenger views, labels each
+pin (free text or part from inventory), and prints a PDF the customer
+sees and the techs build to. One upfit per quote.
+
+- [x] **Tab on `/quotes/[id]`** (`QuoteTabs`) — Quote / Upfit builder.
+      Upfit page lives at `/quotes/[id]/upfit`.
+- [x] **Vehicle templates** defined as SVG path data in
+      `src/lib/upfit/templates.ts`. Each body style ships five views
+      (top, front, rear, side_left, side_right) on a shared 1000×600
+      viewBox. Phase-1 styles: SUV, pickup, sedan. Pin (x, y) is stored
+      as fraction 0..1 within whichever view it was placed on, so the
+      same coordinates render identically in the editor and in the PDF.
+- [x] **Builder UI** (`src/components/UpfitBuilder.tsx`, client) —
+      body-style dropdown, part-from-inventory picker OR free-text
+      label, click-to-place pins, per-pin placement note, autocolor
+      from a 12-color palette, build notes textarea. "Save upfit"
+      persists via a server action on the page.
+- [x] **Persistence** — `upfit_configs(quoteId UNIQUE, body_style,
+      pins jsonb, notes)`. One row per quote, upserted on save. Cascade
+      deletes when the quote is deleted.
+- [x] **PDF spec sheet** — `src/lib/pdf/templates/upfit.tsx` renders
+      branded header + customer/vehicle block + 5-up diagram grid with
+      numbered pins on the same SVG paths + equipment table
+      (# · label · SKU · view · placement note) + build notes. Streamed
+      from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
+      `record_type = upfit`). Download button on the upfit tab.
+- [ ] **Customer-folder auto-link** — drop the generated spec PDF into
+      `customer_documents` under "Spec Approvals" (deferred).
+- [ ] **Standalone tool** outside the quote context (deferred).
+- [ ] **CAD upload** attachable to the upfit config (deferred).
+- [ ] **Build packages** uploadable to inventory parts list (deferred).
+- [ ] **Reorder / drag pins** to fix mistakes without re-placing
+      (deferred — today, "remove" then re-place).
+- [ ] **Per-vehicle photos** as an alternative to the templates
+      (deferred — pin coords are template-relative today).
+
+### Schema additions (Upfit Builder)
+
+Run in Neon's SQL Editor before deploying:
+
+```sql
+CREATE TABLE IF NOT EXISTS upfit_configs (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  quote_id uuid NOT NULL REFERENCES quotes(id) ON DELETE CASCADE UNIQUE,
+  body_style text NOT NULL DEFAULT 'suv',
+  pins jsonb NOT NULL DEFAULT '[]'::jsonb,
+  notes text,
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS upfit_configs_quote_idx ON upfit_configs (quote_id);
+```
 
 ## Users (not yet built)
 

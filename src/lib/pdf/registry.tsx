@@ -10,11 +10,12 @@ import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, purchaseOrders, vendors } from "@/db/schema";
+import { quotes, customers, purchaseOrders, vendors, upfitConfigs, deals, vehicles } from "@/db/schema";
 import { QuoteDocument, type QuoteData, type QuoteLine } from "./templates/quote";
 import { PurchaseOrderDocument, type PurchaseOrderData, type POLine } from "./templates/purchaseOrder";
+import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
 
-export type RecordType = "quote" | "invoice" | "purchase_order";
+export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit";
 
 export type ResolvedPdf = {
   buffer: Buffer;
@@ -67,6 +68,49 @@ async function resolvePurchaseOrder(recordId: string): Promise<PurchaseOrderData
   };
 }
 
+async function resolveUpfit(quoteId: string): Promise<UpfitPdfData | null> {
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return null;
+  const [config] = await db
+    .select()
+    .from(upfitConfigs)
+    .where(eq(upfitConfigs.quoteId, quoteId));
+
+  const customer = q.customerId
+    ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0] ?? null
+    : null;
+
+  let vehicleSummary: string | null = null;
+  if (q.dealId) {
+    const [deal] = await db.select().from(deals).where(eq(deals.id, q.dealId));
+    if (deal) {
+      const parts: string[] = [];
+      if (deal.vehicleYear) parts.push(String(deal.vehicleYear));
+      if (deal.vehicleMake) parts.push(deal.vehicleMake);
+      if (deal.vehicleModel) parts.push(deal.vehicleModel);
+      if (parts.length) vehicleSummary = parts.join(" ");
+      else if (deal.vehicleId) {
+        const [v] = await db.select().from(vehicles).where(eq(vehicles.id, deal.vehicleId));
+        if (v) {
+          const vparts = [v.year, v.make, v.model].filter(Boolean) as (string | number)[];
+          if (vparts.length) vehicleSummary = vparts.join(" ");
+        }
+      }
+    }
+  }
+
+  return {
+    quoteId: q.id,
+    quoteNumber: q.quoteNumber,
+    createdAt: q.createdAt,
+    customerName: customer?.name ?? null,
+    vehicleSummary,
+    bodyStyle: config?.bodyStyle ?? "suv",
+    pins: config?.pins ?? [],
+    notes: config?.notes ?? null,
+  };
+}
+
 // Render entry point. Looks up the record, picks the right template, and
 // streams a Buffer back. Returns null if the record doesn't exist (the
 // API layer turns that into a 404).
@@ -83,6 +127,15 @@ export async function renderRecordPdf(
     const fileName = `${variant === "invoice" ? "Invoice" : "Quote"}_${docNumber}_${dateStr}.pdf`;
     const buffer = await renderToBuffer(<QuoteDocument data={data} />);
     return { buffer, fileName, template: variant === "invoice" ? "invoice_default" : "quote_default" };
+  }
+  if (recordType === "upfit") {
+    const data = await resolveUpfit(recordId);
+    if (!data) return null;
+    const docNumber = data.quoteNumber ?? `Q-${data.quoteId.slice(0, 8)}`;
+    const dateStr = new Date(data.createdAt).toISOString().slice(0, 10).replace(/-/g, "");
+    const fileName = `Upfit_${docNumber}_${dateStr}.pdf`;
+    const buffer = await renderToBuffer(<UpfitDocument data={data} />);
+    return { buffer, fileName, template: "upfit_default" };
   }
   if (recordType === "purchase_order") {
     const data = await resolvePurchaseOrder(recordId);

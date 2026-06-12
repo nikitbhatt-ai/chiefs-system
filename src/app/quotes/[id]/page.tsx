@@ -4,6 +4,7 @@ import { eq, asc, sql, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { quotes, customers, parts, workOrders, partReceipts, deals, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { QuoteTabs } from "@/components/QuoteTabs";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { credentialCoversPart } from "@/lib/credentials";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
@@ -204,6 +205,8 @@ export default async function QuotePage({
       title={q.quoteNumber ?? "Quote"}
       subtitle={`Status: ${q.status} · Stage: ${q.workflowStage.replace(/_/g, " ")}`}
     >
+      <QuoteTabs quoteId={q.id} active="quote" />
+
       <div className="flex justify-end gap-2">
         <a
           href={`/api/pdf/quotes/${q.id}`}
