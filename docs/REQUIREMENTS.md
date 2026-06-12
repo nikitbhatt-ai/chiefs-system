@@ -1049,30 +1049,36 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
 
 ## Upfit Builder
 
-Visual spec sheet for sales: sales picks a vehicle body style, drops
-numbered pins anywhere on the vehicle blueprint image, labels each pin
-(free text or part from inventory), and prints a PDF the customer sees
-and the techs build to. One upfit per quote.
+Visual spec sheet for sales: sales picks a specific vehicle template,
+drops numbered pins anywhere on the multi-view blueprint image, labels
+each pin (free text or part from inventory), and prints a PDF the
+customer sees and the techs build to. One upfit per quote.
 
 - [x] **Tab on `/quotes/[id]`** (`QuoteTabs`) — Quote / Upfit builder.
       Upfit page lives at `/quotes/[id]/upfit`.
-- [x] **Vehicle templates** are a single composite blueprint image per
-      body style — the multi-view picture (top / front / rear / sides
-      all in one image) sales already works from. `templates.ts` maps
-      each body-style slug to one `imageUrl` at
-      `public/upfit-templates/<slug>.png`. The editor renders it as an
-      `<img>`; the PDF reads the file as a Buffer and embeds via
-      React-PDF `<Image>`. Pins are placed freely anywhere on the image
-      and stored as fraction 0..1 of the image box, so the same
-      coordinate is identical on screen and in print regardless of the
-      image's aspect ratio. Phase-1 styles: SUV, pickup, sedan. (The
-      earlier five-separate-views model was dropped — `UpfitPin.view`
-      is retained optional for backward-compat only.)
-- [x] **Template image contract** — drop ONE PNG/JPG per body style at
-      `public/upfit-templates/<slug>.png` where `<slug>` is `suv` /
-      `pickup` / `sedan`. Any aspect ratio works (pins track the image
-      by percentage); a missing file degrades to a labeled empty box,
-      no crash. No rebuild required — files are read on each render.
+- [x] **Per-vehicle templates** — each template is one composite
+      blueprint image (the multi-view picture with top / front / rear /
+      sides all in one). `templates.ts` maps each template slug to one
+      `imageUrl` at `public/upfit-templates/<slug>.{jpg|png}`. The editor
+      renders it as an `<img>`; the PDF reads the file as a Buffer and
+      embeds via React-PDF `<Image>`. Pins are placed freely anywhere on
+      the image and stored as fraction 0..1 of the image box, so the
+      same coordinate is identical on screen and in print regardless of
+      the image's aspect ratio. Templates are per-vehicle (Tahoe,
+      Suburban, Blazer, Silverado, Durango, Ford PIU, F-150, F-350)
+      rather than per body style, so the diagram on the spec actually
+      matches the truck. The `upfit_configs.body_style` column name is
+      preserved for backward-compat; the value now holds the per-vehicle
+      slug. (The earlier five-separate-views model was dropped —
+      `UpfitPin.view` is retained optional for backward-compat only.)
+- [x] **Template image contract** — drop ONE JPG (or PNG) per vehicle at
+      `public/upfit-templates/<slug>.jpg`. Slugs currently shipped:
+      `tahoe`, `suburban`, `blazer`, `silverado`, `durango`, `piu`,
+      `f150`, `f350`. Any aspect ratio works (pins track the image by
+      percentage); a missing file degrades to a labeled empty box, no
+      crash. No rebuild required — files are read on each render. To add
+      a new vehicle: drop the JPG and append an entry to
+      `VEHICLE_TEMPLATES` in `src/lib/upfit/templates.ts`.
 - [x] **Per-diagram vehicle label** — every diagram view (editor +
       PDF) is headed with the specific make/model, e.g. "2024
       Chevrolet Tahoe". `upfit_configs.vehicle_label` stores it;

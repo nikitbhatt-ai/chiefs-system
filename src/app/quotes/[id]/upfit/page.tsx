@@ -15,7 +15,7 @@ async function saveUpfit(formData: FormData) {
   "use server";
   const quoteId = String(formData.get("quoteId") ?? "");
   if (!quoteId) return;
-  const bodyStyle = String(formData.get("bodyStyle") ?? "suv");
+  const bodyStyle = String(formData.get("bodyStyle") ?? "tahoe");
   const vehicleLabel = String(formData.get("vehicleLabel") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const pinsJson = String(formData.get("pins") ?? "[]");
@@ -99,7 +99,7 @@ export default async function UpfitPage({
 
       <UpfitBuilder
         quoteId={q.id}
-        initialBodyStyle={config?.bodyStyle ?? "suv"}
+        initialBodyStyle={config?.bodyStyle ?? "tahoe"}
         initialVehicleLabel={defaultVehicleLabel}
         initialPins={config?.pins ?? []}
         initialNotes={config?.notes ?? ""}

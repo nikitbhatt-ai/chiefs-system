@@ -169,9 +169,9 @@ export function UpfitBuilder({
   return (
     <div className="space-y-4">
       {/* Vehicle identity */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[200px_1fr] gap-3 items-end">
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 items-end">
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
-          Body style
+          Vehicle template
           <select
             value={bodyStyle}
             onChange={(e) => setBodyStyle(e.target.value)}

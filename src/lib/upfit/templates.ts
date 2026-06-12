@@ -1,39 +1,66 @@
-// Vehicle template definitions for the Upfit Builder. Each body style is
-// ONE composite image (the multi-view blueprint sales uploads — top /
-// front / rear / sides all in a single picture). Pins are placed freely
-// anywhere on that image and stored as fractional (x, y) coordinates
-// 0..1 of the image box, so they render identically on screen, in print,
-// and in the PDF regardless of display size.
+// Vehicle template definitions for the Upfit Builder. Each template is
+// ONE composite blueprint image (the multi-view picture sales already
+// works from — top / front / rear / sides all in a single image).
+// Pins are placed freely anywhere on that image and stored as fractional
+// (x, y) coordinates 0..1 of the image box, so they render identically
+// on screen, in print, and in the PDF regardless of display size.
 //
-// Adding a new body style: append to VEHICLE_TEMPLATES and drop the
-// matching image at `public/upfit-templates/<slug>.png`. No other code
-// needs to change.
+// Templates are per-vehicle (Tahoe, Silverado, F-150, …) rather than per
+// body style — sales picks the actual model so the diagram on the spec
+// matches the truck. Adding a new vehicle: drop the JPG at
+// `public/upfit-templates/<slug>.jpg` and append an entry below.
 
 export type VehicleTemplate = {
   slug: string;
   label: string;
-  // Composite blueprint image. Lives at `public/upfit-templates/<slug>.png`
-  // (PNG / JPG). The editor renders it as an <img>; the PDF reads the file
-  // as a Buffer and embeds it. A missing file degrades gracefully to a
-  // labeled empty box — nothing crashes.
+  // Composite blueprint image. Lives at
+  // `public/upfit-templates/<slug>.{jpg|png}`. The editor renders it as
+  // an <img>; the PDF reads the file as a Buffer and embeds it. A
+  // missing file degrades gracefully to a labeled empty box — nothing
+  // crashes.
   imageUrl: string;
 };
 
 export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
-  suv: {
-    slug: "suv",
-    label: "SUV (Tahoe / Suburban / Explorer)",
-    imageUrl: "/upfit-templates/suv.png",
+  tahoe: {
+    slug: "tahoe",
+    label: "Chevrolet Tahoe",
+    imageUrl: "/upfit-templates/tahoe.jpg",
   },
-  pickup: {
-    slug: "pickup",
-    label: "Pickup (Silverado / F-Series)",
-    imageUrl: "/upfit-templates/pickup.png",
+  suburban: {
+    slug: "suburban",
+    label: "Chevrolet Suburban",
+    imageUrl: "/upfit-templates/suburban.jpg",
   },
-  sedan: {
-    slug: "sedan",
-    label: "Sedan (Charger / Patrol cruiser)",
-    imageUrl: "/upfit-templates/sedan.png",
+  blazer: {
+    slug: "blazer",
+    label: "Chevrolet Blazer",
+    imageUrl: "/upfit-templates/blazer.jpg",
+  },
+  silverado: {
+    slug: "silverado",
+    label: "Chevrolet Silverado",
+    imageUrl: "/upfit-templates/silverado.jpg",
+  },
+  durango: {
+    slug: "durango",
+    label: "Dodge Durango",
+    imageUrl: "/upfit-templates/durango.jpg",
+  },
+  piu: {
+    slug: "piu",
+    label: "Ford Police Interceptor Utility (Explorer)",
+    imageUrl: "/upfit-templates/piu.jpg",
+  },
+  f150: {
+    slug: "f150",
+    label: "Ford F-150",
+    imageUrl: "/upfit-templates/f150.jpg",
+  },
+  f350: {
+    slug: "f350",
+    label: "Ford F-350",
+    imageUrl: "/upfit-templates/f350.jpg",
   },
 };
 
@@ -43,7 +70,7 @@ export const BODY_STYLES = Object.values(VEHICLE_TEMPLATES).map((t) => ({
 }));
 
 export function getTemplate(bodyStyle: string): VehicleTemplate {
-  return VEHICLE_TEMPLATES[bodyStyle] ?? VEHICLE_TEMPLATES.suv;
+  return VEHICLE_TEMPLATES[bodyStyle] ?? VEHICLE_TEMPLATES.tahoe;
 }
 
 // Translate a template image URL into a server-side public/ filesystem
