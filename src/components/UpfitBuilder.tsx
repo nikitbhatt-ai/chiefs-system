@@ -3,13 +3,8 @@
 import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import {
   BODY_STYLES,
-  VEHICLE_TEMPLATES,
-  VIEW_LABELS,
-  VIEW_ORDER,
-  VIEW_VIEWBOX,
   getTemplate,
   nextPinColor,
-  type ViewKey,
 } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
@@ -28,6 +23,11 @@ type Selection = { partId: string | null; label: string; partSku: string | null 
 function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
 }
+
+// Below this distance (fraction of the image box) a pointerdown is
+// treated as a click-to-select rather than a drag, so tapping a pin to
+// select it doesn't nudge its position.
+const DRAG_THRESHOLD = 0.01;
 
 export function UpfitBuilder({
   quoteId,
@@ -50,7 +50,15 @@ export function UpfitBuilder({
 
   const template = useMemo(() => getTemplate(bodyStyle), [bodyStyle]);
 
-  // The next pin to be added when the user clicks on the diagram.
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ pinId: string; startX: number; startY: number; moved: boolean } | null>(
+    null,
+  );
+
+  // The next pin to be added when the user clicks on the diagram. We
+  // deliberately do NOT clear this after each placement so a single
+  // selection can be placed multiple times (e.g. the same SKU on the
+  // front and rear of the vehicle).
   const pendingSelection: Selection | null = useMemo(() => {
     if (selectedPartId) {
       const p = parts.find((pp) => pp.id === selectedPartId);
@@ -61,33 +69,75 @@ export function UpfitBuilder({
     return null;
   }, [selectedPartId, customLabel, parts]);
 
+  const stopPlacing = () => {
+    setSelectedPartId("");
+    setCustomLabel("");
+  };
+
   const renumber = (arr: UpfitPin[]): UpfitPin[] =>
     arr.map((p, idx) => ({ ...p, number: idx + 1 }));
 
-  const placePin = useCallback(
-    (view: ViewKey, x: number, y: number) => {
-      if (!pendingSelection) return;
-      const id = randomId();
-      const next: UpfitPin = {
+  // Convert a client (mouse) coordinate into a fractional 0..1 position
+  // inside the image box.
+  const toFractional = (clientX: number, clientY: number) => {
+    const box = boxRef.current;
+    if (!box) return null;
+    const rect = box.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return null;
+    return {
+      x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const handleBoxClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pendingSelection) return;
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    const id = randomId();
+    setPins((cur) => [
+      ...cur,
+      {
         id,
-        number: pins.length + 1,
-        view,
-        x,
-        y,
+        number: cur.length + 1,
+        x: f.x,
+        y: f.y,
         label: pendingSelection.label,
         partId: pendingSelection.partId,
         partSku: pendingSelection.partSku,
-        color: nextPinColor(pins.length),
-      };
-      setPins([...pins, next]);
-      setActivePinId(id);
-      // Clear the staging fields so the next click doesn't double-place
-      // the same part by accident.
-      setSelectedPartId("");
-      setCustomLabel("");
-    },
-    [pendingSelection, pins],
-  );
+        color: nextPinColor(cur.length),
+      },
+    ]);
+    setActivePinId(id);
+  };
+
+  const handlePinPointerDown = (e: React.PointerEvent<HTMLButtonElement>, pin: UpfitPin) => {
+    e.stopPropagation();
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    dragRef.current = { pinId: pin.id, startX: f.x, startY: f.y, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const handlePinPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    if (!drag.moved) {
+      if (Math.hypot(f.x - drag.startX, f.y - drag.startY) < DRAG_THRESHOLD) return;
+      drag.moved = true;
+    }
+    setPins((cur) => cur.map((p) => (p.id === drag.pinId ? { ...p, x: f.x, y: f.y } : p)));
+  };
+
+  const handlePinPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    if (!drag.moved) setActivePinId(drag.pinId);
+    dragRef.current = null;
+  };
 
   const removePin = (id: string) => {
     setPins((cur) => renumber(cur.filter((p) => p.id !== id)));
@@ -119,9 +169,9 @@ export function UpfitBuilder({
   return (
     <div className="space-y-4">
       {/* Vehicle identity */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[200px_1fr] gap-3 items-end">
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 items-end">
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
-          Body style
+          Vehicle template
           <select
             value={bodyStyle}
             onChange={(e) => setBodyStyle(e.target.value)}
@@ -136,7 +186,7 @@ export function UpfitBuilder({
         </label>
 
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
-          Vehicle (make &amp; model — printed on every diagram)
+          Vehicle (make &amp; model — printed on the diagram)
           <input
             value={vehicleLabel}
             onChange={(e) => setVehicleLabel(e.target.value)}
@@ -192,34 +242,80 @@ export function UpfitBuilder({
 
       {/* Hint banner */}
       <div
-        className={`text-[11px] font-body rounded-md px-3 py-2 border ${
+        className={`flex items-center justify-between gap-3 text-[11px] font-body rounded-md px-3 py-2 border ${
           pendingSelection
             ? "bg-amber-500/10 border-amber-500/30 text-amber-200"
             : "bg-white/5 border-white/10 text-zinc-400"
         }`}
       >
-        {pendingSelection
-          ? `Click anywhere on a vehicle view to place: ${pendingSelection.label}`
-          : "Pick a part or type a custom label, then click on a vehicle view to place a pin."}
-        {saveMsg ? <span className="ml-3 text-zinc-300">{saveMsg}</span> : null}
+        <span>
+          {pendingSelection
+            ? `Click on the diagram to place: ${pendingSelection.label}. Place it as many times as you need. Drag any placed pin to move it.`
+            : "Pick a part or type a custom label, then click on the diagram to place a pin. Drag placed pins to move them."}
+          {saveMsg ? <span className="ml-3 text-zinc-300">{saveMsg}</span> : null}
+        </span>
+        {pendingSelection ? (
+          <button
+            type="button"
+            onClick={stopPlacing}
+            className="shrink-0 text-[10px] text-amber-200 hover:text-white border border-amber-500/40 hover:border-amber-300 rounded px-2 py-0.5"
+          >
+            Stop placing
+          </button>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-        {/* Diagram grid */}
-        <div className="space-y-3">
-          {VIEW_ORDER.map((view) => (
-            <UpfitView
-              key={view}
-              view={view}
-              vehicleLabel={vehicleLabel}
-              paths={template.views[view].paths}
-              pins={pins.filter((p) => p.view === view)}
-              activePinId={activePinId}
-              canPlace={!!pendingSelection}
-              onPlace={(x, y) => placePin(view, x, y)}
-              onSelect={(id) => setActivePinId(id)}
+        {/* Diagram */}
+        <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+          <div className="mb-2">
+            <div className="text-xs font-body font-semibold text-white">
+              {vehicleLabel.trim() || "Vehicle (unset)"}
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+              {template.label}
+            </div>
+          </div>
+          <div
+            ref={boxRef}
+            onClick={handleBoxClick}
+            className="relative w-full bg-white rounded border border-white/10 overflow-hidden select-none"
+            style={{ cursor: pendingSelection ? "crosshair" : "default", touchAction: "none" }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={template.imageUrl}
+              alt={template.label}
+              className="w-full h-auto block pointer-events-none"
+              draggable={false}
             />
-          ))}
+            {pins.map((pin) => {
+              const isActive = activePinId === pin.id;
+              return (
+                <button
+                  key={pin.id}
+                  type="button"
+                  onPointerDown={(e) => handlePinPointerDown(e, pin)}
+                  onPointerMove={handlePinPointerMove}
+                  onPointerUp={handlePinPointerUp}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black text-black text-[11px] font-bold flex items-center justify-center"
+                  style={{
+                    left: `${pin.x * 100}%`,
+                    top: `${pin.y * 100}%`,
+                    width: isActive ? 26 : 22,
+                    height: isActive ? 26 : 22,
+                    backgroundColor: pin.color ?? "#f59e0b",
+                    cursor: "grab",
+                    touchAction: "none",
+                    boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
+                  }}
+                >
+                  {pin.number}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Pin list / sidebar */}
@@ -230,7 +326,7 @@ export function UpfitBuilder({
             </div>
             {pins.length === 0 ? (
               <p className="text-xs text-zinc-500 font-body italic">
-                No pins yet. Pick a part above and click on a view.
+                No pins yet. Pick a part above and click on the diagram.
               </p>
             ) : (
               <ul className="space-y-2">
@@ -261,9 +357,6 @@ export function UpfitBuilder({
                         remove
                       </button>
                     </div>
-                    <div className="mt-1 text-[10px] text-zinc-500 font-body">
-                      {VIEW_LABELS[pin.view]}
-                    </div>
                     <input
                       value={pin.notes ?? ""}
                       onChange={(e) => updatePin(pin.id, { notes: e.target.value })}
@@ -290,101 +383,6 @@ export function UpfitBuilder({
           </label>
         </div>
       </div>
-    </div>
-  );
-}
-
-function UpfitView({
-  view,
-  vehicleLabel,
-  paths,
-  pins,
-  activePinId,
-  canPlace,
-  onPlace,
-  onSelect,
-}: {
-  view: ViewKey;
-  vehicleLabel: string;
-  paths: string[];
-  pins: UpfitPin[];
-  activePinId: string | null;
-  canPlace: boolean;
-  onPlace: (x: number, y: number) => void;
-  onSelect: (id: string) => void;
-}) {
-  const svgRef = useRef<SVGSVGElement | null>(null);
-
-  const handleClick = (e: React.MouseEvent<SVGSVGElement>) => {
-    if (!canPlace) return;
-    const svg = svgRef.current;
-    if (!svg) return;
-    const pt = svg.createSVGPoint();
-    pt.x = e.clientX;
-    pt.y = e.clientY;
-    const ctm = svg.getScreenCTM();
-    if (!ctm) return;
-    const local = pt.matrixTransform(ctm.inverse());
-    onPlace(local.x / VIEW_VIEWBOX.width, local.y / VIEW_VIEWBOX.height);
-  };
-
-  return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
-      <div className="mb-2">
-        <div className="text-xs font-body font-semibold text-white">
-          {vehicleLabel.trim() || "Vehicle (unset)"}
-        </div>
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
-          {VIEW_LABELS[view]}
-        </div>
-      </div>
-      <svg
-        ref={svgRef}
-        viewBox={`0 0 ${VIEW_VIEWBOX.width} ${VIEW_VIEWBOX.height}`}
-        onClick={handleClick}
-        style={{ cursor: canPlace ? "crosshair" : "default" }}
-        className="w-full h-auto bg-white rounded border border-white/10"
-      >
-        <g stroke="#1f2937" strokeWidth={2} fill="none" strokeLinejoin="round" strokeLinecap="round">
-          {paths.map((d, i) => (
-            <path key={i} d={d} />
-          ))}
-        </g>
-        {pins.map((pin) => {
-          const cx = pin.x * VIEW_VIEWBOX.width;
-          const cy = pin.y * VIEW_VIEWBOX.height;
-          const isActive = activePinId === pin.id;
-          return (
-            <g
-              key={pin.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelect(pin.id);
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <circle
-                cx={cx}
-                cy={cy}
-                r={isActive ? 22 : 18}
-                fill={pin.color ?? "#f59e0b"}
-                stroke="#000"
-                strokeWidth={2}
-              />
-              <text
-                x={cx}
-                y={cy + 6}
-                textAnchor="middle"
-                fontSize={18}
-                fontWeight={700}
-                fill="#000"
-              >
-                {pin.number}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
     </div>
   );
 }

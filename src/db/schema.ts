@@ -573,7 +573,10 @@ export const customerMessages = pgTable("customer_messages", {
 export type UpfitPin = {
   id: string;
   number: number;
-  view: "top" | "front" | "rear" | "side_left" | "side_right";
+  // x/y are fractional 0..1 coordinates on the single composite vehicle
+  // image. (`view` was used when each body style had five separate view
+  // panels; kept optional for backward-compat with older saved configs.)
+  view?: string;
   x: number;
   y: number;
   label: string;

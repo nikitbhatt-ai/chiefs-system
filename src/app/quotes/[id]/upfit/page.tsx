@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { QuoteTabs } from "@/components/QuoteTabs";
 import { UpfitBuilder } from "@/components/UpfitBuilder";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
+import { upsertUpfitLink } from "@/lib/customerDocLinks";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ async function saveUpfit(formData: FormData) {
   "use server";
   const quoteId = String(formData.get("quoteId") ?? "");
   if (!quoteId) return;
-  const bodyStyle = String(formData.get("bodyStyle") ?? "suv");
+  const bodyStyle = String(formData.get("bodyStyle") ?? "tahoe");
   const vehicleLabel = String(formData.get("vehicleLabel") ?? "").trim() || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const pinsJson = String(formData.get("pins") ?? "[]");
@@ -39,8 +40,20 @@ async function saveUpfit(formData: FormData) {
     await db.insert(upfitConfigs).values({ quoteId, bodyStyle, vehicleLabel, pins, notes });
   }
 
+  // Auto-link the spec PDF into the customer's folder under
+  // Photos / Build Documentation. Best-effort: the upfit save is already
+  // committed, so a customer-folder failure must not bubble up as a
+  // user-facing error.
+  try {
+    await upsertUpfitLink(quoteId);
+  } catch (err) {
+    console.error("upsertUpfitLink failed:", err);
+  }
+
   revalidatePath(`/quotes/${quoteId}/upfit`);
   revalidatePath(`/quotes/${quoteId}`);
+  const [quoteRow] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (quoteRow?.customerId) revalidatePath(`/crm/${quoteRow.customerId}`);
 }
 
 export default async function UpfitPage({
@@ -86,7 +99,7 @@ export default async function UpfitPage({
 
       <UpfitBuilder
         quoteId={q.id}
-        initialBodyStyle={config?.bodyStyle ?? "suv"}
+        initialBodyStyle={config?.bodyStyle ?? "tahoe"}
         initialVehicleLabel={defaultVehicleLabel}
         initialPins={config?.pins ?? []}
         initialNotes={config?.notes ?? ""}

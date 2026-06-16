@@ -1049,19 +1049,36 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
 
 ## Upfit Builder
 
-Visual spec sheet for sales: sales picks a vehicle body style, drags
-numbered pins onto top/front/rear/driver/passenger views, labels each
-pin (free text or part from inventory), and prints a PDF the customer
-sees and the techs build to. One upfit per quote.
+Visual spec sheet for sales: sales picks a specific vehicle template,
+drops numbered pins anywhere on the multi-view blueprint image, labels
+each pin (free text or part from inventory), and prints a PDF the
+customer sees and the techs build to. One upfit per quote.
 
 - [x] **Tab on `/quotes/[id]`** (`QuoteTabs`) — Quote / Upfit builder.
       Upfit page lives at `/quotes/[id]/upfit`.
-- [x] **Vehicle templates** defined as SVG path data in
-      `src/lib/upfit/templates.ts`. Each body style ships five views
-      (top, front, rear, side_left, side_right) on a shared 1000×600
-      viewBox. Phase-1 styles: SUV, pickup, sedan. Pin (x, y) is stored
-      as fraction 0..1 within whichever view it was placed on, so the
-      same coordinates render identically in the editor and in the PDF.
+- [x] **Per-vehicle templates** — each template is one composite
+      blueprint image (the multi-view picture with top / front / rear /
+      sides all in one). `templates.ts` maps each template slug to one
+      `imageUrl` at `public/upfit-templates/<slug>.{jpg|png}`. The editor
+      renders it as an `<img>`; the PDF reads the file as a Buffer and
+      embeds via React-PDF `<Image>`. Pins are placed freely anywhere on
+      the image and stored as fraction 0..1 of the image box, so the
+      same coordinate is identical on screen and in print regardless of
+      the image's aspect ratio. Templates are per-vehicle (Tahoe,
+      Suburban, Blazer, Silverado, Durango, Ford PIU, F-150, F-350)
+      rather than per body style, so the diagram on the spec actually
+      matches the truck. The `upfit_configs.body_style` column name is
+      preserved for backward-compat; the value now holds the per-vehicle
+      slug. (The earlier five-separate-views model was dropped —
+      `UpfitPin.view` is retained optional for backward-compat only.)
+- [x] **Template image contract** — drop ONE JPG (or PNG) per vehicle at
+      `public/upfit-templates/<slug>.jpg`. Slugs currently shipped:
+      `tahoe`, `suburban`, `blazer`, `silverado`, `durango`, `piu`,
+      `f150`, `f350`. Any aspect ratio works (pins track the image by
+      percentage); a missing file degrades to a labeled empty box, no
+      crash. No rebuild required — files are read on each render. To add
+      a new vehicle: drop the JPG and append an entry to
+      `VEHICLE_TEMPLATES` in `src/lib/upfit/templates.ts`.
 - [x] **Per-diagram vehicle label** — every diagram view (editor +
       PDF) is headed with the specific make/model, e.g. "2024
       Chevrolet Tahoe". `upfit_configs.vehicle_label` stores it;
@@ -1071,25 +1088,37 @@ sees and the techs build to. One upfit per quote.
       so a spec can target a different unit than the deal record.
 - [x] **Builder UI** (`src/components/UpfitBuilder.tsx`, client) —
       body-style dropdown, part-from-inventory picker OR free-text
-      label, click-to-place pins, per-pin placement note, autocolor
-      from a 12-color palette, build notes textarea. "Save upfit"
-      persists via a server action on the page.
+      label, click-to-place pins on the single blueprint image,
+      **pointer-drag to reposition placed pins** (1%-of-box threshold
+      separates click-to-select from drag-to-move), per-pin placement
+      note, autocolor from a 12-color palette, build notes textarea.
+      Pins are HTML overlays positioned by percentage over the `<img>`.
+      "Save upfit" persists via a server action on the page.
+- [x] **Place same part multiple times** — picking a part (or typing a
+      label) enters "placement mode" and stays in it across clicks, so
+      the same SKU can be placed on every corner/pillar of the vehicle
+      without re-selecting. Explicit "Stop placing" button on the hint
+      banner clears the selection when done.
 - [x] **Persistence** — `upfit_configs(quoteId UNIQUE, body_style,
       pins jsonb, notes)`. One row per quote, upserted on save. Cascade
       deletes when the quote is deleted.
 - [x] **PDF spec sheet** — `src/lib/pdf/templates/upfit.tsx` renders
-      branded header + customer/vehicle block + 5-up diagram grid with
-      numbered pins on the same SVG paths + equipment table
-      (# · label · SKU · view · placement note) + build notes. Streamed
-      from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
+      branded header + customer/vehicle block + the full-width
+      blueprint image with numbered pins overlaid by percentage +
+      equipment table (# · label · SKU · placement note) + build notes.
+      Streamed from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
       `record_type = upfit`). Download button on the upfit tab.
-- [ ] **Customer-folder auto-link** — drop the generated spec PDF into
-      `customer_documents` under "Spec Approvals" (deferred).
+- [x] **Customer-folder auto-link** — `upsertUpfitLink(quoteId)` in
+      `src/lib/customerDocLinks.ts` writes one stable
+      `customer_documents` row keyed by `kind = auto_link:upfit:<quoteId>`
+      into the customer folder under the **Photos / Build Documentation**
+      category. The row's `blob_url` points at `/api/pdf/upfit/<quoteId>`
+      and its `mime_type` is `application/pdf`, so the customer-folder
+      list link streams the live spec PDF rather than a stale snapshot.
+      Called on every save; purged when the quote has no customer.
 - [ ] **Standalone tool** outside the quote context (deferred).
 - [ ] **CAD upload** attachable to the upfit config (deferred).
 - [ ] **Build packages** uploadable to inventory parts list (deferred).
-- [ ] **Reorder / drag pins** to fix mistakes without re-placing
-      (deferred — today, "remove" then re-place).
 - [ ] **Per-vehicle photos** as an alternative to the templates
       (deferred — pin coords are template-relative today).
 
