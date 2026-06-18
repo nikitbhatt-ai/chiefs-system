@@ -10,6 +10,7 @@ import {
   pgEnum,
   primaryKey,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -124,10 +125,10 @@ export const leads = pgTable("leads", {
   customerType: text("customer_type"),
   subSource: text("sub_source"),
   subSourceMeta: jsonb("sub_source_meta"),
-  partnerId: uuid("partner_id"),
-  partnerContactId: uuid("partner_contact_id"),
+  partnerId: uuid("partner_id").references(() => partners.id, { onDelete: "set null" }),
+  partnerContactId: uuid("partner_contact_id").references(() => partnerContacts.id, { onDelete: "set null" }),
   convertedCustomerId: uuid("converted_customer_id").references(() => customers.id),
-  convertedDealId: uuid("converted_deal_id"),
+  convertedDealId: uuid("converted_deal_id").references((): AnyPgColumn => deals.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -151,8 +152,8 @@ export const deals = pgTable("deals", {
   source: text("source"),
   subSource: text("sub_source"),
   subSourceMeta: jsonb("sub_source_meta"),
-  partnerId: uuid("partner_id"),
-  partnerContactId: uuid("partner_contact_id"),
+  partnerId: uuid("partner_id").references(() => partners.id, { onDelete: "set null" }),
+  partnerContactId: uuid("partner_contact_id").references(() => partnerContacts.id, { onDelete: "set null" }),
   sourceLocked: boolean("source_locked").notNull().default(false),
   department: text("department"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -364,7 +365,7 @@ export const customerDocuments = pgTable("customer_documents", {
   kind: text("kind"),
   version: integer("version").notNull().default(1),
   isCurrentVersion: boolean("is_current_version").notNull().default(true),
-  parentDocumentId: uuid("parent_document_id"),
+  parentDocumentId: uuid("parent_document_id").references((): AnyPgColumn => customerDocuments.id, { onDelete: "set null" }),
 }, (t) => [
   index("customer_documents_customer_idx").on(t.customerId),
   index("customer_documents_category_idx").on(t.customerId, t.category),
@@ -423,7 +424,7 @@ export const agentLogs = pgTable("agent_logs", {
 export const lookups = pgTable("lookups", {
   id: uuid("id").defaultRandom().primaryKey(),
   category: text("category").notNull(),
-  parentId: uuid("parent_id"),
+  parentId: uuid("parent_id").references((): AnyPgColumn => lookups.id, { onDelete: "set null" }),
   value: text("value").notNull(),
   label: text("label"),
   active: boolean("active").notNull().default(true),
@@ -470,7 +471,7 @@ export const partnerContacts = pgTable("partner_contacts", {
 export const dealActivity = pgTable("deal_activity", {
   id: uuid("id").defaultRandom().primaryKey(),
   dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
-  parentId: uuid("parent_id"),
+  parentId: uuid("parent_id").references((): AnyPgColumn => dealActivity.id, { onDelete: "set null" }),
   authorId: uuid("author_id").references(() => users.id),
   kind: text("kind").notNull(),
   body: text("body"),

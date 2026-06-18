@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { asc, eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { quotes, workOrders, parts, partReceipts } from "@/db/schema";
+import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
+import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,6 @@ const STAGE_KEYS = [
   "completed",
   "delivered",
 ];
-
-type StockLine = { kind?: string; partId?: string; quantity?: number };
 
 // POST /api/quotes/[id]/workflow-stage  body: { stage }
 // Moves the quote on the /workflow Kanban. Mirrors the existing
@@ -44,7 +43,6 @@ export async function POST(
         id: quotes.id,
         customerId: quotes.customerId,
         dealId: quotes.dealId,
-        lineItems: quotes.lineItems,
         workflowStage: quotes.workflowStage,
       })
       .from(quotes)
@@ -92,24 +90,17 @@ export async function POST(
       await db.update(workOrders).set({ status: stage, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
     }
 
-    if (stage === "in_progress" && wo && !wo.partsConsumed) {
-      const lines = (q.lineItems as unknown as StockLine[]) ?? [];
-      for (const line of lines) {
-        if (line.kind !== "item" || !line.partId) continue;
-        const qty = Number(line.quantity || 0);
-        if (qty <= 0) continue;
-        const layers = await db.select().from(partReceipts).where(eq(partReceipts.partId, line.partId)).orderBy(asc(partReceipts.receivedAt));
-        let need = qty;
-        for (const layer of layers) {
-          if (need <= 0) break;
-          if (layer.quantityRemaining <= 0) continue;
-          const take = Math.min(need, layer.quantityRemaining);
-          await db.update(partReceipts).set({ quantityRemaining: layer.quantityRemaining - take }).where(eq(partReceipts.id, layer.id));
-          need -= take;
-        }
-        await db.update(parts).set({ quantityOnHand: sql`${parts.quantityOnHand} - ${qty}`, updatedAt: new Date() }).where(eq(parts.id, line.partId));
+    // Transactional, idempotent FIFO consumption (see src/lib/inventory.ts).
+    // Advancing to or past in_progress consumes the quote's parts exactly once;
+    // walking the build back before in_progress restores the drained layers.
+    if (wo) {
+      const idx = STAGE_KEYS.indexOf(stage);
+      const inProgressIdx = STAGE_KEYS.indexOf("in_progress");
+      if (idx >= inProgressIdx) {
+        await consumeWorkOrderParts(wo.id);
+      } else {
+        await restoreWorkOrderParts(wo.id);
       }
-      await db.update(workOrders).set({ partsConsumed: true, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
     }
 
     await db.update(quotes).set({ workflowStage: stage, updatedAt: new Date() }).where(eq(quotes.id, id));

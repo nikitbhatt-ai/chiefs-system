@@ -2,11 +2,9 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { deals, dealCredentials, stageOverrides, dealActivity } from "@/db/schema";
-import { canAdvanceTo, stageLabel, type DealStage } from "@/lib/pipelines";
-import { isCredentialActive } from "@/lib/credentials";
+import { deals } from "@/db/schema";
 import { stageForBucket, type BucketSlug, PIPELINE_BUCKETS } from "@/lib/pipelineBuckets";
-import { maybeCreateDocReminder, maybePromoteWonDeal, syncDealToWorkflow } from "@/lib/dealTriggers";
+import { applyDealStageChange } from "@/lib/dealStage";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +20,13 @@ export async function POST(
 
   const body = await req.json().catch(() => null);
   const bucket = (body?.bucket ?? "") as BucketSlug;
-  const override = body?.override === true;
-  const reason = String(body?.reason ?? "").trim();
   if (!PIPELINE_BUCKETS.some((b) => b.slug === bucket)) {
     return NextResponse.json({ error: "Invalid bucket" }, { status: 400 });
   }
 
-  const [d] = await db.select().from(deals).where(eq(deals.id, id));
+  // The kanban speaks in buckets; resolve to the pipeline-specific stage, then
+  // route through the single guarded transition (same as the stage endpoint).
+  const [d] = await db.select({ pipeline: deals.pipeline }).from(deals).where(eq(deals.id, id));
   if (!d) return NextResponse.json({ error: "Deal not found" }, { status: 404 });
 
   const targetStage = stageForBucket(d.pipeline, bucket);
@@ -38,80 +36,31 @@ export async function POST(
       { status: 400 },
     );
   }
-  if (targetStage === (d.stage as DealStage)) {
-    return NextResponse.json({ ok: true, stage: d.stage });
-  }
 
-  const creds = await db
-    .select({ verifiedAt: dealCredentials.verifiedAt, expiresAt: dealCredentials.expiresAt })
-    .from(dealCredentials)
-    .where(eq(dealCredentials.dealId, id));
-  const hasActiveCredential = creds.some((c) => isCredentialActive(c));
+  const result = await applyDealStageChange(id, targetStage, {
+    userId: session.user.id,
+    override: body?.override === true,
+    reason: body?.reason,
+  });
 
-  const transition = canAdvanceTo(d.pipeline, d.stage, targetStage, { hasActiveCredential, override });
-  if (!transition.ok) {
-    return NextResponse.json(
-      { error: transition.reason, overridable: transition.overridable === true },
-      { status: 400 },
-    );
-  }
-
-  const isBackwards = transition.backwards === true;
-  if ((override || isBackwards) && !reason) {
+  if (!result.ok) {
     return NextResponse.json(
       {
-        error: isBackwards
-          ? "Moving a deal backwards requires a reason."
-          : "Override requires a reason.",
-        requiresReason: true,
-        backwards: isBackwards,
+        error: result.error,
+        overridable: result.overridable,
+        requiresReason: result.requiresReason,
+        backwards: result.backwards,
       },
-      { status: 400 },
+      { status: result.status },
     );
   }
-
-  await db
-    .update(deals)
-    .set({ stage: targetStage, currentStageEnteredAt: new Date(), updatedAt: new Date() })
-    .where(eq(deals.id, id));
-
-  if (override || isBackwards) {
-    const kind = override ? "skip_override" : "backwards";
-    await db.insert(stageOverrides).values({
-      dealId: id,
-      kind,
-      fromStage: d.stage,
-      toStage: targetStage,
-      reason,
-      userId: session.user.id,
-    });
-    await db.insert(dealActivity).values({
-      dealId: id,
-      kind: "stage_override",
-      body: `${kind === "backwards" ? "Backwards move" : "Forward override"}: ${stageLabel(d.stage)} → ${stageLabel(targetStage)}. Reason: ${reason}`,
-      metadata: { kind, fromStage: d.stage, toStage: targetStage },
-    });
-  }
-
-  const promotion = await maybePromoteWonDeal(id, targetStage, d.stage).catch((err) => {
-    console.error("maybePromoteWonDeal failed:", err);
-    return { ok: false as const, reason: "no_quote" as const };
-  });
-  const reminder = await maybeCreateDocReminder(id, targetStage, d.stage).catch((err) => {
-    console.error("maybeCreateDocReminder failed:", err);
-    return { created: false, taskId: null };
-  });
-  const sync = await syncDealToWorkflow(id, targetStage, d.stage).catch((err) => {
-    console.error("syncDealToWorkflow failed:", err);
-    return { ok: false as const, reason: "no_deal" as const };
-  });
 
   return NextResponse.json({
     ok: true,
-    stage: targetStage,
-    promotedQuoteId: promotion.ok ? promotion.promotedQuoteId : null,
-    createdWorkOrderId: promotion.ok ? promotion.createdWorkOrderId : null,
-    reminderTaskId: reminder.taskId,
-    workflowSync: sync.ok ? { workOrderId: sync.workOrderId, workflowStage: sync.workflowStage, created: sync.created } : null,
+    stage: result.stage,
+    promotedQuoteId: result.promotedQuoteId,
+    createdWorkOrderId: result.createdWorkOrderId,
+    reminderTaskId: result.reminderTaskId,
+    workflowSync: result.workflowSync,
   });
 }

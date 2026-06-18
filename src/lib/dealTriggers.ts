@@ -69,35 +69,52 @@ export async function maybePromoteWonDeal(
     }
   }
   if (!q) return { ok: false, reason: "no_quote" };
+  const quoteId = q.id;
 
-  const currentIdx = WORKFLOW_ORDER.indexOf(q.workflowStage as (typeof WORKFLOW_ORDER)[number]);
-  const confirmedIdx = WORKFLOW_ORDER.indexOf("confirmed");
-  if (currentIdx >= confirmedIdx) {
-    return { ok: false, reason: "already_past_confirmed" };
-  }
+  const [d] = await db.select({ customerId: deals.customerId }).from(deals).where(eq(deals.id, dealId));
 
-  await db.update(quotes).set({ workflowStage: "confirmed", updatedAt: new Date() }).where(eq(quotes.id, q.id));
+  // The promotion runs inside a transaction with the quote row locked
+  // FOR UPDATE. Two concurrent moves into the Won bucket therefore serialize:
+  // the second sees workflowStage = 'confirmed' and bails before creating a
+  // second work order. The work order is stamped with dealId so the
+  // CRM->Workflow sync that runs right after finds it (by deal_id) instead of
+  // creating its own duplicate.
+  return db.transaction(async (tx) => {
+    const [locked] = await tx.select().from(quotes).where(eq(quotes.id, quoteId)).for("update");
+    if (!locked) return { ok: false, reason: "no_quote" };
 
-  let createdWorkOrderId: string | null = null;
-  const [existingWo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, q.id)).limit(1);
-  if (!existingWo) {
-    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
-    const [d] = await db.select({ customerId: deals.customerId }).from(deals).where(eq(deals.id, dealId));
-    const [wo] = await db
-      .insert(workOrders)
-      .values({
-        woNumber,
-        customerId: d?.customerId ?? null,
-        quoteId: q.id,
-        status: "confirmed",
-      })
-      .returning();
-    createdWorkOrderId = wo?.id ?? null;
-  } else {
-    await db.update(workOrders).set({ status: "confirmed", updatedAt: new Date() }).where(eq(workOrders.id, existingWo.id));
-  }
+    const currentIdx = WORKFLOW_ORDER.indexOf(locked.workflowStage as (typeof WORKFLOW_ORDER)[number]);
+    const confirmedIdx = WORKFLOW_ORDER.indexOf("confirmed");
+    if (currentIdx >= confirmedIdx) {
+      return { ok: false, reason: "already_past_confirmed" };
+    }
 
-  return { ok: true, promotedQuoteId: q.id, createdWorkOrderId };
+    await tx.update(quotes).set({ workflowStage: "confirmed", updatedAt: new Date() }).where(eq(quotes.id, quoteId));
+
+    let createdWorkOrderId: string | null = null;
+    const [existingWo] = await tx.select().from(workOrders).where(eq(workOrders.quoteId, quoteId)).limit(1).for("update");
+    if (!existingWo) {
+      const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+      const [wo] = await tx
+        .insert(workOrders)
+        .values({
+          woNumber,
+          customerId: d?.customerId ?? null,
+          quoteId,
+          dealId,
+          status: "confirmed",
+        })
+        .returning();
+      createdWorkOrderId = wo?.id ?? null;
+    } else {
+      await tx
+        .update(workOrders)
+        .set({ status: "confirmed", dealId: existingWo.dealId ?? dealId, updatedAt: new Date() })
+        .where(eq(workOrders.id, existingWo.id));
+    }
+
+    return { ok: true, promotedQuoteId: quoteId, createdWorkOrderId };
+  });
 }
 
 // Soft pipeline-document reminder. When a deal advances to / past the

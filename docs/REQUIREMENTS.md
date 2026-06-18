@@ -1286,6 +1286,138 @@ copy-paste needed.
 vehicle is sold, reordering photos, designating a "cover" photo,
 image compression / thumbnail variants.
 
+## Hardening roadmap (replacing a packaged ERP — NetSuite-grade reliability)
+
+We are NOT migrating to NetSuite; we are building this app into the
+production ERP that makes buying one unnecessary. That raises the bar:
+ledgers must never lie, roles must be enforced server-side, and core
+operational modules must actually exist. A four-track QA dissection
+produced the backlog below. Tracks are tackled in dependency order.
+
+- **Phase 1 — Data integrity** (this PR). ✅ see below.
+- **Phase 2 — Security / RBAC.** Central role-enforcement helper on every
+  mutating route + the document-upload path; timing-safe webhook secret
+  comparison; input/enum validation (reject unknown enum values and
+  coerce-to-`[object Object]` numerics).
+- **Phase 3 — Operational modules.** Work Orders (create/edit/detail UI,
+  parts, notes, tags), QC checklists wired to build-close, Time Clock
+  (geo-tagged clock-in + per-work-order technician tracker for labor
+  $/hours per build — needs shop lat/lng + radius from the user).
+- **Phase 4 — CRM cross-cutting.** Filter-by-column + tags + archive on
+  every list; remove the dead `/timeclock` nav 404; drop dead tables
+  (`deal_comms`, and the others once their modules land or are cut).
+- **Phase 5 — Performance.** Indexes on hot filter columns
+  (`quotes(deal_id,customer_id,status)`, `work_orders(status,...)`,
+  `purchase_orders(status)`, `leads(status)`, `deal_tasks(assigned_to)`),
+  pagination on every unbounded list, SQL aggregates in dashboard
+  metrics, dashboard KPI caching.
+
+Email/outbound notifications are deferred: build a provider adapter
+interface, keep notifications in-app only until a provider is chosen.
+
+### Phase 1 — Data integrity (shipped)
+
+Every stock- and ledger-moving operation is now transactional and
+idempotent. The two duplicated, non-transactional FIFO loops were
+replaced by one module; deal-stage transitions were unified behind one
+guarded function.
+
+- [x] **`src/lib/inventory.ts`** — the single home for stock movement.
+  - `consumeWorkOrderParts(woId)` — transactional FIFO consumption.
+    Locks the `work_orders` row `FOR UPDATE`; the `parts_consumed`
+    latch makes it idempotent (a second call, or a concurrent
+    deal-driven + workflow-board move, is a no-op). On-hand is floored
+    at zero (`GREATEST(0, …)`) so inventory can never go negative;
+    layer shortfalls are returned as `shortages` instead of corrupting
+    stock.
+  - `restoreWorkOrderParts(woId)` — reverses a consumption (build
+    walked back before `in_progress`, or cancelled). Refills the oldest
+    layers first, capped at each layer's original received quantity.
+  - `receivePurchaseOrder(poId, receiveByIndex)` — transactional PO
+    receive. Locks + re-reads the PO row inside the txn, so two
+    simultaneous receives serialize instead of double-incrementing
+    stock. Receipt layer + on-hand bump + cost-history row are all-or-
+    nothing.
+- [x] **FIFO consumption keyed to stage, both directions.** Advancing a
+  quote/WO to or past `in_progress` consumes once; moving it back before
+  `in_progress` restores. Wired into both `/quotes/[id]` `moveStage`
+  and `POST /api/quotes/[id]/workflow-stage` (the two paths now call the
+  same module).
+- [x] **`src/lib/dealStage.ts :: applyDealStageChange`** — the single
+  guarded deal-stage transition. Runs `canAdvanceTo` (credential hard
+  gate included), captures override/backwards reasons into
+  `stage_overrides`, then fires the Won promotion, doc reminder, and
+  CRM→Workflow sync. Now used by `POST /api/deals/[id]/stage`,
+  `POST /api/deals/[id]/move-bucket`, AND `PATCH /api/deals/[id]`. The
+  generic PATCH previously wrote `stage` directly and bypassed every
+  gate — that hole is closed (stage changes through PATCH now return the
+  same 400s as the dedicated endpoint).
+- [x] **Won auto-promotion hardened.** `maybePromoteWonDeal` runs in a
+  transaction with the quote row locked, re-checks `workflow_stage`
+  inside the lock (prevents the double-WO race), and stamps `deal_id` on
+  the created work order so the follow-on sync finds it instead of
+  creating a duplicate.
+- [x] **FK constraints declared** in `src/db/schema.ts` for the columns
+  that were bare UUIDs (`leads.partner_id/partner_contact_id/
+  converted_deal_id`, `deals.partner_id/partner_contact_id`,
+  `customer_documents.parent_document_id`, `deal_activity.parent_id`,
+  `lookups.parent_id`).
+
+#### Schema additions (Phase 1) — run in Neon's SQL Editor
+
+The Drizzle schema declares these, but the live DB only enforces them
+after you run the SQL. Add the work-order uniqueness guard and the
+missing foreign keys. The FKs use `NOT VALID` so they don't fail on a
+busy table; validate after confirming there are no orphan rows.
+
+```sql
+-- One work order per quote (defense-in-depth against the duplicate-WO
+-- race). If this errors, you already have dupes — see the detection
+-- query below and merge/delete them first.
+CREATE UNIQUE INDEX IF NOT EXISTS work_orders_quote_unique
+  ON work_orders (quote_id) WHERE quote_id IS NOT NULL;
+
+-- Detect existing duplicate work orders per quote (run if the index fails):
+--   SELECT quote_id, count(*) FROM work_orders
+--   WHERE quote_id IS NOT NULL GROUP BY quote_id HAVING count(*) > 1;
+
+-- Foreign keys (ON DELETE SET NULL so deleting a parent nulls the ref
+-- rather than orphaning it). NOT VALID skips the initial full-table check.
+ALTER TABLE leads  ADD CONSTRAINT leads_partner_id_fk
+  FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE leads  ADD CONSTRAINT leads_partner_contact_id_fk
+  FOREIGN KEY (partner_contact_id) REFERENCES partner_contacts(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE leads  ADD CONSTRAINT leads_converted_deal_id_fk
+  FOREIGN KEY (converted_deal_id) REFERENCES deals(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE deals  ADD CONSTRAINT deals_partner_id_fk
+  FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE deals  ADD CONSTRAINT deals_partner_contact_id_fk
+  FOREIGN KEY (partner_contact_id) REFERENCES partner_contacts(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE customer_documents ADD CONSTRAINT customer_documents_parent_fk
+  FOREIGN KEY (parent_document_id) REFERENCES customer_documents(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE deal_activity ADD CONSTRAINT deal_activity_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES deal_activity(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE lookups ADD CONSTRAINT lookups_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES lookups(id) ON DELETE SET NULL NOT VALID;
+
+-- After confirming no orphans, promote each to fully validated, e.g.:
+--   ALTER TABLE leads VALIDATE CONSTRAINT leads_partner_id_fk;
+--   (repeat per constraint above)
+```
+
+A one-time reconciliation to catch any drift the old non-transactional
+code already introduced (on-hand should equal the sum of remaining FIFO
+layers for parts that are receipt-tracked):
+
+```sql
+SELECT p.id, p.sku, p.quantity_on_hand,
+       COALESCE(SUM(r.quantity_remaining), 0) AS fifo_remaining
+FROM parts p
+LEFT JOIN part_receipts r ON r.part_id = p.id
+GROUP BY p.id, p.sku, p.quantity_on_hand
+HAVING p.quantity_on_hand <> COALESCE(SUM(r.quantity_remaining), 0);
+```
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

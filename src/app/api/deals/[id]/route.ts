@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { deals } from "@/db/schema";
-import { syncDealToWorkflow } from "@/lib/dealTriggers";
+import { applyDealStageChange } from "@/lib/dealStage";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -19,6 +19,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
+
+  // Stage changes must NOT be writable through this generic PATCH — that
+  // bypassed canAdvanceTo, the credential hard gate, override auditing, and
+  // the Won/sync triggers. Stage is routed through the single guarded
+  // transition; every other field is a plain update.
   const update: Record<string, unknown> = { updatedAt: new Date() };
   for (const f of [
     "customerId",
@@ -28,18 +33,42 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     "vehicleMake",
     "vehicleModel",
     "vin",
-    "stage",
     "referralSource",
     "notes",
   ]) {
     if (f in body) update[f] = body[f];
   }
+
   const [existing] = await db.select({ stage: deals.stage }).from(deals).where(eq(deals.id, id));
-  const [row] = await db.update(deals).set(update).where(eq(deals.id, id)).returning();
-  if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
-  if (existing && typeof update.stage === "string" && update.stage !== existing.stage) {
-    await syncDealToWorkflow(id, String(update.stage), existing.stage);
+  if (!existing) return NextResponse.json({ error: "not found" }, { status: 404 });
+
+  // Apply the non-stage fields (only if any were provided).
+  if (Object.keys(update).length > 1) {
+    await db.update(deals).set(update).where(eq(deals.id, id));
   }
+
+  // Then handle a stage change through the guarded path, surfacing gate
+  // failures to the caller instead of silently writing the column.
+  if ("stage" in body && typeof body.stage === "string" && body.stage !== existing.stage) {
+    const result = await applyDealStageChange(id, body.stage, {
+      userId: session.user.id,
+      override: body?.override === true,
+      reason: body?.reason,
+    });
+    if (!result.ok) {
+      return NextResponse.json(
+        {
+          error: result.error,
+          overridable: result.overridable,
+          requiresReason: result.requiresReason,
+          backwards: result.backwards,
+        },
+        { status: result.status },
+      );
+    }
+  }
+
+  const [row] = await db.select().from(deals).where(eq(deals.id, id));
   return NextResponse.json(row);
 }
 
