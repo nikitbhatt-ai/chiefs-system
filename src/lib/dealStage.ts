@@ -18,6 +18,7 @@ import { deals, dealCredentials, stageOverrides, dealActivity } from "@/db/schem
 import { canAdvanceTo, stageLabel, type DealStage } from "@/lib/pipelines";
 import { isCredentialActive } from "@/lib/credentials";
 import { maybeCreateDocReminder, maybePromoteWonDeal, syncDealToWorkflow } from "@/lib/dealTriggers";
+import { upsertWorkOrderLink } from "@/lib/customerDocLinks";
 
 export type StageChangeOk = {
   ok: true;
@@ -117,6 +118,15 @@ export async function applyDealStageChange(
     console.error("maybePromoteWonDeal failed:", err);
     return { ok: false as const, reason: "no_quote" as const };
   });
+  // On conversion into Won, the estimate becomes a work order — auto-link its
+  // de-priced build-sheet PDF into the customer folder. Best-effort.
+  if (promotion.ok && promotion.workOrderId) {
+    try {
+      await upsertWorkOrderLink(promotion.workOrderId);
+    } catch (err) {
+      console.error("upsertWorkOrderLink failed:", err);
+    }
+  }
   const reminder = await maybeCreateDocReminder(dealId, targetStage, d.stage).catch((err) => {
     console.error("maybeCreateDocReminder failed:", err);
     return { created: false, taskId: null };

@@ -29,7 +29,7 @@ const WORKFLOW_ORDER = [
 ] as const;
 
 export type WonPromotionResult =
-  | { ok: true; promotedQuoteId: string; createdWorkOrderId: string | null }
+  | { ok: true; promotedQuoteId: string; createdWorkOrderId: string | null; workOrderId: string | null }
   | { ok: false; reason: "not_won_bucket" | "no_quote" | "already_past_confirmed" };
 
 export async function maybePromoteWonDeal(
@@ -92,6 +92,7 @@ export async function maybePromoteWonDeal(
     await tx.update(quotes).set({ workflowStage: "confirmed", updatedAt: new Date() }).where(eq(quotes.id, quoteId));
 
     let createdWorkOrderId: string | null = null;
+    let workOrderId: string | null = null;
     const [existingWo] = await tx.select().from(workOrders).where(eq(workOrders.quoteId, quoteId)).limit(1).for("update");
     if (!existingWo) {
       const woNumber = `WO-${Date.now().toString().slice(-7)}`;
@@ -106,14 +107,16 @@ export async function maybePromoteWonDeal(
         })
         .returning();
       createdWorkOrderId = wo?.id ?? null;
+      workOrderId = wo?.id ?? null;
     } else {
       await tx
         .update(workOrders)
         .set({ status: "confirmed", dealId: existingWo.dealId ?? dealId, updatedAt: new Date() })
         .where(eq(workOrders.id, existingWo.id));
+      workOrderId = existingWo.id;
     }
 
-    return { ok: true, promotedQuoteId: quoteId, createdWorkOrderId };
+    return { ok: true, promotedQuoteId: quoteId, createdWorkOrderId, workOrderId };
   });
 }
 

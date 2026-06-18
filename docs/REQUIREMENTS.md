@@ -1455,6 +1455,42 @@ Remaining (lower-severity, follow-up): per-rep ownership scoping (IDOR)
 on `sales`-role reads; narrowing `/api/users` exposure; extending the
 enum/numeric validation pattern to vendors/vehicles/parts writes.
 
+### Phase 3a — De-priced work-order build sheet (shipped)
+
+Requirement (from the user, with example PDFs): a work order must match
+the estimate/invoice exactly, but when an estimate converts it becomes a
+work-order PDF with **all pricing removed** — only **part name, brand,
+manufacturer part number, and quantity** per line.
+
+- [x] **`src/lib/pdf/templates/workOrder.tsx`** — `WorkOrderDocument`,
+  the de-priced build sheet. Same header/branding as the estimate;
+  columns are Part · Brand · Part # · Qty. No unit price, discount, fee,
+  tax, or total appears anywhere. Fee lines are dropped entirely.
+- [x] **Registry + endpoint.** `work_order` record type added to
+  `src/lib/pdf/registry.tsx` (resolver sources line items from the
+  linked estimate so it always matches, resolves brand from the part's
+  manufacturer and part # from the new mfg field). Download/inline at
+  `GET /api/pdf/work-orders/[id]`.
+- [x] **Auto-generate on conversion.** When a deal converts into Won and
+  the estimate is promoted to a work order, `applyDealStageChange` calls
+  `upsertWorkOrderLink`, which drops a live-PDF link into the customer
+  folder under Spec / Build Approvals. The link renders the current
+  de-priced PDF on every click (no stale blobs).
+- [x] **`parts.mfg_part_number`** column added (the manufacturer/brand
+  part number, distinct from the internal SKU). Surfaced on the part
+  add + edit forms. The work-order PDF prints `mfg_part_number` and
+  falls back to `sku` when it's blank. "Brand" = the part's manufacturer
+  vendor name (`parts.manufacturer_id`).
+
+#### Schema addition (Phase 3a) — run in Neon's SQL Editor
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS mfg_part_number text;
+```
+
+Backfill is optional — until set, the work-order sheet shows the
+internal SKU as the part number.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

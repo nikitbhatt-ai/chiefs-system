@@ -18,6 +18,7 @@ async function createPart(formData: FormData) {
     sku,
     name,
     description: String(formData.get("description") ?? "").trim() || null,
+    mfgPartNumber: String(formData.get("mfgPartNumber") ?? "").trim() || null,
     category: String(formData.get("category") ?? "").trim() || null,
     quantityOnHand: num("quantityOnHand") ?? 0,
     quantityOnOrder: num("quantityOnOrder") ?? 0,

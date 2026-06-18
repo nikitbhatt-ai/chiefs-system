@@ -237,6 +237,7 @@ export const parts = pgTable("parts", {
   sku: text("sku").unique().notNull(),
   name: text("name").notNull(),
   description: text("description"),
+  mfgPartNumber: text("mfg_part_number"),
   category: text("category"),
   quantityOnHand: integer("quantity_on_hand").notNull().default(0),
   quantityOnOrder: integer("quantity_on_order").notNull().default(0),
