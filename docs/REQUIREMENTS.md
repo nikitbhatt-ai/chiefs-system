@@ -1418,6 +1418,43 @@ GROUP BY p.id, p.sku, p.quantity_on_hand
 HAVING p.quantity_on_hand <> COALESCE(SUM(r.quantity_remaining), 0);
 ```
 
+### Phase 2 — Security / RBAC (shipped)
+
+Authentication was already enforced everywhere; this phase adds
+authorization. Policy lives in one place: `src/lib/rbac.ts`.
+
+- [x] **`src/lib/rbac.ts`** — `roleOf`, `hasRole`, `requireRole` (route
+  guard returning 401/403), capability shortcuts (`canDelete`,
+  `canManageUsers`, `canOverrideStageGate`), and `secretEquals`
+  (constant-time shared-secret compare).
+- [x] **Delete is manager+** on every entity route: customers, deals,
+  quotes, purchase-orders, parts, vendors, vehicles, leads. A
+  warehouse/tech/sales account now gets 403 on DELETE instead of
+  wiping records.
+- [x] **Stage-gate override is manager+.** `POST /api/deals/[id]/stage`,
+  `/move-bucket`, and `PATCH /api/deals/[id]` reject `override: true`
+  from non-managers (403). Combined with Phase 1's `applyDealStageChange`
+  chokepoint, a rep can no longer self-authorize skipping the credential
+  gate.
+- [x] **Document-upload RBAC.** `POST /api/deals/[id]/documents` now
+  checks `categoryVisibleTo(category, role)` before writing — the same
+  gate that protected downloads. A non-manager can no longer drop files
+  into contracts/credentials/invoices/compliance folders. Also caps
+  uploads at 25 MB.
+- [x] **Timing-safe webhook secrets.** `/api/leads/capture` and
+  `/api/cron/expiring-credentials` compare their shared secret with
+  `crypto.timingSafeEqual` (via `secretEquals`) instead of `===`. Both
+  still fail closed when the env var is unset.
+- [x] **Input / enum validation.** `PATCH /api/quotes/[id]` rejects
+  invalid `status` enum values and non-finite/negative money fields
+  (no more `String({})` → `"[object Object]"` landing in numeric
+  columns). `POST`/`PATCH /api/customers[/id]` validate the
+  `customer_type` enum.
+
+Remaining (lower-severity, follow-up): per-rep ownership scoping (IDOR)
+on `sales`-role reads; narrowing `/api/users` exposure; extending the
+enum/numeric validation pattern to vendors/vehicles/parts writes.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

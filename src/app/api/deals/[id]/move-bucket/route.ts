@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { deals } from "@/db/schema";
 import { stageForBucket, type BucketSlug, PIPELINE_BUCKETS } from "@/lib/pipelineBuckets";
+import { canOverrideStageGate } from "@/lib/rbac";
 import { applyDealStageChange } from "@/lib/dealStage";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,9 @@ export async function POST(
   const bucket = (body?.bucket ?? "") as BucketSlug;
   if (!PIPELINE_BUCKETS.some((b) => b.slug === bucket)) {
     return NextResponse.json({ error: "Invalid bucket" }, { status: 400 });
+  }
+  if (body?.override === true && !canOverrideStageGate(session)) {
+    return NextResponse.json({ error: "Only managers can override stage gates." }, { status: 403 });
   }
 
   // The kanban speaks in buckets; resolve to the pipeline-specific stage, then

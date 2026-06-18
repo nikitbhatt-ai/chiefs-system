@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { canDelete, canOverrideStageGate } from "@/lib/rbac";
 import { db } from "@/db";
 import { deals } from "@/db/schema";
 import { applyDealStageChange } from "@/lib/dealStage";
@@ -50,6 +51,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   // Then handle a stage change through the guarded path, surfacing gate
   // failures to the caller instead of silently writing the column.
   if ("stage" in body && typeof body.stage === "string" && body.stage !== existing.stage) {
+    if (body?.override === true && !canOverrideStageGate(session)) {
+      return NextResponse.json({ error: "Only managers can override stage gates." }, { status: 403 });
+    }
     const result = await applyDealStageChange(id, body.stage, {
       userId: session.user.id,
       override: body?.override === true,
@@ -76,6 +80,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  if (!canDelete(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   await db.delete(deals).where(eq(deals.id, id));
   return NextResponse.json({ ok: true });
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { canOverrideStageGate } from "@/lib/rbac";
 import { applyDealStageChange } from "@/lib/dealStage";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +15,9 @@ export async function POST(
   const body = await req.json().catch(() => null);
   const targetStage = String(body?.stage ?? "");
   if (!targetStage) return NextResponse.json({ error: "Missing stage" }, { status: 400 });
+  if (body?.override === true && !canOverrideStageGate(session)) {
+    return NextResponse.json({ error: "Only managers can override stage gates." }, { status: 403 });
+  }
 
   const result = await applyDealStageChange(id, targetStage, {
     userId: session.user.id,

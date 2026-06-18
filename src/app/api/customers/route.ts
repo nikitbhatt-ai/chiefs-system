@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { customers } from "@/db/schema";
+import { customers, customerType } from "@/db/schema";
 
 export async function GET() {
   const session = await auth();
@@ -19,6 +19,9 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   if (!body || typeof body.name !== "string" || !body.name.trim()) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
+  }
+  if (body.type != null && !customerType.enumValues.includes(body.type)) {
+    return NextResponse.json({ error: "invalid customer type" }, { status: 400 });
   }
 
   const [row] = await db
