@@ -1,7 +1,9 @@
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, count, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "@/db";
 import { leads, lookups, partners, partnerContacts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { parsePagination } from "@/lib/pagination";
 import { NewLeadForm } from "./NewLeadForm";
 import { convertLeadAction, deleteLeadAction } from "./actions";
 import { fmtDateTime } from "@/lib/datetime";
@@ -14,14 +16,40 @@ const STATUS_COLORS: Record<string, string> = {
   converted: "bg-green-500/10 text-green-300 border-green-500/30",
   lost: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
 };
+const LEAD_STATUSES = ["new", "contacted", "converted", "lost"];
 
-export default async function LeadsPage() {
-  const [rows, sources, subSources, samesRow] = await Promise.all([
-    db.select().from(leads).orderBy(desc(leads.createdAt)),
+export default async function LeadsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
+  const q = (sp.q ?? "").trim();
+  const status = (sp.status ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
+
+  const filters = [];
+  if (status) filters.push(eq(leads.status, status as typeof leads.$inferSelect.status));
+  if (q) {
+    const like = `%${q}%`;
+    filters.push(or(ilike(leads.name, like), ilike(leads.email, like), ilike(leads.phone, like)));
+  }
+  const where = filters.length ? and(...filters) : undefined;
+  const baseQuery = (() => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    if (status) qs.set("status", status);
+    return qs.toString();
+  })();
+
+  const [rows, totalRows, sources, subSources, samesRow] = await Promise.all([
+    db.select().from(leads).where(where).orderBy(desc(leads.createdAt)).limit(perPage).offset(offset),
+    db.select({ n: count() }).from(leads).where(where),
     db.select({ id: lookups.id, value: lookups.value, parentId: lookups.parentId }).from(lookups).where(and(eq(lookups.category, "source"), eq(lookups.active, true))).orderBy(asc(lookups.sortOrder), asc(lookups.value)),
     db.select({ id: lookups.id, value: lookups.value, parentId: lookups.parentId }).from(lookups).where(and(eq(lookups.category, "sub_source"), eq(lookups.active, true))).orderBy(asc(lookups.sortOrder), asc(lookups.value)),
     db.select().from(partners).where(eq(partners.name, "Sames")).limit(1),
   ]);
+  const total = Number(totalRows[0]?.n ?? 0);
   const samesPartner = samesRow[0] ?? null;
   const samesContacts = samesPartner
     ? await db.select({ id: partnerContacts.id, name: partnerContacts.name, location: partnerContacts.location }).from(partnerContacts).where(and(eq(partnerContacts.partnerId, samesPartner.id), eq(partnerContacts.active, true))).orderBy(asc(partnerContacts.name))
@@ -39,6 +67,15 @@ export default async function LeadsPage() {
           <NewLeadForm sources={sources} subSources={subSources} samesPartner={samesPartner ? { id: samesPartner.id, name: samesPartner.name } : null} samesContacts={samesContacts} />
         )}
       </div>
+      <form method="get" className="flex flex-wrap items-center gap-2">
+        <input name="q" defaultValue={q} placeholder="Search name, email, phone…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]" />
+        <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+          <option value="">All statuses</option>
+          {LEAD_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
+        </select>
+        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+        {(q || status) && (<a href="/leads" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
+      </form>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -74,6 +111,7 @@ export default async function LeadsPage() {
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={baseQuery} />
       </div>
     </AppShell>
   );

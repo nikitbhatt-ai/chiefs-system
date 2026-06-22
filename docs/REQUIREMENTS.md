@@ -1609,14 +1609,16 @@ CREATE INDEX IF NOT EXISTS deal_credentials_expires_idx ON deal_credentials (exp
 - [x] **Dead `/timeclock` nav link fixed** — the route now exists (Phase 3b).
 - [x] **Reusable list search + pagination** — `src/lib/pagination.ts`
   (`parsePagination`, `pageCount`) + `src/components/Pagination.tsx`.
-- [x] **Deals list** (`/deals`): server-side free-text search (customer
-  name, VIN, make, model, rep), stage filter, and pagination (50/page,
-  SQL `count()` + limit/offset). Reference implementation for the rest.
-- [x] **`deleteDeal` server action** now requires manager+ (server-action
-  delete was outside the Phase 2 API sweep, same as the work-orders fix).
-- [ ] Apply the same search + pagination to the other lists (leads,
-  quotes, customers/CRM, work orders, purchase orders, inventory). The
-  helper + component make each a small, mechanical change.
+- [x] **Search + pagination applied to:** deals (customer/VIN/make/model/
+  rep + stage), leads (name/email/phone + status), quotes (quote #/
+  customer + status). 50/page, SQL `count()` + limit/offset, filters
+  preserved across pages.
+- [x] **Manager-only delete** extended to the deals, quotes, and leads
+  delete server actions (server-action deletes were outside the Phase 2
+  API sweep).
+- [ ] Remaining lists to get the same treatment: customers/CRM, work
+  orders, purchase orders, inventory (pagination). Mechanical — same
+  helper + component.
 - [ ] Tags + archive on lists — needs schema (a `tags` column/table and
   `archived` flags where missing); batched into a future SQL block so it
   doesn't trickle migrations out one at a time.
