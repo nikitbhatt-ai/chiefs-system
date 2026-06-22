@@ -1,8 +1,12 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, customers, users, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { parsePagination } from "@/lib/pagination";
+import { canDelete } from "@/lib/rbac";
+import { auth } from "@/auth";
 import { isCredentialActive } from "@/lib/credentials";
 import { fmtDateTime } from "@/lib/datetime";
 import { maybeCreateDocReminder, maybePromoteWonDeal } from "@/lib/dealTriggers";
@@ -61,6 +65,8 @@ async function createDeal(formData: FormData) {
 
 async function deleteDeal(formData: FormData) {
   "use server";
+  const session = await auth();
+  if (!canDelete(session)) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.delete(deals).where(eq(deals.id, id));
@@ -100,14 +106,57 @@ async function changeStage(formData: FormData) {
   revalidatePath("/work-orders");
 }
 
-export default async function DealsPage() {
-  const [customerRows, userRows, dealRows] = await Promise.all([
+export default async function DealsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; stage?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
+  const q = (sp.q ?? "").trim();
+  const stage = (sp.stage ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
+
+  // Build the WHERE. Free-text search matches vehicle fields + sales rep, plus
+  // any customer whose name matches (resolved to ids first to avoid a join).
+  const filters = [];
+  if (stage) filters.push(eq(deals.stage, stage as DealStage));
+  if (q) {
+    const like = `%${q}%`;
+    const matchCustomerIds = (
+      await db.select({ id: customers.id }).from(customers).where(ilike(customers.name, like))
+    ).map((c) => c.id);
+    const ors = [
+      ilike(deals.vin, like),
+      ilike(deals.vehicleMake, like),
+      ilike(deals.vehicleModel, like),
+      ilike(deals.salesRep, like),
+    ];
+    if (matchCustomerIds.length) ors.push(inArray(deals.customerId, matchCustomerIds));
+    filters.push(or(...ors));
+  }
+  const where = filters.length ? and(...filters) : undefined;
+
+  const [customerRows, userRows, totalRows, dealRows] = await Promise.all([
     db.select({ id: customers.id, name: customers.name, type: customers.type }).from(customers).orderBy(customers.name),
     db.select({ id: users.id, email: users.email, name: users.name }).from(users).where(eq(users.active, true)),
-    db.select().from(deals).orderBy(desc(deals.createdAt)),
+    db.select({ n: count() }).from(deals).where(where),
+    db.select().from(deals).where(where).orderBy(desc(deals.createdAt)).limit(perPage).offset(offset),
   ]);
+  const total = Number(totalRows[0]?.n ?? 0);
   const customerMap = new Map(customerRows.map((c) => [c.id, c.name]));
   const userMap = new Map(userRows.map((u) => [u.id, u.name ?? u.email]));
+
+  const baseQuery = (() => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    if (stage) qs.set("stage", stage);
+    return qs.toString();
+  })();
+
+  const ALL_STAGES: DealStage[] = [
+    "prospect", "credential_verification", "quote_sent", "po_received",
+    "deposit_received", "in_production", "delivered", "lost",
+  ];
 
   return (
     <AppShell title="Deals" subtitle="Sales opportunities">
@@ -137,6 +186,22 @@ export default async function DealsPage() {
           <div className="md:col-span-3 flex justify-end"><button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save deal</button></div>
         </form>
       </div>
+      <form method="get" className="flex flex-wrap items-center gap-2">
+        <input
+          name="q"
+          defaultValue={q}
+          placeholder="Search customer, VIN, make, model, rep…"
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]"
+        />
+        <select name="stage" defaultValue={stage} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+          <option value="">All stages</option>
+          {ALL_STAGES.map((s) => (<option key={s} value={s}>{stageLabel(s)}</option>))}
+        </select>
+        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+        {(q || stage) && (
+          <a href="/deals" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>
+        )}
+      </form>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -191,6 +256,7 @@ export default async function DealsPage() {
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={baseQuery} />
       </div>
       <p className="text-[11px] font-body text-zinc-500">
         Stage transitions are validated against the deal&apos;s pipeline. Stages must be advanced one step at a time; <span className="text-red-300">Lost</span> can be reached from any stage. Backwards movement is allowed.
