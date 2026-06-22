@@ -1568,6 +1568,42 @@ manual-create UI form (work orders are auto-created from quotes; the
 JSON POST exists for now). No schema changes in 3c — `qc_checklists`
 already exists in the live DB.
 
+### Phase 5 — Performance (partial — indexes + dashboard aggregates)
+
+- [x] **Dashboard count aggregates.** `operationsKpis` no longer selects
+  every matching work-order row to `.length` it — the active /
+  scheduled-this-week / ready / past-due KPIs now run as SQL `count()`.
+  (The sales/admin value KPIs reuse their rows for grand-total sums, so
+  they stay row selects.)
+- [ ] **Pagination** on the unbounded list pages (deals, quotes, leads,
+  inventory, work orders, purchase orders) — still TODO.
+- [ ] Dashboard KPI caching (`unstable_cache` w/ TTL) — still TODO.
+
+#### Hot-path indexes (Phase 5) — run in Neon's SQL Editor
+
+These back the most common filters/joins. Plain `CREATE INDEX IF NOT
+EXISTS` (run individually; swap to `CONCURRENTLY` if any table is large
+and you can't take a brief lock). They are intentionally NOT declared in
+`schema.ts` — we never run drizzle-kit (CLAUDE.md), so the live indexes
+won't be dropped, and keeping perf indexes out of the schema avoids
+implying a migration path that doesn't exist.
+
+```sql
+CREATE INDEX IF NOT EXISTS quotes_deal_idx        ON quotes (deal_id);
+CREATE INDEX IF NOT EXISTS quotes_customer_idx    ON quotes (customer_id);
+CREATE INDEX IF NOT EXISTS quotes_status_idx      ON quotes (status);
+CREATE INDEX IF NOT EXISTS work_orders_status_idx ON work_orders (status);
+CREATE INDEX IF NOT EXISTS work_orders_target_idx ON work_orders (target_build_start_date);
+CREATE INDEX IF NOT EXISTS work_orders_quote_idx  ON work_orders (quote_id);
+CREATE INDEX IF NOT EXISTS purchase_orders_status_idx ON purchase_orders (status);
+CREATE INDEX IF NOT EXISTS deals_stage_idx        ON deals (stage);
+CREATE INDEX IF NOT EXISTS deals_customer_idx     ON deals (customer_id);
+CREATE INDEX IF NOT EXISTS deals_assigned_idx     ON deals (assigned_to);
+CREATE INDEX IF NOT EXISTS leads_status_idx       ON leads (status);
+CREATE INDEX IF NOT EXISTS deal_tasks_assigned_idx ON deal_tasks (assigned_to);
+CREATE INDEX IF NOT EXISTS deal_credentials_expires_idx ON deal_credentials (expires_at);
+```
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

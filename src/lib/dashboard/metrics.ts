@@ -190,19 +190,22 @@ export async function operationsKpis() {
   const weekEnd = endOfWeek();
   const now = new Date();
 
+  // Pure counts run as SQL count() aggregates instead of selecting every row
+  // and measuring array length. `completed` still needs its timestamps for the
+  // avg-build-days computation, so it stays a row select.
   const [active, scheduled, ready, completed, pastDue] = await Promise.all([
-    db.select({ id: workOrders.id }).from(workOrders).where(inArray(workOrders.status, ACTIVE_WO_STATUSES)),
+    db.select({ n: count() }).from(workOrders).where(inArray(workOrders.status, ACTIVE_WO_STATUSES)),
     db
-      .select({ id: workOrders.id })
+      .select({ n: count() })
       .from(workOrders)
       .where(and(gte(workOrders.targetBuildStartDate, weekStart), lte(workOrders.targetBuildStartDate, weekEnd))),
-    db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.status, "completed")),
+    db.select({ n: count() }).from(workOrders).where(eq(workOrders.status, "completed")),
     db
       .select({ createdAt: workOrders.createdAt, completedAt: workOrders.completedAt })
       .from(workOrders)
       .where(and(eq(workOrders.status, "delivered"), gte(workOrders.updatedAt, ninetyAgo))),
     db
-      .select({ id: workOrders.id })
+      .select({ n: count() })
       .from(workOrders)
       .where(and(inArray(workOrders.status, ACTIVE_WO_STATUSES), lt(workOrders.targetBuildStartDate, now))),
   ]);
@@ -234,12 +237,12 @@ export async function operationsKpis() {
   }
 
   return {
-    activeBuilds: active.length,
-    scheduledThisWeek: scheduled.length,
-    readyForDelivery: ready.length,
+    activeBuilds: Number(active[0]?.n ?? 0),
+    scheduledThisWeek: Number(scheduled[0]?.n ?? 0),
+    readyForDelivery: Number(ready[0]?.n ?? 0),
     avgBuildDays,
     onTimePct,
-    pastDue: pastDue.length,
+    pastDue: Number(pastDue[0]?.n ?? 0),
   };
 }
 
@@ -450,7 +453,6 @@ export async function adminActionItems() {
 
 // Unused-import guards — keeps the imports above honest as we add cache
 // wrappers in a later PR.
-void count;
 void sum;
 void or;
 void partReceipts;
