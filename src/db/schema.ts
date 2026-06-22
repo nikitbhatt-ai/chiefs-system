@@ -204,16 +204,6 @@ export const stageOverrides = pgTable("stage_overrides", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("stage_overrides_deal_idx").on(t.dealId)]);
 
-export const dealComms = pgTable("deal_comms", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
-  agentName: text("agent_name").notNull(),
-  type: commType("type").notNull(),
-  lastContactDate: timestamp("last_contact_date").notNull(),
-  message: text("message").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
 export const quotes = pgTable("quotes", {
   id: uuid("id").defaultRandom().primaryKey(),
   quoteNumber: text("quote_number").unique(),
@@ -615,5 +605,5 @@ export const upfitConfigs = pgTable("upfit_configs", {
 
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
-export const dealsRelations = relations(deals, ({ one, many }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }), comms: many(dealComms) }));
+export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
 export const workOrdersRelations = relations(workOrders, ({ one, many }) => ({ customer: one(customers, { fields: [workOrders.customerId], references: [customers.id] }), vehicle: one(vehicles, { fields: [workOrders.vehicleId], references: [vehicles.id] }), qcChecklists: many(qcChecklists), timeEntries: many(timeEntries) }));

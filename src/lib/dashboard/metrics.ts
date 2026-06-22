@@ -5,6 +5,7 @@
 // ones in unstable_cache with sensible TTLs per the spec.
 
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sum } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 import { db } from "@/db";
 import {
   deals,
@@ -48,7 +49,12 @@ const ACTIVE_WO_STATUSES = ["confirmed", "awaiting_parts", "next_in_line", "in_p
 
 // ---------- Sales ----------
 
-export async function salesKpis(userId: string | null) {
+// KPI cards tolerate a little staleness, so cache the heavier roll-ups for
+// 60s to spare the DB on every dashboard load. Action-item lists below are
+// left uncached — they drive "do this now" workflows and must stay fresh.
+export const salesKpis = unstable_cache(salesKpisImpl, ["dashboard:salesKpis"], { revalidate: 60 });
+
+async function salesKpisImpl(userId: string | null) {
   void userId; // surface per-user filtering later; today the KPIs are global
   const monthStart = startOfMonth();
   const ninetyAgo = daysAgo(90);
@@ -184,7 +190,9 @@ export async function salesActionItems(userId: string | null) {
 
 // ---------- Operations ----------
 
-export async function operationsKpis() {
+export const operationsKpis = unstable_cache(operationsKpisImpl, ["dashboard:operationsKpis"], { revalidate: 60 });
+
+async function operationsKpisImpl() {
   const ninetyAgo = daysAgo(90);
   const weekStart = startOfWeek();
   const weekEnd = endOfWeek();
@@ -271,7 +279,9 @@ export async function operationsActionItems() {
 
 // ---------- Admin ----------
 
-export async function adminKpis() {
+export const adminKpis = unstable_cache(adminKpisImpl, ["dashboard:adminKpis"], { revalidate: 60 });
+
+async function adminKpisImpl() {
   const monthStart = startOfMonth();
   const ninetyAgo = daysAgo(90);
 

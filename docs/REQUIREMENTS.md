@@ -1575,9 +1575,10 @@ already exists in the live DB.
   scheduled-this-week / ready / past-due KPIs now run as SQL `count()`.
   (The sales/admin value KPIs reuse their rows for grand-total sums, so
   they stay row selects.)
-- [ ] **Pagination** on the unbounded list pages (deals, quotes, leads,
-  inventory, work orders, purchase orders) — still TODO.
-- [ ] Dashboard KPI caching (`unstable_cache` w/ TTL) — still TODO.
+- [x] **Pagination** on every list page (done in Phase 4).
+- [x] **Dashboard KPI caching** — `salesKpis` / `operationsKpis` /
+  `adminKpis` wrapped in `unstable_cache` (60s revalidate). Action-item
+  lists stay uncached (must be live).
 
 #### Hot-path indexes (Phase 5) — run in Neon's SQL Editor
 
@@ -1625,9 +1626,8 @@ CREATE INDEX IF NOT EXISTS deal_credentials_expires_idx ON deal_credentials (exp
 - [ ] Tags + archive on lists — needs schema (a `tags` column/table and
   `archived` flags where missing); batched into a future SQL block so it
   doesn't trickle migrations out one at a time.
-- [ ] `deal_comms` is confirmed dead (no code references). Left in place
-  for now — dropping a live table is destructive; do it deliberately:
-  `DROP TABLE IF EXISTS deal_comms;`
+- [x] `deal_comms` removed from the schema (was dead — no code refs).
+  Drop the live table when ready: `DROP TABLE IF EXISTS deal_comms;`
 
 ## Notes on building order
 
