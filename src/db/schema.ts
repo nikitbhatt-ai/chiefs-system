@@ -10,6 +10,7 @@ import {
   pgEnum,
   primaryKey,
   index,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
@@ -65,6 +66,8 @@ export const verificationTokens = pgTable("verification_tokens", {
 
 export const customers = pgTable("customers", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   name: text("name").notNull(),
   type: customerType("type").notNull().default("commercial"),
   address: text("address"),
@@ -114,6 +117,8 @@ export const vehicles = pgTable("vehicles", {
 
 export const leads = pgTable("leads", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
@@ -124,16 +129,18 @@ export const leads = pgTable("leads", {
   customerType: text("customer_type"),
   subSource: text("sub_source"),
   subSourceMeta: jsonb("sub_source_meta"),
-  partnerId: uuid("partner_id"),
-  partnerContactId: uuid("partner_contact_id"),
+  partnerId: uuid("partner_id").references(() => partners.id, { onDelete: "set null" }),
+  partnerContactId: uuid("partner_contact_id").references(() => partnerContacts.id, { onDelete: "set null" }),
   convertedCustomerId: uuid("converted_customer_id").references(() => customers.id),
-  convertedDealId: uuid("converted_deal_id"),
+  convertedDealId: uuid("converted_deal_id").references((): AnyPgColumn => deals.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const deals = pgTable("deals", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   customerId: uuid("customer_id").references(() => customers.id),
   assignedTo: uuid("assigned_to").references(() => users.id),
   salesRep: text("sales_rep"),
@@ -151,8 +158,8 @@ export const deals = pgTable("deals", {
   source: text("source"),
   subSource: text("sub_source"),
   subSourceMeta: jsonb("sub_source_meta"),
-  partnerId: uuid("partner_id"),
-  partnerContactId: uuid("partner_contact_id"),
+  partnerId: uuid("partner_id").references(() => partners.id, { onDelete: "set null" }),
+  partnerContactId: uuid("partner_contact_id").references(() => partnerContacts.id, { onDelete: "set null" }),
   sourceLocked: boolean("source_locked").notNull().default(false),
   department: text("department"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -203,18 +210,10 @@ export const stageOverrides = pgTable("stage_overrides", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("stage_overrides_deal_idx").on(t.dealId)]);
 
-export const dealComms = pgTable("deal_comms", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
-  agentName: text("agent_name").notNull(),
-  type: commType("type").notNull(),
-  lastContactDate: timestamp("last_contact_date").notNull(),
-  message: text("message").notNull(),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-});
-
 export const quotes = pgTable("quotes", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   quoteNumber: text("quote_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   dealId: uuid("deal_id").references(() => deals.id),
@@ -233,9 +232,11 @@ export type QuoteLineItem = { description: string; quantity: number; unitPrice: 
 
 export const parts = pgTable("parts", {
   id: uuid("id").defaultRandom().primaryKey(),
+  tags: text("tags").array(),
   sku: text("sku").unique().notNull(),
   name: text("name").notNull(),
   description: text("description"),
+  mfgPartNumber: text("mfg_part_number"),
   category: text("category"),
   quantityOnHand: integer("quantity_on_hand").notNull().default(0),
   quantityOnOrder: integer("quantity_on_order").notNull().default(0),
@@ -274,6 +275,8 @@ export const partCostHistory = pgTable("part_cost_history", {
 
 export const purchaseOrders = pgTable("purchase_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   poNumber: text("po_number").unique(),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   status: purchaseOrderStatus("status").notNull().default("pending"),
@@ -290,6 +293,8 @@ export type POLineItem = { partId?: string; description: string; quantity: numbe
 
 export const workOrders = pgTable("work_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   woNumber: text("wo_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),
@@ -327,8 +332,19 @@ export const timeEntries = pgTable("time_entries", {
   workOrderId: uuid("work_order_id").references(() => workOrders.id),
   clockedInAt: timestamp("clocked_in_at").notNull().defaultNow(),
   clockedOutAt: timestamp("clocked_out_at"),
+  // Geofence telemetry captured at each punch (added with the Time Clock UI).
+  clockInLat: numeric("clock_in_lat", { precision: 10, scale: 6 }),
+  clockInLng: numeric("clock_in_lng", { precision: 10, scale: 6 }),
+  clockInDistanceMeters: numeric("clock_in_distance_meters", { precision: 10, scale: 1 }),
+  clockInWithinGeofence: boolean("clock_in_within_geofence"),
+  clockOutLat: numeric("clock_out_lat", { precision: 10, scale: 6 }),
+  clockOutLng: numeric("clock_out_lng", { precision: 10, scale: 6 }),
   note: text("note"),
-}, (t) => [index("time_entries_user_idx").on(t.userId)]);
+}, (t) => [
+  index("time_entries_user_idx").on(t.userId),
+  index("time_entries_work_order_idx").on(t.workOrderId),
+  index("time_entries_open_idx").on(t.clockedOutAt),
+]);
 
 export const notes = pgTable("notes", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -364,7 +380,7 @@ export const customerDocuments = pgTable("customer_documents", {
   kind: text("kind"),
   version: integer("version").notNull().default(1),
   isCurrentVersion: boolean("is_current_version").notNull().default(true),
-  parentDocumentId: uuid("parent_document_id"),
+  parentDocumentId: uuid("parent_document_id").references((): AnyPgColumn => customerDocuments.id, { onDelete: "set null" }),
 }, (t) => [
   index("customer_documents_customer_idx").on(t.customerId),
   index("customer_documents_category_idx").on(t.customerId, t.category),
@@ -423,7 +439,7 @@ export const agentLogs = pgTable("agent_logs", {
 export const lookups = pgTable("lookups", {
   id: uuid("id").defaultRandom().primaryKey(),
   category: text("category").notNull(),
-  parentId: uuid("parent_id"),
+  parentId: uuid("parent_id").references((): AnyPgColumn => lookups.id, { onDelete: "set null" }),
   value: text("value").notNull(),
   label: text("label"),
   active: boolean("active").notNull().default(true),
@@ -470,7 +486,7 @@ export const partnerContacts = pgTable("partner_contacts", {
 export const dealActivity = pgTable("deal_activity", {
   id: uuid("id").defaultRandom().primaryKey(),
   dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
-  parentId: uuid("parent_id"),
+  parentId: uuid("parent_id").references((): AnyPgColumn => dealActivity.id, { onDelete: "set null" }),
   authorId: uuid("author_id").references(() => users.id),
   kind: text("kind").notNull(),
   body: text("body"),
@@ -602,5 +618,5 @@ export const upfitConfigs = pgTable("upfit_configs", {
 
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
-export const dealsRelations = relations(deals, ({ one, many }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }), comms: many(dealComms) }));
+export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
 export const workOrdersRelations = relations(workOrders, ({ one, many }) => ({ customer: one(customers, { fields: [workOrders.customerId], references: [customers.id] }), vehicle: one(vehicles, { fields: [workOrders.vehicleId], references: [vehicles.id] }), qcChecklists: many(qcChecklists), timeEntries: many(timeEntries) }));

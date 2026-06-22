@@ -3,6 +3,7 @@ import { eq, and } from "drizzle-orm";
 import { db } from "@/db";
 import { leads, users } from "@/db/schema";
 import { notifyMany } from "@/lib/notifications";
+import { secretEquals } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -34,11 +35,12 @@ const ALLOWED_CUSTOMER_TYPES = new Set(["government", "walk_in_credentialed", "c
 
 function authorized(req: Request): boolean {
   const expected = process.env.LEAD_CAPTURE_SECRET;
-  if (!expected) return false;
+  if (!expected) return false; // fail closed when unset
   const auth = req.headers.get("authorization") ?? "";
-  if (auth === `Bearer ${expected}`) return true;
+  const bearer = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  if (secretEquals(bearer, expected)) return true;
   const xhook = req.headers.get("x-webhook-secret") ?? "";
-  if (xhook === expected) return true;
+  if (secretEquals(xhook, expected)) return true;
   return false;
 }
 

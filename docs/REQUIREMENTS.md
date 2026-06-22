@@ -1286,6 +1286,384 @@ copy-paste needed.
 vehicle is sold, reordering photos, designating a "cover" photo,
 image compression / thumbnail variants.
 
+## Hardening roadmap (replacing a packaged ERP — NetSuite-grade reliability)
+
+We are NOT migrating to NetSuite; we are building this app into the
+production ERP that makes buying one unnecessary. That raises the bar:
+ledgers must never lie, roles must be enforced server-side, and core
+operational modules must actually exist. A four-track QA dissection
+produced the backlog below. Tracks are tackled in dependency order.
+
+- **Phase 1 — Data integrity** (this PR). ✅ see below.
+- **Phase 2 — Security / RBAC.** Central role-enforcement helper on every
+  mutating route + the document-upload path; timing-safe webhook secret
+  comparison; input/enum validation (reject unknown enum values and
+  coerce-to-`[object Object]` numerics).
+- **Phase 3 — Operational modules.** Work Orders (create/edit/detail UI,
+  parts, notes, tags), QC checklists wired to build-close, Time Clock
+  (geo-tagged clock-in + per-work-order technician tracker for labor
+  $/hours per build — needs shop lat/lng + radius from the user).
+- **Phase 4 — CRM cross-cutting.** Filter-by-column + tags + archive on
+  every list; remove the dead `/timeclock` nav 404; drop dead tables
+  (`deal_comms`, and the others once their modules land or are cut).
+- **Phase 5 — Performance.** Indexes on hot filter columns
+  (`quotes(deal_id,customer_id,status)`, `work_orders(status,...)`,
+  `purchase_orders(status)`, `leads(status)`, `deal_tasks(assigned_to)`),
+  pagination on every unbounded list, SQL aggregates in dashboard
+  metrics, dashboard KPI caching.
+
+Email/outbound notifications are deferred: build a provider adapter
+interface, keep notifications in-app only until a provider is chosen.
+
+### Phase 1 — Data integrity (shipped)
+
+Every stock- and ledger-moving operation is now transactional and
+idempotent. The two duplicated, non-transactional FIFO loops were
+replaced by one module; deal-stage transitions were unified behind one
+guarded function.
+
+- [x] **`src/lib/inventory.ts`** — the single home for stock movement.
+  - `consumeWorkOrderParts(woId)` — transactional FIFO consumption.
+    Locks the `work_orders` row `FOR UPDATE`; the `parts_consumed`
+    latch makes it idempotent (a second call, or a concurrent
+    deal-driven + workflow-board move, is a no-op). On-hand is floored
+    at zero (`GREATEST(0, …)`) so inventory can never go negative;
+    layer shortfalls are returned as `shortages` instead of corrupting
+    stock.
+  - `restoreWorkOrderParts(woId)` — reverses a consumption (build
+    walked back before `in_progress`, or cancelled). Refills the oldest
+    layers first, capped at each layer's original received quantity.
+  - `receivePurchaseOrder(poId, receiveByIndex)` — transactional PO
+    receive. Locks + re-reads the PO row inside the txn, so two
+    simultaneous receives serialize instead of double-incrementing
+    stock. Receipt layer + on-hand bump + cost-history row are all-or-
+    nothing.
+- [x] **FIFO consumption keyed to stage, both directions.** Advancing a
+  quote/WO to or past `in_progress` consumes once; moving it back before
+  `in_progress` restores. Wired into both `/quotes/[id]` `moveStage`
+  and `POST /api/quotes/[id]/workflow-stage` (the two paths now call the
+  same module).
+- [x] **`src/lib/dealStage.ts :: applyDealStageChange`** — the single
+  guarded deal-stage transition. Runs `canAdvanceTo` (credential hard
+  gate included), captures override/backwards reasons into
+  `stage_overrides`, then fires the Won promotion, doc reminder, and
+  CRM→Workflow sync. Now used by `POST /api/deals/[id]/stage`,
+  `POST /api/deals/[id]/move-bucket`, AND `PATCH /api/deals/[id]`. The
+  generic PATCH previously wrote `stage` directly and bypassed every
+  gate — that hole is closed (stage changes through PATCH now return the
+  same 400s as the dedicated endpoint).
+- [x] **Won auto-promotion hardened.** `maybePromoteWonDeal` runs in a
+  transaction with the quote row locked, re-checks `workflow_stage`
+  inside the lock (prevents the double-WO race), and stamps `deal_id` on
+  the created work order so the follow-on sync finds it instead of
+  creating a duplicate.
+- [x] **FK constraints declared** in `src/db/schema.ts` for the columns
+  that were bare UUIDs (`leads.partner_id/partner_contact_id/
+  converted_deal_id`, `deals.partner_id/partner_contact_id`,
+  `customer_documents.parent_document_id`, `deal_activity.parent_id`,
+  `lookups.parent_id`).
+
+#### Schema additions (Phase 1) — run in Neon's SQL Editor
+
+The Drizzle schema declares these, but the live DB only enforces them
+after you run the SQL. Add the work-order uniqueness guard and the
+missing foreign keys. The FKs use `NOT VALID` so they don't fail on a
+busy table; validate after confirming there are no orphan rows.
+
+```sql
+-- One work order per quote (defense-in-depth against the duplicate-WO
+-- race). If this errors, you already have dupes — see the detection
+-- query below and merge/delete them first.
+CREATE UNIQUE INDEX IF NOT EXISTS work_orders_quote_unique
+  ON work_orders (quote_id) WHERE quote_id IS NOT NULL;
+
+-- Detect existing duplicate work orders per quote (run if the index fails):
+--   SELECT quote_id, count(*) FROM work_orders
+--   WHERE quote_id IS NOT NULL GROUP BY quote_id HAVING count(*) > 1;
+
+-- Foreign keys (ON DELETE SET NULL so deleting a parent nulls the ref
+-- rather than orphaning it). NOT VALID skips the initial full-table check.
+ALTER TABLE leads  ADD CONSTRAINT leads_partner_id_fk
+  FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE leads  ADD CONSTRAINT leads_partner_contact_id_fk
+  FOREIGN KEY (partner_contact_id) REFERENCES partner_contacts(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE leads  ADD CONSTRAINT leads_converted_deal_id_fk
+  FOREIGN KEY (converted_deal_id) REFERENCES deals(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE deals  ADD CONSTRAINT deals_partner_id_fk
+  FOREIGN KEY (partner_id) REFERENCES partners(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE deals  ADD CONSTRAINT deals_partner_contact_id_fk
+  FOREIGN KEY (partner_contact_id) REFERENCES partner_contacts(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE customer_documents ADD CONSTRAINT customer_documents_parent_fk
+  FOREIGN KEY (parent_document_id) REFERENCES customer_documents(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE deal_activity ADD CONSTRAINT deal_activity_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES deal_activity(id) ON DELETE SET NULL NOT VALID;
+ALTER TABLE lookups ADD CONSTRAINT lookups_parent_fk
+  FOREIGN KEY (parent_id) REFERENCES lookups(id) ON DELETE SET NULL NOT VALID;
+
+-- After confirming no orphans, promote each to fully validated, e.g.:
+--   ALTER TABLE leads VALIDATE CONSTRAINT leads_partner_id_fk;
+--   (repeat per constraint above)
+```
+
+A one-time reconciliation to catch any drift the old non-transactional
+code already introduced (on-hand should equal the sum of remaining FIFO
+layers for parts that are receipt-tracked):
+
+```sql
+SELECT p.id, p.sku, p.quantity_on_hand,
+       COALESCE(SUM(r.quantity_remaining), 0) AS fifo_remaining
+FROM parts p
+LEFT JOIN part_receipts r ON r.part_id = p.id
+GROUP BY p.id, p.sku, p.quantity_on_hand
+HAVING p.quantity_on_hand <> COALESCE(SUM(r.quantity_remaining), 0);
+```
+
+### Phase 2 — Security / RBAC (shipped)
+
+Authentication was already enforced everywhere; this phase adds
+authorization. Policy lives in one place: `src/lib/rbac.ts`.
+
+- [x] **`src/lib/rbac.ts`** — `roleOf`, `hasRole`, `requireRole` (route
+  guard returning 401/403), capability shortcuts (`canDelete`,
+  `canManageUsers`, `canOverrideStageGate`), and `secretEquals`
+  (constant-time shared-secret compare).
+- [x] **Delete is manager+** on every entity route: customers, deals,
+  quotes, purchase-orders, parts, vendors, vehicles, leads. A
+  warehouse/tech/sales account now gets 403 on DELETE instead of
+  wiping records.
+- [x] **Stage-gate override is manager+.** `POST /api/deals/[id]/stage`,
+  `/move-bucket`, and `PATCH /api/deals/[id]` reject `override: true`
+  from non-managers (403). Combined with Phase 1's `applyDealStageChange`
+  chokepoint, a rep can no longer self-authorize skipping the credential
+  gate.
+- [x] **Document-upload RBAC.** `POST /api/deals/[id]/documents` now
+  checks `categoryVisibleTo(category, role)` before writing — the same
+  gate that protected downloads. A non-manager can no longer drop files
+  into contracts/credentials/invoices/compliance folders. Also caps
+  uploads at 25 MB.
+- [x] **Timing-safe webhook secrets.** `/api/leads/capture` and
+  `/api/cron/expiring-credentials` compare their shared secret with
+  `crypto.timingSafeEqual` (via `secretEquals`) instead of `===`. Both
+  still fail closed when the env var is unset.
+- [x] **Input / enum validation.** `PATCH /api/quotes/[id]` rejects
+  invalid `status` enum values and non-finite/negative money fields
+  (no more `String({})` → `"[object Object]"` landing in numeric
+  columns). `POST`/`PATCH /api/customers[/id]` validate the
+  `customer_type` enum.
+
+Remaining (lower-severity, follow-up): per-rep ownership scoping (IDOR)
+on `sales`-role reads; narrowing `/api/users` exposure; extending the
+enum/numeric validation pattern to vendors/vehicles/parts writes.
+
+### Phase 3a — De-priced work-order build sheet (shipped)
+
+Requirement (from the user, with example PDFs): a work order must match
+the estimate/invoice exactly, but when an estimate converts it becomes a
+work-order PDF with **all pricing removed** — only **part name, brand,
+manufacturer part number, and quantity** per line.
+
+- [x] **`src/lib/pdf/templates/workOrder.tsx`** — `WorkOrderDocument`,
+  the de-priced build sheet. Same header/branding as the estimate;
+  columns are Part · Brand · Part # · Qty. No unit price, discount, fee,
+  tax, or total appears anywhere. Fee lines are dropped entirely.
+- [x] **Registry + endpoint.** `work_order` record type added to
+  `src/lib/pdf/registry.tsx` (resolver sources line items from the
+  linked estimate so it always matches, resolves brand from the part's
+  manufacturer and part # from the new mfg field). Download/inline at
+  `GET /api/pdf/work-orders/[id]`.
+- [x] **Auto-generate on conversion.** When a deal converts into Won and
+  the estimate is promoted to a work order, `applyDealStageChange` calls
+  `upsertWorkOrderLink`, which drops a live-PDF link into the customer
+  folder under Spec / Build Approvals. The link renders the current
+  de-priced PDF on every click (no stale blobs).
+- [x] **`parts.mfg_part_number`** column added (the manufacturer/brand
+  part number, distinct from the internal SKU). Surfaced on the part
+  add + edit forms. The work-order PDF prints `mfg_part_number` and
+  falls back to `sku` when it's blank. "Brand" = the part's manufacturer
+  vendor name (`parts.manufacturer_id`).
+
+#### Schema addition (Phase 3a) — run in Neon's SQL Editor
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS mfg_part_number text;
+```
+
+Backfill is optional — until set, the work-order sheet shows the
+internal SKU as the part number.
+
+### Phase 3b — Time Clock (shipped)
+
+Geo-verified clock-in plus per-build labor tracking. Also fixes the dead
+`/timeclock` nav link (it 404'd — the route now exists).
+
+- [x] **Reused the existing `time_entries` table** (it was scaffolded but
+  unused — `workOrders` already had a relation to it) instead of adding a
+  parallel one. Extended it with geofence telemetry: lat/lng at both
+  punches, clock-in distance from the shop, and whether it passed the
+  geofence. `work_order_id` ties labor to a build.
+- [x] **Hardcoded geofence** in `src/config/shopLocation.ts` — shop at
+  `30.12285632819516, -96.10635062783578`, radius **150 m**, enforcement
+  ON. Haversine distance check. Edit + redeploy to move/resize/disable.
+- [x] **`src/lib/timeclock.ts`** — transactional `clockIn` / `clockOut`
+  (one open shift per user, enforced by a `FOR UPDATE` lock on the open
+  row), `getOpenEntry`, and `laborByWorkOrder` (SQL roll-up of hours +
+  labor $ per work order). Labor rate: `src/config/labor.ts`
+  (`DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`).
+- [x] **API**: `POST /api/timeclock/clock-in` (validates geofence; 403
+  when off-site, 409 when already clocked in) and
+  `POST /api/timeclock/clock-out`.
+- [x] **`/timeclock` page** — clock in/out panel (browser geolocation),
+  build picker, the user's recent punches (off-site punches flagged),
+  and a "Labor per build" table (hours + labor $).
+- [x] **WO PDF link** surfaced on the `/work-orders` list, and the
+  `deleteWO` server action now requires manager+ (server-action delete
+  was outside the Phase 2 API-route sweep).
+
+#### Schema addition (Phase 3b) — run in Neon's SQL Editor
+
+```sql
+-- Extend the existing (unused) time_entries table with geofence telemetry.
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_lat numeric(10,6);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_lng numeric(10,6);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_distance_meters numeric(10,1);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_within_geofence boolean;
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_lat numeric(10,6);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_lng numeric(10,6);
+CREATE INDEX IF NOT EXISTS time_entries_work_order_idx ON time_entries (work_order_id);
+CREATE INDEX IF NOT EXISTS time_entries_open_idx ON time_entries (clocked_out_at);
+```
+
+Still queued in Phase 3: Work Orders create/edit/detail UI (currently
+list-only) and QC checklists wired to build-close.
+
+### Phase 3c — Work Orders detail/edit + QC checklists (shipped)
+
+Work orders were list-only and QC didn't exist as a feature (the
+`qc_checklists` table was scaffolded but unused). Both are now wired up.
+
+- [x] **Work order detail page** `/work-orders/[id]` — header/status,
+  customer + vehicle + linked estimate, the de-priced parts list, an
+  editable block (assignee, priority, target build start, safety buffer,
+  notes), the per-build labor roll-up (hours + $), the WO PDF link, and
+  the QC checklist. WO numbers on `/work-orders` link here.
+- [x] **`src/lib/workOrderParts.ts`** — one resolver for a work order's
+  de-priced parts (name/brand/part #/qty), now used by BOTH the PDF
+  registry and the detail page so they can't drift (same de-dup
+  discipline as Phase 1's inventory module).
+- [x] **QC checklists** (`src/lib/qc.ts`) — one checklist per work order,
+  seeded from a standard upfit template on first open; per-item
+  pass/fail + notes saved from the detail page; `completed_at` /
+  `completed_by` stamped when the whole list passes.
+- [x] **Build-close gate.** A build cannot move into `completed` or
+  `delivered` until `qcComplete` is true — enforced in BOTH stage paths
+  (`POST /api/quotes/[id]/workflow-stage` returns 400 `qcIncomplete`;
+  the `/quotes/[id]` `moveStage` server action refuses to advance).
+- [x] **Work order JSON API** — `GET/POST /api/work-orders`,
+  `GET/PATCH/DELETE /api/work-orders/[id]` (delete manager-only; `status`
+  intentionally not writable here so closes go through the workflow path
+  and hit the QC gate).
+
+Deferred (minor): work-order tags (needs a column) and a dedicated
+manual-create UI form (work orders are auto-created from quotes; the
+JSON POST exists for now). No schema changes in 3c — `qc_checklists`
+already exists in the live DB.
+
+### Phase 5 — Performance (partial — indexes + dashboard aggregates)
+
+- [x] **Dashboard count aggregates.** `operationsKpis` no longer selects
+  every matching work-order row to `.length` it — the active /
+  scheduled-this-week / ready / past-due KPIs now run as SQL `count()`.
+  (The sales/admin value KPIs reuse their rows for grand-total sums, so
+  they stay row selects.)
+- [x] **Pagination** on every list page (done in Phase 4).
+- [x] **Dashboard KPI caching** — `salesKpis` / `operationsKpis` /
+  `adminKpis` wrapped in `unstable_cache` (60s revalidate). Action-item
+  lists stay uncached (must be live).
+
+#### Hot-path indexes (Phase 5) — run in Neon's SQL Editor
+
+These back the most common filters/joins. Plain `CREATE INDEX IF NOT
+EXISTS` (run individually; swap to `CONCURRENTLY` if any table is large
+and you can't take a brief lock). They are intentionally NOT declared in
+`schema.ts` — we never run drizzle-kit (CLAUDE.md), so the live indexes
+won't be dropped, and keeping perf indexes out of the schema avoids
+implying a migration path that doesn't exist.
+
+```sql
+CREATE INDEX IF NOT EXISTS quotes_deal_idx        ON quotes (deal_id);
+CREATE INDEX IF NOT EXISTS quotes_customer_idx    ON quotes (customer_id);
+CREATE INDEX IF NOT EXISTS quotes_status_idx      ON quotes (status);
+CREATE INDEX IF NOT EXISTS work_orders_status_idx ON work_orders (status);
+CREATE INDEX IF NOT EXISTS work_orders_target_idx ON work_orders (target_build_start_date);
+CREATE INDEX IF NOT EXISTS work_orders_quote_idx  ON work_orders (quote_id);
+CREATE INDEX IF NOT EXISTS purchase_orders_status_idx ON purchase_orders (status);
+CREATE INDEX IF NOT EXISTS deals_stage_idx        ON deals (stage);
+CREATE INDEX IF NOT EXISTS deals_customer_idx     ON deals (customer_id);
+CREATE INDEX IF NOT EXISTS deals_assigned_idx     ON deals (assigned_to);
+CREATE INDEX IF NOT EXISTS leads_status_idx       ON leads (status);
+CREATE INDEX IF NOT EXISTS deal_tasks_assigned_idx ON deal_tasks (assigned_to);
+CREATE INDEX IF NOT EXISTS deal_credentials_expires_idx ON deal_credentials (expires_at);
+```
+
+### Phase 4 — CRM cross-cutting (in progress)
+
+- [x] **Dead `/timeclock` nav link fixed** — the route now exists (Phase 3b).
+- [x] **Reusable list search + pagination** — `src/lib/pagination.ts`
+  (`parsePagination`, `pageCount`) + `src/components/Pagination.tsx`.
+- [x] **Search + pagination applied to:** deals (customer/VIN/make/model/
+  rep + stage), leads (name/email/phone + status), quotes (quote #/
+  customer + status). 50/page, SQL `count()` + limit/offset, filters
+  preserved across pages.
+- [x] **Manager-only delete** extended to the deals, quotes, and leads
+  delete server actions (server-action deletes were outside the Phase 2
+  API sweep).
+- [x] **All core lists now paginated + filterable:** deals, leads,
+  quotes, customers/CRM (search), work orders (WO#/status), purchase
+  orders (status), inventory (existing filters + pagination). Every list
+  query is now `count()` + `limit/offset` instead of full-table loads.
+- [x] **Manager-only delete** on the customers and purchase-order delete
+  server actions too (full server-action parity with the API routes).
+- [x] **Tags + archive on every list.** Added `tags text[]` to deals,
+  customers, leads, quotes, work_orders, purchase_orders, parts, and
+  `archived` to all of those that lacked it. Each list now has an
+  Active/Archived toggle, tag-chip filtering (click a tag to filter;
+  chip in the bar to clear), inline tag editing, and an Archive/Unarchive
+  action — all via the shared `ListRowControls` (client) + `ListFilters`
+  (server) components and a generic `PATCH /api/list-meta` endpoint
+  (entity + id → tags/archived; any authenticated user, since it's
+  non-destructive). Inventory keeps its existing archive control and
+  gains tags.
+
+#### Schema additions (tags + archive) — run in Neon's SQL Editor
+
+```sql
+ALTER TABLE deals           ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE customers       ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE leads           ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE quotes          ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE work_orders     ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+
+ALTER TABLE deals           ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE customers       ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE leads           ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE quotes          ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE work_orders     ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE parts           ADD COLUMN IF NOT EXISTS tags text[];
+
+-- GIN indexes so tag-contains (@>) filtering stays fast.
+CREATE INDEX IF NOT EXISTS deals_tags_gin           ON deals USING gin (tags);
+CREATE INDEX IF NOT EXISTS customers_tags_gin       ON customers USING gin (tags);
+CREATE INDEX IF NOT EXISTS leads_tags_gin           ON leads USING gin (tags);
+CREATE INDEX IF NOT EXISTS quotes_tags_gin          ON quotes USING gin (tags);
+CREATE INDEX IF NOT EXISTS work_orders_tags_gin     ON work_orders USING gin (tags);
+CREATE INDEX IF NOT EXISTS purchase_orders_tags_gin ON purchase_orders USING gin (tags);
+CREATE INDEX IF NOT EXISTS parts_tags_gin           ON parts USING gin (tags);
+```
+- [x] `deal_comms` removed from the schema (was dead — no code refs).
+  Drop the live table when ready: `DROP TABLE IF EXISTS deal_comms;`
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

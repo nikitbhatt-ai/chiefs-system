@@ -10,7 +10,7 @@
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { customerDocuments, quotes } from "@/db/schema";
+import { customerDocuments, quotes, workOrders } from "@/db/schema";
 import type { CustomerDocCategory } from "@/lib/customerDocuments";
 
 function quoteKind(quoteId: string) {
@@ -131,4 +131,68 @@ export async function unlinkUpfit(quoteId: string) {
   await db
     .delete(customerDocuments)
     .where(eq(customerDocuments.kind, upfitKind(quoteId)));
+}
+
+// Work-order build sheet auto-link. Created when an estimate converts into a
+// work order. Lands in the customer folder under "Spec / Build Approvals" so
+// the shop floor has the de-priced pull sheet alongside the rest of the build
+// paperwork. Points at the live PDF endpoint, which renders the work order
+// with all pricing stripped (part name, brand, part number, quantity only).
+function workOrderKind(workOrderId: string) {
+  return `auto_link:work_order:${workOrderId}`;
+}
+
+export async function upsertWorkOrderLink(workOrderId: string) {
+  const [wo] = await db
+    .select({ id: workOrders.id, customerId: workOrders.customerId, woNumber: workOrders.woNumber, dealId: workOrders.dealId })
+    .from(workOrders)
+    .where(eq(workOrders.id, workOrderId));
+  if (!wo) return;
+  const kind = workOrderKind(workOrderId);
+
+  if (!wo.customerId) {
+    await db.delete(customerDocuments).where(eq(customerDocuments.kind, kind));
+    return;
+  }
+
+  const baseName = wo.woNumber ?? `Work Order ${wo.id.slice(0, 8)}`;
+  const fileName = `${baseName} (build sheet)`;
+  const blobUrl = `/api/pdf/work-orders/${wo.id}`;
+  const associatedDealId = wo.dealId ?? null;
+
+  const [existing] = await db
+    .select({ id: customerDocuments.id })
+    .from(customerDocuments)
+    .where(and(eq(customerDocuments.kind, kind), eq(customerDocuments.isCurrentVersion, true)))
+    .limit(1);
+
+  if (existing) {
+    await db
+      .update(customerDocuments)
+      .set({
+        customerId: wo.customerId,
+        category: "spec_approvals" as CustomerDocCategory,
+        fileName,
+        blobUrl,
+        associatedDealId,
+      })
+      .where(eq(customerDocuments.id, existing.id));
+  } else {
+    await db.insert(customerDocuments).values({
+      customerId: wo.customerId,
+      category: "spec_approvals" as CustomerDocCategory,
+      fileName,
+      blobUrl,
+      mimeType: "application/pdf",
+      associatedDealId,
+      kind,
+      notes: "Auto-linked work-order build sheet (no pricing). Opens the live PDF.",
+    });
+  }
+}
+
+export async function unlinkWorkOrder(workOrderId: string) {
+  await db
+    .delete(customerDocuments)
+    .where(eq(customerDocuments.kind, workOrderKind(workOrderId)));
 }

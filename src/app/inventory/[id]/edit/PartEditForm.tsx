@@ -7,6 +7,7 @@ type Initial = {
   sku: string;
   name: string;
   description: string;
+  mfgPartNumber: string;
   category: string;
   quantityOnHand: number;
   quantityOnOrder: number;
@@ -59,6 +60,12 @@ export function PartEditForm({
         defaultValue={initial.name}
         placeholder="Name *"
         className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white md:col-span-2"
+      />
+      <input
+        name="mfgPartNumber"
+        defaultValue={initial.mfgPartNumber}
+        placeholder="Mfg part # (shown on work orders)"
+        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
       />
       <input
         name="category"
