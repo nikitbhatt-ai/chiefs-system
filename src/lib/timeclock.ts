@@ -5,7 +5,7 @@
 
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { timeClockEntries, workOrders } from "@/db/schema";
+import { timeEntries, workOrders } from "@/db/schema";
 import { distanceMeters, withinGeofence, ENFORCE, RADIUS_METERS } from "@/config/shopLocation";
 import { DEFAULT_LABOR_RATE_USD_PER_HOUR } from "@/config/labor";
 
@@ -40,15 +40,15 @@ export async function clockIn(
 
   return db.transaction(async (tx) => {
     const [open] = await tx
-      .select({ id: timeClockEntries.id })
-      .from(timeClockEntries)
-      .where(and(eq(timeClockEntries.userId, userId), isNull(timeClockEntries.clockOutAt)))
+      .select({ id: timeEntries.id })
+      .from(timeEntries)
+      .where(and(eq(timeEntries.userId, userId), isNull(timeEntries.clockedOutAt)))
       .for("update");
     if (open) {
       return { ok: false as const, status: 409, error: "You're already clocked in. Clock out first." };
     }
     const [row] = await tx
-      .insert(timeClockEntries)
+      .insert(timeEntries)
       .values({
         userId,
         workOrderId: workOrderId || null,
@@ -57,7 +57,7 @@ export async function clockIn(
         clockInDistanceMeters: dist != null ? dist.toFixed(1) : null,
         clockInWithinGeofence: coords ? inside : null,
       })
-      .returning({ id: timeClockEntries.id });
+      .returning({ id: timeEntries.id });
     return { ok: true as const, entryId: row.id, withinGeofence: inside, distanceMeters: dist };
   });
 }
@@ -72,23 +72,23 @@ export async function clockOut(userId: string, coords: Coords | null): Promise<C
   return db.transaction(async (tx) => {
     const [open] = await tx
       .select()
-      .from(timeClockEntries)
-      .where(and(eq(timeClockEntries.userId, userId), isNull(timeClockEntries.clockOutAt)))
-      .orderBy(desc(timeClockEntries.clockInAt))
+      .from(timeEntries)
+      .where(and(eq(timeEntries.userId, userId), isNull(timeEntries.clockedOutAt)))
+      .orderBy(desc(timeEntries.clockedInAt))
       .for("update");
     if (!open) {
       return { ok: false as const, status: 409, error: "You're not clocked in." };
     }
     const now = new Date();
     await tx
-      .update(timeClockEntries)
+      .update(timeEntries)
       .set({
-        clockOutAt: now,
+        clockedOutAt: now,
         clockOutLat: coords ? String(coords.lat) : null,
         clockOutLng: coords ? String(coords.lng) : null,
       })
-      .where(eq(timeClockEntries.id, open.id));
-    const minutes = Math.max(0, Math.round((now.getTime() - open.clockInAt.getTime()) / 60000));
+      .where(eq(timeEntries.id, open.id));
+    const minutes = Math.max(0, Math.round((now.getTime() - open.clockedInAt.getTime()) / 60000));
     return { ok: true as const, entryId: open.id, minutes };
   });
 }
@@ -97,9 +97,9 @@ export async function clockOut(userId: string, coords: Coords | null): Promise<C
 export async function getOpenEntry(userId: string) {
   const [open] = await db
     .select()
-    .from(timeClockEntries)
-    .where(and(eq(timeClockEntries.userId, userId), isNull(timeClockEntries.clockOutAt)))
-    .orderBy(desc(timeClockEntries.clockInAt))
+    .from(timeEntries)
+    .where(and(eq(timeEntries.userId, userId), isNull(timeEntries.clockedOutAt)))
+    .orderBy(desc(timeEntries.clockedInAt))
     .limit(1);
   return open ?? null;
 }
@@ -117,14 +117,14 @@ export type WorkOrderLabor = {
 export async function laborByWorkOrder(): Promise<WorkOrderLabor[]> {
   const rows = await db
     .select({
-      workOrderId: timeClockEntries.workOrderId,
+      workOrderId: timeEntries.workOrderId,
       woNumber: workOrders.woNumber,
-      minutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeClockEntries.clockOutAt} - ${timeClockEntries.clockInAt})) / 60), 0)`,
+      minutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntries.clockedOutAt} - ${timeEntries.clockedInAt})) / 60), 0)`,
     })
-    .from(timeClockEntries)
-    .leftJoin(workOrders, eq(workOrders.id, timeClockEntries.workOrderId))
-    .where(sql`${timeClockEntries.workOrderId} IS NOT NULL AND ${timeClockEntries.clockOutAt} IS NOT NULL`)
-    .groupBy(timeClockEntries.workOrderId, workOrders.woNumber);
+    .from(timeEntries)
+    .leftJoin(workOrders, eq(workOrders.id, timeEntries.workOrderId))
+    .where(sql`${timeEntries.workOrderId} IS NOT NULL AND ${timeEntries.clockedOutAt} IS NOT NULL`)
+    .groupBy(timeEntries.workOrderId, workOrders.woNumber);
 
   return rows
     .map((r) => {

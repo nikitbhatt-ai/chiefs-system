@@ -1,7 +1,7 @@
 import { and, desc, eq, inArray, isNull, not } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { timeClockEntries, workOrders, customers } from "@/db/schema";
+import { timeEntries, workOrders, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 import { getOpenEntry, laborByWorkOrder } from "@/lib/timeclock";
@@ -46,7 +46,7 @@ export default async function TimeClockPage() {
   const open = openRaw
     ? {
         id: openRaw.id,
-        clockInAt: openRaw.clockInAt.toISOString(),
+        clockInAt: openRaw.clockedInAt.toISOString(),
         woLabel: openRaw.workOrderId ? woLabelById.get(openRaw.workOrderId) ?? null : null,
       }
     : null;
@@ -54,9 +54,9 @@ export default async function TimeClockPage() {
   // This user's recent punches.
   const recent = await db
     .select()
-    .from(timeClockEntries)
-    .where(eq(timeClockEntries.userId, userId))
-    .orderBy(desc(timeClockEntries.clockInAt))
+    .from(timeEntries)
+    .where(eq(timeEntries.userId, userId))
+    .orderBy(desc(timeEntries.clockedInAt))
     .limit(15);
 
   const labor = await laborByWorkOrder();
@@ -80,13 +80,13 @@ export default async function TimeClockPage() {
                 ) : (
                   recent.map((e) => (
                     <tr key={e.id} className="border-t border-white/5">
-                      <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(e.clockInAt)}</td>
+                      <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(e.clockedInAt)}</td>
                       <td className="px-3 py-2 text-xs">
                         {e.workOrderId ? woLabelById.get(e.workOrderId) ?? "build" : <span className="text-zinc-600">—</span>}
                       </td>
                       <td className="px-3 py-2 text-xs">
-                        {e.clockOutAt ? (
-                          <span className="text-zinc-300">{durationLabel(e.clockInAt, e.clockOutAt)}</span>
+                        {e.clockedOutAt ? (
+                          <span className="text-zinc-300">{durationLabel(e.clockedInAt, e.clockedOutAt)}</span>
                         ) : (
                           <span className="text-green-400">open</span>
                         )}

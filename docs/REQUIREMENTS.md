@@ -1496,10 +1496,11 @@ internal SKU as the part number.
 Geo-verified clock-in plus per-build labor tracking. Also fixes the dead
 `/timeclock` nav link (it 404'd — the route now exists).
 
-- [x] **`time_clock_entries` table** — one row per shift, `clock_out_at`
-  null while open. Captures lat/lng at both punches, the clock-in
-  distance from the shop, and whether it passed the geofence.
-  `work_order_id` ties labor to a build.
+- [x] **Reused the existing `time_entries` table** (it was scaffolded but
+  unused — `workOrders` already had a relation to it) instead of adding a
+  parallel one. Extended it with geofence telemetry: lat/lng at both
+  punches, clock-in distance from the shop, and whether it passed the
+  geofence. `work_order_id` ties labor to a build.
 - [x] **Hardcoded geofence** in `src/config/shopLocation.ts` — shop at
   `30.12285632819516, -96.10635062783578`, radius **150 m**, enforcement
   ON. Haversine distance check. Edit + redeploy to move/resize/disable.
@@ -1521,24 +1522,15 @@ Geo-verified clock-in plus per-build labor tracking. Also fixes the dead
 #### Schema addition (Phase 3b) — run in Neon's SQL Editor
 
 ```sql
-CREATE TABLE IF NOT EXISTS time_clock_entries (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
-  clock_in_at timestamp NOT NULL DEFAULT now(),
-  clock_out_at timestamp,
-  clock_in_lat numeric(10,6),
-  clock_in_lng numeric(10,6),
-  clock_in_distance_meters numeric(10,1),
-  clock_in_within_geofence boolean,
-  clock_out_lat numeric(10,6),
-  clock_out_lng numeric(10,6),
-  note text,
-  created_at timestamp NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS time_clock_user_idx ON time_clock_entries (user_id);
-CREATE INDEX IF NOT EXISTS time_clock_work_order_idx ON time_clock_entries (work_order_id);
-CREATE INDEX IF NOT EXISTS time_clock_open_idx ON time_clock_entries (clock_out_at);
+-- Extend the existing (unused) time_entries table with geofence telemetry.
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_lat numeric(10,6);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_lng numeric(10,6);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_distance_meters numeric(10,1);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_in_within_geofence boolean;
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_lat numeric(10,6);
+ALTER TABLE time_entries ADD COLUMN IF NOT EXISTS clock_out_lng numeric(10,6);
+CREATE INDEX IF NOT EXISTS time_entries_work_order_idx ON time_entries (work_order_id);
+CREATE INDEX IF NOT EXISTS time_entries_open_idx ON time_entries (clocked_out_at);
 ```
 
 Still queued in Phase 3: Work Orders create/edit/detail UI (currently

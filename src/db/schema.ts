@@ -311,31 +311,6 @@ export const workOrders = pgTable("work_orders", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-// Time clock. One row per clock-in; clock_out_at is null while the shift is
-// open. Geolocation is captured at both punches; clock_in_within_geofence
-// records whether the in-punch passed the shop geofence. work_order_id ties
-// the labor to a specific build so we can roll up hours and labor $ per
-// work order.
-export const timeClockEntries = pgTable("time_clock_entries", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
-  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
-  clockInAt: timestamp("clock_in_at").notNull().defaultNow(),
-  clockOutAt: timestamp("clock_out_at"),
-  clockInLat: numeric("clock_in_lat", { precision: 10, scale: 6 }),
-  clockInLng: numeric("clock_in_lng", { precision: 10, scale: 6 }),
-  clockInDistanceMeters: numeric("clock_in_distance_meters", { precision: 10, scale: 1 }),
-  clockInWithinGeofence: boolean("clock_in_within_geofence"),
-  clockOutLat: numeric("clock_out_lat", { precision: 10, scale: 6 }),
-  clockOutLng: numeric("clock_out_lng", { precision: 10, scale: 6 }),
-  note: text("note"),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [
-  index("time_clock_user_idx").on(t.userId),
-  index("time_clock_work_order_idx").on(t.workOrderId),
-  index("time_clock_open_idx").on(t.clockOutAt),
-]);
-
 export const qcChecklists = pgTable("qc_checklists", {
   id: uuid("id").defaultRandom().primaryKey(),
   workOrderId: uuid("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
@@ -354,8 +329,19 @@ export const timeEntries = pgTable("time_entries", {
   workOrderId: uuid("work_order_id").references(() => workOrders.id),
   clockedInAt: timestamp("clocked_in_at").notNull().defaultNow(),
   clockedOutAt: timestamp("clocked_out_at"),
+  // Geofence telemetry captured at each punch (added with the Time Clock UI).
+  clockInLat: numeric("clock_in_lat", { precision: 10, scale: 6 }),
+  clockInLng: numeric("clock_in_lng", { precision: 10, scale: 6 }),
+  clockInDistanceMeters: numeric("clock_in_distance_meters", { precision: 10, scale: 1 }),
+  clockInWithinGeofence: boolean("clock_in_within_geofence"),
+  clockOutLat: numeric("clock_out_lat", { precision: 10, scale: 6 }),
+  clockOutLng: numeric("clock_out_lng", { precision: 10, scale: 6 }),
   note: text("note"),
-}, (t) => [index("time_entries_user_idx").on(t.userId)]);
+}, (t) => [
+  index("time_entries_user_idx").on(t.userId),
+  index("time_entries_work_order_idx").on(t.workOrderId),
+  index("time_entries_open_idx").on(t.clockedOutAt),
+]);
 
 export const notes = pgTable("notes", {
   id: uuid("id").defaultRandom().primaryKey(),
