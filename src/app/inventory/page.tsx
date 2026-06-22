@@ -1,8 +1,10 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq, and, sql } from "drizzle-orm";
+import { desc, eq, and, sql, count } from "drizzle-orm";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { parsePagination } from "@/lib/pagination";
 import { PartAddForm } from "./PartAddForm";
 
 async function createPart(formData: FormData) {
@@ -70,14 +72,16 @@ function pct(cost: string | null, price: string | null) {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; vendor?: string; archived?: string }>;
+  searchParams: Promise<{ category?: string; vendor?: string; archived?: string; page?: string }>;
 }) {
   const sp = await searchParams;
+  const { page, perPage, offset } = parsePagination(sp.page);
   const filters = [];
   if (sp.category) filters.push(eq(parts.category, sp.category));
   if (sp.vendor) filters.push(eq(parts.vendorId, sp.vendor));
   if (sp.archived === "1") filters.push(eq(parts.archived, true));
   else filters.push(eq(parts.archived, false));
+  const where = filters.length ? and(...filters) : undefined;
 
   const vendorRows = await db
     .select({ id: vendors.id, name: vendors.name })
@@ -85,11 +89,11 @@ export default async function InventoryPage({
     .orderBy(vendors.name);
   const vendorMap = new Map(vendorRows.map((v) => [v.id, v.name]));
 
-  const rows = await db
-    .select()
-    .from(parts)
-    .where(filters.length ? and(...filters) : undefined)
-    .orderBy(desc(parts.createdAt));
+  const [totalRows, rows] = await Promise.all([
+    db.select({ n: count() }).from(parts).where(where),
+    db.select().from(parts).where(where).orderBy(desc(parts.createdAt)).limit(perPage).offset(offset),
+  ]);
+  const total = Number(totalRows[0]?.n ?? 0);
 
   const categoriesRaw = await db
     .selectDistinct({ category: parts.category })
@@ -105,6 +109,7 @@ export default async function InventoryPage({
     const s = qs.toString();
     return s ? `?${s}` : "";
   })();
+  const pagerBaseQuery = printQs.replace(/^\?/, "");
 
   return (
     <AppShell title="Inventory" subtitle="Parts and supplies">
@@ -260,6 +265,7 @@ export default async function InventoryPage({
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={pagerBaseQuery} />
       </div>
     </AppShell>
   );

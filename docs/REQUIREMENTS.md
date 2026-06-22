@@ -1616,9 +1616,12 @@ CREATE INDEX IF NOT EXISTS deal_credentials_expires_idx ON deal_credentials (exp
 - [x] **Manager-only delete** extended to the deals, quotes, and leads
   delete server actions (server-action deletes were outside the Phase 2
   API sweep).
-- [ ] Remaining lists to get the same treatment: customers/CRM, work
-  orders, purchase orders, inventory (pagination). Mechanical — same
-  helper + component.
+- [x] **All core lists now paginated + filterable:** deals, leads,
+  quotes, customers/CRM (search), work orders (WO#/status), purchase
+  orders (status), inventory (existing filters + pagination). Every list
+  query is now `count()` + `limit/offset` instead of full-table loads.
+- [x] **Manager-only delete** on the customers and purchase-order delete
+  server actions too (full server-action parity with the API routes).
 - [ ] Tags + archive on lists — needs schema (a `tags` column/table and
   `archived` flags where missing); batched into a future SQL block so it
   doesn't trickle migrations out one at a time.

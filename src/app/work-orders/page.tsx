@@ -1,11 +1,15 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
 import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { parsePagination } from "@/lib/pagination";
 import { fmtDateTime } from "@/lib/datetime";
+
+const WO_STATUSES = ["confirmed", "awaiting_parts", "next_in_line", "in_progress", "qc_check", "completed", "delivered"];
 import {
   buildPartPlan,
   criticalPathForPlan,
@@ -58,8 +62,32 @@ async function setProcurementPlan(formData: FormData) {
   revalidatePath("/procurement/parts-to-order");
 }
 
-export default async function WorkOrdersPage() {
-  const rows = await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+export default async function WorkOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
+  const q = (sp.q ?? "").trim();
+  const status = (sp.status ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
+
+  const filters = [];
+  if (status) filters.push(eq(workOrders.status, status));
+  if (q) filters.push(ilike(workOrders.woNumber, `%${q}%`));
+  const where = filters.length ? and(...filters) : undefined;
+  const baseQuery = (() => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    if (status) qs.set("status", status);
+    return qs.toString();
+  })();
+
+  const [totalRows, rows] = await Promise.all([
+    db.select({ n: count() }).from(workOrders).where(where),
+    db.select().from(workOrders).where(where).orderBy(desc(workOrders.createdAt)).limit(perPage).offset(offset),
+  ]);
+  const total = Number(totalRows[0]?.n ?? 0);
 
   const customerIds = Array.from(
     new Set(rows.map((r) => r.customerId).filter(Boolean) as string[]),
@@ -209,6 +237,15 @@ export default async function WorkOrdersPage() {
       title="Work Orders"
       subtitle="Builds in motion — created automatically when a quote moves past Estimate"
     >
+      <form method="get" className="flex flex-wrap items-center gap-2 mb-4">
+        <input name="q" defaultValue={q} placeholder="Search WO #…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[200px]" />
+        <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+          <option value="">All stages</option>
+          {WO_STATUSES.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
+        </select>
+        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+        {(q || status) && (<a href="/work-orders" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
+      </form>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -377,6 +414,7 @@ export default async function WorkOrdersPage() {
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={baseQuery} />
       </div>
     </AppShell>
   );

@@ -1,8 +1,12 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { count, desc, eq, ilike, or } from "drizzle-orm";
 import { db } from "@/db";
 import { customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { parsePagination } from "@/lib/pagination";
+import { canDelete } from "@/lib/rbac";
+import { auth } from "@/auth";
 import { fmtDateTime } from "@/lib/datetime";
 
 async function createCustomer(formData: FormData) {
@@ -26,14 +30,33 @@ async function createCustomer(formData: FormData) {
 
 async function deleteCustomer(formData: FormData) {
   "use server";
+  const session = await auth();
+  if (!canDelete(session)) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.delete(customers).where(eq(customers.id, id));
   revalidatePath("/crm");
 }
 
-export default async function CrmPage() {
-  const rows = await db.select().from(customers).orderBy(desc(customers.createdAt));
+export default async function CrmPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
+  const q = (sp.q ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
+
+  const where = q
+    ? or(ilike(customers.name, `%${q}%`), ilike(customers.email, `%${q}%`), ilike(customers.phone, `%${q}%`))
+    : undefined;
+  const baseQuery = q ? new URLSearchParams({ q }).toString() : "";
+
+  const [totalRows, rows] = await Promise.all([
+    db.select({ n: count() }).from(customers).where(where),
+    db.select().from(customers).where(where).orderBy(desc(customers.createdAt)).limit(perPage).offset(offset),
+  ]);
+  const total = Number(totalRows[0]?.n ?? 0);
 
   return (
     <AppShell title="Customers" subtitle="CRM directory">
@@ -59,6 +82,11 @@ export default async function CrmPage() {
         </form>
       </div>
 
+      <form method="get" className="flex flex-wrap items-center gap-2">
+        <input name="q" defaultValue={q} placeholder="Search name, email, phone…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]" />
+        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Search</button>
+        {q && (<a href="/crm" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
+      </form>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -97,6 +125,7 @@ export default async function CrmPage() {
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={baseQuery} />
       </div>
     </AppShell>
   );

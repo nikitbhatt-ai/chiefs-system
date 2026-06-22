@@ -1,10 +1,16 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { desc, eq, inArray } from "drizzle-orm";
+import { count, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { purchaseOrders, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { parsePagination } from "@/lib/pagination";
+import { canDelete } from "@/lib/rbac";
+import { auth } from "@/auth";
 import { fmtDateTime } from "@/lib/datetime";
+
+const PO_STATUSES = ["pending", "pending_review", "po_received", "partially_received", "received"];
 
 const STATUS_COLORS: Record<string, string> = {
   pending: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
@@ -28,6 +34,8 @@ async function createPO(formData: FormData) {
 
 async function deletePO(formData: FormData) {
   "use server";
+  const session = await auth();
+  if (!canDelete(session)) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.delete(purchaseOrders).where(eq(purchaseOrders.id, id));
@@ -41,16 +49,27 @@ function fmt(v: string | null | undefined) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
-export default async function PurchaseOrdersPage() {
+export default async function PurchaseOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; page?: string }>;
+}) {
+  const sp = await searchParams;
+  const status = (sp.status ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
+  const where = status ? eq(purchaseOrders.status, status as typeof purchaseOrders.$inferSelect.status) : undefined;
+  const baseQuery = status ? new URLSearchParams({ status }).toString() : "";
+
   const vendorRows = await db
     .select({ id: vendors.id, name: vendors.name })
     .from(vendors)
     .orderBy(vendors.name);
 
-  const rows = await db
-    .select()
-    .from(purchaseOrders)
-    .orderBy(desc(purchaseOrders.createdAt));
+  const [totalRows, rows] = await Promise.all([
+    db.select({ n: count() }).from(purchaseOrders).where(where),
+    db.select().from(purchaseOrders).where(where).orderBy(desc(purchaseOrders.createdAt)).limit(perPage).offset(offset),
+  ]);
+  const total = Number(totalRows[0]?.n ?? 0);
 
   const vendorIds = Array.from(
     new Set(rows.map((r) => r.vendorId).filter(Boolean) as string[]),
@@ -94,6 +113,14 @@ export default async function PurchaseOrdersPage() {
         </form>
       </div>
 
+      <form method="get" className="flex flex-wrap items-center gap-2">
+        <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+          <option value="">All statuses</option>
+          {PO_STATUSES.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
+        </select>
+        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+        {status && (<a href="/purchase-orders" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
+      </form>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -153,6 +180,7 @@ export default async function PurchaseOrdersPage() {
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={baseQuery} />
       </div>
     </AppShell>
   );
