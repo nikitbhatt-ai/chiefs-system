@@ -9,6 +9,7 @@ import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { credentialCoversPart } from "@/lib/credentials";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
+import { qcComplete } from "@/lib/qc";
 
 export const dynamic = "force-dynamic";
 
@@ -104,6 +105,13 @@ async function moveStage(formData: FormData) {
   if (!q) return;
 
   let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
+
+  // Build-close gate: don't advance into completed/delivered until QC passes.
+  if (stage === "completed" || stage === "delivered") {
+    const passed = wo ? await qcComplete(wo.id) : false;
+    if (!passed) return;
+  }
+
   if (!wo && stage !== "estimate") {
     const woNumber = `WO-${Date.now().toString().slice(-7)}`;
     const inserted = await db

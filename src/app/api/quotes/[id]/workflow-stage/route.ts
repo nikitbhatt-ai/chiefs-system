@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
+import { qcComplete } from "@/lib/qc";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,18 @@ export async function POST(
       .from(workOrders)
       .where(eq(workOrders.quoteId, id));
     const prevWorkflowStage = wo?.status ?? null;
+
+    // Build-close gate: a build can't move into completed/delivered until its
+    // QC checklist fully passes. No work order (hence no checklist) = not ready.
+    if (stage === "completed" || stage === "delivered") {
+      const passed = wo ? await qcComplete(wo.id) : false;
+      if (!passed) {
+        return NextResponse.json(
+          { error: "QC checklist must be fully passed before this build can be closed.", qcIncomplete: true },
+          { status: 400 },
+        );
+      }
+    }
 
     if (!wo && stage !== "estimate") {
       const woNumber = `WO-${Date.now().toString().slice(-7)}`;

@@ -8,13 +8,14 @@
 
 import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, purchaseOrders, vendors, upfitConfigs, workOrders, parts } from "@/db/schema";
+import { quotes, customers, purchaseOrders, vendors, upfitConfigs, workOrders } from "@/db/schema";
 import { QuoteDocument, type QuoteData, type QuoteLine } from "./templates/quote";
 import { PurchaseOrderDocument, type PurchaseOrderData, type POLine } from "./templates/purchaseOrder";
 import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
-import { WorkOrderDocument, type WorkOrderData, type WorkOrderLine } from "./templates/workOrder";
+import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
+import { resolvePartsFromLineItems } from "@/lib/workOrderParts";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
 
 export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit" | "work_order";
@@ -109,58 +110,17 @@ async function resolveWorkOrder(workOrderId: string): Promise<WorkOrderData | nu
     ? (await db.select().from(customers).where(eq(customers.id, wo.customerId)))[0] ?? null
     : null;
 
-  let rawLines: QuoteLine[] = [];
+  let lineItems: WorkOrderData["lineItems"] = [];
   let quoteNumber: string | null = null;
   let quoteForVehicle: typeof quotes.$inferSelect | null = null;
   if (wo.quoteId) {
     const [q] = await db.select().from(quotes).where(eq(quotes.id, wo.quoteId));
     if (q) {
-      rawLines = (q.lineItems as unknown as QuoteLine[]) ?? [];
+      lineItems = await resolvePartsFromLineItems(q.lineItems);
       quoteNumber = q.quoteNumber;
       quoteForVehicle = q;
     }
   }
-
-  const itemLines = rawLines.filter(
-    (l): l is Extract<QuoteLine, { kind: "item" }> => l.kind === "item",
-  );
-  const partIds = Array.from(
-    new Set(itemLines.map((l) => l.partId).filter((x): x is string => !!x)),
-  );
-
-  const partRows = partIds.length
-    ? await db
-        .select({
-          id: parts.id,
-          name: parts.name,
-          sku: parts.sku,
-          mfgPartNumber: parts.mfgPartNumber,
-          manufacturerId: parts.manufacturerId,
-        })
-        .from(parts)
-        .where(inArray(parts.id, partIds))
-    : [];
-  const partById = new Map(partRows.map((p) => [p.id, p]));
-
-  const mfgIds = Array.from(
-    new Set(partRows.map((p) => p.manufacturerId).filter((x): x is string => !!x)),
-  );
-  const mfgRows = mfgIds.length
-    ? await db.select({ id: vendors.id, name: vendors.name }).from(vendors).where(inArray(vendors.id, mfgIds))
-    : [];
-  const mfgById = new Map(mfgRows.map((v) => [v.id, v.name]));
-
-  const lineItems: WorkOrderLine[] = itemLines.map((l) => {
-    const p = l.partId ? partById.get(l.partId) : undefined;
-    const brand = p?.manufacturerId ? mfgById.get(p.manufacturerId) ?? null : null;
-    const partNumber = p ? p.mfgPartNumber || p.sku : null;
-    return {
-      name: p?.name ?? l.description ?? "—",
-      brand,
-      partNumber,
-      quantity: Number(l.quantity || 0),
-    };
-  });
 
   const vehicleSummary = quoteForVehicle ? await resolveVehicleLabel(quoteForVehicle) : null;
 

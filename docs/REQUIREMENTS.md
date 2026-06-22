@@ -1536,6 +1536,38 @@ CREATE INDEX IF NOT EXISTS time_entries_open_idx ON time_entries (clocked_out_at
 Still queued in Phase 3: Work Orders create/edit/detail UI (currently
 list-only) and QC checklists wired to build-close.
 
+### Phase 3c — Work Orders detail/edit + QC checklists (shipped)
+
+Work orders were list-only and QC didn't exist as a feature (the
+`qc_checklists` table was scaffolded but unused). Both are now wired up.
+
+- [x] **Work order detail page** `/work-orders/[id]` — header/status,
+  customer + vehicle + linked estimate, the de-priced parts list, an
+  editable block (assignee, priority, target build start, safety buffer,
+  notes), the per-build labor roll-up (hours + $), the WO PDF link, and
+  the QC checklist. WO numbers on `/work-orders` link here.
+- [x] **`src/lib/workOrderParts.ts`** — one resolver for a work order's
+  de-priced parts (name/brand/part #/qty), now used by BOTH the PDF
+  registry and the detail page so they can't drift (same de-dup
+  discipline as Phase 1's inventory module).
+- [x] **QC checklists** (`src/lib/qc.ts`) — one checklist per work order,
+  seeded from a standard upfit template on first open; per-item
+  pass/fail + notes saved from the detail page; `completed_at` /
+  `completed_by` stamped when the whole list passes.
+- [x] **Build-close gate.** A build cannot move into `completed` or
+  `delivered` until `qcComplete` is true — enforced in BOTH stage paths
+  (`POST /api/quotes/[id]/workflow-stage` returns 400 `qcIncomplete`;
+  the `/quotes/[id]` `moveStage` server action refuses to advance).
+- [x] **Work order JSON API** — `GET/POST /api/work-orders`,
+  `GET/PATCH/DELETE /api/work-orders/[id]` (delete manager-only; `status`
+  intentionally not writable here so closes go through the workflow path
+  and hit the QC gate).
+
+Deferred (minor): work-order tags (needs a column) and a dedicated
+manual-create UI form (work orders are auto-created from quotes; the
+JSON POST exists for now). No schema changes in 3c — `qc_checklists`
+already exists in the live DB.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

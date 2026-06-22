@@ -240,8 +240,10 @@ export default async function WorkOrdersPage() {
                 const v = w.vehicleId ? vehicleMap.get(w.vehicleId) : null;
                 return (
                   <tr key={w.id} className="border-t border-white/5">
-                    <td className="px-3 py-2 font-mono text-xs text-white">
-                      {w.woNumber ?? w.id.slice(0, 8)}
+                    <td className="px-3 py-2 font-mono text-xs">
+                      <a href={`/work-orders/${w.id}`} className="text-white hover:text-amber-300">
+                        {w.woNumber ?? w.id.slice(0, 8)}
+                      </a>
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {q ? (
