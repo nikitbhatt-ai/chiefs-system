@@ -1,5 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { desc, eq, inArray } from "drizzle-orm";
+import { auth } from "@/auth";
+import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
 import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
@@ -31,6 +33,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 async function deleteWO(formData: FormData) {
   "use server";
+  const session = await auth();
+  if (!canDelete(session)) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.delete(workOrders).where(eq(workOrders.id, id));
@@ -338,6 +342,15 @@ export default async function WorkOrdersPage() {
                     </td>
                     <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(w.createdAt)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <a
+                        href={`/api/pdf/work-orders/${w.id}`}
+                        target="_blank"
+                        rel="noopener"
+                        className="text-[11px] text-amber-400 hover:text-amber-300 mr-3"
+                        title="Build sheet — no pricing"
+                      >
+                        WO PDF
+                      </a>
                       {w.quoteId ? (
                         <a
                           href={`/quotes/${w.quoteId}`}
