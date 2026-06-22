@@ -1623,9 +1623,44 @@ CREATE INDEX IF NOT EXISTS deal_credentials_expires_idx ON deal_credentials (exp
   query is now `count()` + `limit/offset` instead of full-table loads.
 - [x] **Manager-only delete** on the customers and purchase-order delete
   server actions too (full server-action parity with the API routes).
-- [ ] Tags + archive on lists — needs schema (a `tags` column/table and
-  `archived` flags where missing); batched into a future SQL block so it
-  doesn't trickle migrations out one at a time.
+- [x] **Tags + archive on every list.** Added `tags text[]` to deals,
+  customers, leads, quotes, work_orders, purchase_orders, parts, and
+  `archived` to all of those that lacked it. Each list now has an
+  Active/Archived toggle, tag-chip filtering (click a tag to filter;
+  chip in the bar to clear), inline tag editing, and an Archive/Unarchive
+  action — all via the shared `ListRowControls` (client) + `ListFilters`
+  (server) components and a generic `PATCH /api/list-meta` endpoint
+  (entity + id → tags/archived; any authenticated user, since it's
+  non-destructive). Inventory keeps its existing archive control and
+  gains tags.
+
+#### Schema additions (tags + archive) — run in Neon's SQL Editor
+
+```sql
+ALTER TABLE deals           ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE customers       ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE leads           ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE quotes          ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE work_orders     ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS archived boolean NOT NULL DEFAULT false;
+
+ALTER TABLE deals           ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE customers       ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE leads           ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE quotes          ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE work_orders     ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS tags text[];
+ALTER TABLE parts           ADD COLUMN IF NOT EXISTS tags text[];
+
+-- GIN indexes so tag-contains (@>) filtering stays fast.
+CREATE INDEX IF NOT EXISTS deals_tags_gin           ON deals USING gin (tags);
+CREATE INDEX IF NOT EXISTS customers_tags_gin       ON customers USING gin (tags);
+CREATE INDEX IF NOT EXISTS leads_tags_gin           ON leads USING gin (tags);
+CREATE INDEX IF NOT EXISTS quotes_tags_gin          ON quotes USING gin (tags);
+CREATE INDEX IF NOT EXISTS work_orders_tags_gin     ON work_orders USING gin (tags);
+CREATE INDEX IF NOT EXISTS purchase_orders_tags_gin ON purchase_orders USING gin (tags);
+CREATE INDEX IF NOT EXISTS parts_tags_gin           ON parts USING gin (tags);
+```
 - [x] `deal_comms` removed from the schema (was dead — no code refs).
   Drop the live table when ready: `DROP TABLE IF EXISTS deal_comms;`
 

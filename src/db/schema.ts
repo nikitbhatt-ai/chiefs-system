@@ -66,6 +66,8 @@ export const verificationTokens = pgTable("verification_tokens", {
 
 export const customers = pgTable("customers", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   name: text("name").notNull(),
   type: customerType("type").notNull().default("commercial"),
   address: text("address"),
@@ -115,6 +117,8 @@ export const vehicles = pgTable("vehicles", {
 
 export const leads = pgTable("leads", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   name: text("name").notNull(),
   email: text("email"),
   phone: text("phone"),
@@ -135,6 +139,8 @@ export const leads = pgTable("leads", {
 
 export const deals = pgTable("deals", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   customerId: uuid("customer_id").references(() => customers.id),
   assignedTo: uuid("assigned_to").references(() => users.id),
   salesRep: text("sales_rep"),
@@ -206,6 +212,8 @@ export const stageOverrides = pgTable("stage_overrides", {
 
 export const quotes = pgTable("quotes", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   quoteNumber: text("quote_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   dealId: uuid("deal_id").references(() => deals.id),
@@ -224,6 +232,7 @@ export type QuoteLineItem = { description: string; quantity: number; unitPrice: 
 
 export const parts = pgTable("parts", {
   id: uuid("id").defaultRandom().primaryKey(),
+  tags: text("tags").array(),
   sku: text("sku").unique().notNull(),
   name: text("name").notNull(),
   description: text("description"),
@@ -266,6 +275,8 @@ export const partCostHistory = pgTable("part_cost_history", {
 
 export const purchaseOrders = pgTable("purchase_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   poNumber: text("po_number").unique(),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   status: purchaseOrderStatus("status").notNull().default("pending"),
@@ -282,6 +293,8 @@ export type POLineItem = { partId?: string; description: string; quantity: numbe
 
 export const workOrders = pgTable("work_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
   woNumber: text("wo_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),

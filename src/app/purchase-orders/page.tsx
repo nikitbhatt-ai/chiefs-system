@@ -1,10 +1,12 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { count, desc, eq, inArray } from "drizzle-orm";
+import { and, arrayContains, count, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { purchaseOrders, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
+import { ListRowControls } from "@/components/ListRowControls";
+import { ListFilters } from "@/components/ListFilters";
 import { parsePagination } from "@/lib/pagination";
 import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
@@ -52,13 +54,25 @@ function fmt(v: string | null | undefined) {
 export default async function PurchaseOrdersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; page?: string }>;
+  searchParams: Promise<{ status?: string; page?: string; view?: string; tag?: string }>;
 }) {
   const sp = await searchParams;
   const status = (sp.status ?? "").trim();
+  const view = sp.view === "archived" ? "archived" : "active";
+  const tag = (sp.tag ?? "").trim();
   const { page, perPage, offset } = parsePagination(sp.page);
-  const where = status ? eq(purchaseOrders.status, status as typeof purchaseOrders.$inferSelect.status) : undefined;
-  const baseQuery = status ? new URLSearchParams({ status }).toString() : "";
+
+  const filters = [eq(purchaseOrders.archived, view === "archived")];
+  if (tag) filters.push(arrayContains(purchaseOrders.tags, [tag]));
+  if (status) filters.push(eq(purchaseOrders.status, status as typeof purchaseOrders.$inferSelect.status));
+  const where = and(...filters);
+  const baseQuery = (() => {
+    const qs = new URLSearchParams();
+    if (status) qs.set("status", status);
+    if (view === "archived") qs.set("view", "archived");
+    if (tag) qs.set("tag", tag);
+    return qs.toString();
+  })();
 
   const vendorRows = await db
     .select({ id: vendors.id, name: vendors.name })
@@ -113,14 +127,19 @@ export default async function PurchaseOrdersPage({
         </form>
       </div>
 
-      <form method="get" className="flex flex-wrap items-center gap-2">
-        <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
-          <option value="">All statuses</option>
-          {PO_STATUSES.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
-        </select>
-        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
-        {status && (<a href="/purchase-orders" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
-      </form>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <form method="get" className="flex flex-wrap items-center gap-2">
+          {view === "archived" && <input type="hidden" name="view" value="archived" />}
+          {tag && <input type="hidden" name="tag" value={tag} />}
+          <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+            <option value="">All statuses</option>
+            {PO_STATUSES.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
+          </select>
+          <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+          {status && (<a href="/purchase-orders" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
+        </form>
+        <ListFilters basePath="/purchase-orders" view={view} tag={tag} carry={{ status }} />
+      </div>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -159,6 +178,7 @@ export default async function PurchaseOrdersPage({
                   <td className="px-4 py-2.5 text-xs text-right">{fmt(p.total)}</td>
                   <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(p.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="purchase-orders" id={p.id} tags={p.tags ?? []} archived={p.archived} /></div>
                     <a
                       href={`/purchase-orders/${p.id}`}
                       className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3"

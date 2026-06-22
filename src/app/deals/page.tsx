@@ -1,9 +1,11 @@
 import { revalidatePath } from "next/cache";
-import { and, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
+import { and, arrayContains, count, desc, eq, ilike, inArray, or } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, customers, users, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
+import { ListRowControls } from "@/components/ListRowControls";
+import { ListFilters } from "@/components/ListFilters";
 import { parsePagination } from "@/lib/pagination";
 import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
@@ -109,16 +111,19 @@ async function changeStage(formData: FormData) {
 export default async function DealsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; stage?: string; page?: string }>;
+  searchParams: Promise<{ q?: string; stage?: string; page?: string; view?: string; tag?: string }>;
 }) {
   const sp = await searchParams;
   const q = (sp.q ?? "").trim();
   const stage = (sp.stage ?? "").trim();
+  const view = sp.view === "archived" ? "archived" : "active";
+  const tag = (sp.tag ?? "").trim();
   const { page, perPage, offset } = parsePagination(sp.page);
 
   // Build the WHERE. Free-text search matches vehicle fields + sales rep, plus
   // any customer whose name matches (resolved to ids first to avoid a join).
-  const filters = [];
+  const filters = [eq(deals.archived, view === "archived")];
+  if (tag) filters.push(arrayContains(deals.tags, [tag]));
   if (stage) filters.push(eq(deals.stage, stage as DealStage));
   if (q) {
     const like = `%${q}%`;
@@ -132,7 +137,8 @@ export default async function DealsPage({
       ilike(deals.salesRep, like),
     ];
     if (matchCustomerIds.length) ors.push(inArray(deals.customerId, matchCustomerIds));
-    filters.push(or(...ors));
+    const orCond = or(...ors);
+    if (orCond) filters.push(orCond);
   }
   const where = filters.length ? and(...filters) : undefined;
 
@@ -150,6 +156,8 @@ export default async function DealsPage({
     const qs = new URLSearchParams();
     if (q) qs.set("q", q);
     if (stage) qs.set("stage", stage);
+    if (view === "archived") qs.set("view", "archived");
+    if (tag) qs.set("tag", tag);
     return qs.toString();
   })();
 
@@ -186,22 +194,27 @@ export default async function DealsPage({
           <div className="md:col-span-3 flex justify-end"><button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save deal</button></div>
         </form>
       </div>
-      <form method="get" className="flex flex-wrap items-center gap-2">
-        <input
-          name="q"
-          defaultValue={q}
-          placeholder="Search customer, VIN, make, model, rep…"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]"
-        />
-        <select name="stage" defaultValue={stage} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
-          <option value="">All stages</option>
-          {ALL_STAGES.map((s) => (<option key={s} value={s}>{stageLabel(s)}</option>))}
-        </select>
-        <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
-        {(q || stage) && (
-          <a href="/deals" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>
-        )}
-      </form>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <form method="get" className="flex flex-wrap items-center gap-2">
+          {view === "archived" && <input type="hidden" name="view" value="archived" />}
+          {tag && <input type="hidden" name="tag" value={tag} />}
+          <input
+            name="q"
+            defaultValue={q}
+            placeholder="Search customer, VIN, make, model, rep…"
+            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]"
+          />
+          <select name="stage" defaultValue={stage} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+            <option value="">All stages</option>
+            {ALL_STAGES.map((s) => (<option key={s} value={s}>{stageLabel(s)}</option>))}
+          </select>
+          <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+          {(q || stage) && (
+            <a href="/deals" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>
+          )}
+        </form>
+        <ListFilters basePath="/deals" view={view} tag={tag} carry={{ q, stage }} />
+      </div>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -246,6 +259,7 @@ export default async function DealsPage({
                     <td className="px-3 py-2 text-xs">{d.referralSource ?? "—"}</td>
                     <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(d.createdAt)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="deals" id={d.id} tags={d.tags ?? []} archived={d.archived} /></div>
                       <a href={`/deals/${d.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 mr-3">Open</a>
                       <a href={`/deals/${d.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 mr-3">Edit</a>
                       <form action={deleteDeal} className="inline"><input type="hidden" name="id" value={d.id} /><button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button></form>
