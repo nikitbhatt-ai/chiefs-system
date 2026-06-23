@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { asc } from "drizzle-orm";
 import { auth } from "@/auth";
+import { requireRole } from "@/lib/rbac";
 import { db } from "@/db";
 import { glAccounts } from "@/db/schema";
 
@@ -10,14 +11,16 @@ const BALANCES = ["debit", "credit"] as const;
 
 export async function GET() {
   const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = requireRole(session, ["admin"]);
+  if (denied) return denied;
   const rows = await db.select().from(glAccounts).orderBy(asc(glAccounts.code));
   return NextResponse.json(rows);
 }
 
 export async function POST(req: Request) {
   const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = requireRole(session, ["admin"]);
+  if (denied) return denied;
   const body = await req.json().catch(() => null);
   if (!body || typeof body.code !== "string" || !body.code.trim())
     return NextResponse.json({ error: "code is required" }, { status: 400 });

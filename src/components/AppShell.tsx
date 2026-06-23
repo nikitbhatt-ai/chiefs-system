@@ -81,7 +81,7 @@ export async function AppShell({
         </div>
       </header>
 
-      <TopNav />
+      <TopNav role={session?.user?.role ?? null} />
       <Breadcrumbs />
 
       <section className="p-6 space-y-5">

@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { desc } from "drizzle-orm";
 import { auth } from "@/auth";
+import { requireRole } from "@/lib/rbac";
 import { db } from "@/db";
 import { journalEntries } from "@/db/schema";
 import { postJournalEntry, LedgerError, type JournalLineInput } from "@/lib/accounting";
 
 export async function GET() {
   const session = await auth();
-  if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = requireRole(session, ["admin"]);
+  if (denied) return denied;
   const rows = await db.select().from(journalEntries).orderBy(desc(journalEntries.entryDate)).limit(200);
   return NextResponse.json(rows);
 }
@@ -15,6 +17,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const denied = requireRole(session, ["admin"]);
+  if (denied) return denied;
   const body = await req.json().catch(() => null);
   if (!body || !Array.isArray(body.lines))
     return NextResponse.json({ error: "lines are required" }, { status: 400 });
