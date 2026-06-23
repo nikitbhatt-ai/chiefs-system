@@ -33,6 +33,14 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    label: "Accounting",
+    children: [
+      { href: "/accounting", label: "Overview" },
+      { href: "/accounting/accounts", label: "Chart of Accounts" },
+      { href: "/accounting/journal", label: "Journal" },
+    ],
+  },
+  {
     label: "Admin",
     children: [
       { href: "/timeclock", label: "Timeclock" },
