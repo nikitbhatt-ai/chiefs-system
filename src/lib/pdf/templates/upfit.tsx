@@ -4,7 +4,12 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { sharedStyles } from "../styles";
 import { BRANDING } from "../branding";
-import { getTemplate, localImagePath } from "@/lib/upfit/templates";
+import {
+  getColorScheme,
+  getPinSize,
+  getTemplate,
+  localImagePath,
+} from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
 export type UpfitPdfData = {
@@ -48,13 +53,98 @@ function loadTemplateImage(imageUrl: string): Buffer | null {
   return null;
 }
 
-// The diagram is one composite image with pins overlaid by percentage
-// position. PANEL_W is the page content width (Letter minus the 48pt
-// horizontal padding from sharedStyles.page). Pin diameter is fixed in
-// points; positions are percent of the panel so they line up with the
-// editor regardless of the image's native aspect ratio.
+// PANEL_W is the page content width (Letter minus the 48pt horizontal
+// padding from sharedStyles.page). Pin sizes are stored as fractions of
+// the diagram's dimensions and applied as actual points off PANEL_W
+// (assuming roughly the rendered vehicle aspect) so the printed pin
+// looks like the on-screen editor pin.
 const PANEL_W = 612 - 96;
-const PIN_D = 16;
+// Most of our vehicle templates render at roughly 2:1 (wide and short).
+// Used to convert heightFrac → points; this is approximate but the only
+// alternative is to inspect every image and embed its true aspect.
+const ASSUMED_PANEL_H = PANEL_W * 0.5;
+
+function pinDims(pin: UpfitPin) {
+  const sz = getPinSize(pin.size);
+  const longPt = sz.widthFrac * PANEL_W;
+  const shortPt = sz.heightFrac * ASSUMED_PANEL_H;
+  const horizontal = (pin.orientation ?? "horizontal") === "horizontal";
+  return {
+    width: horizontal ? longPt : shortPt,
+    height: horizontal ? shortPt : longPt,
+    horizontal,
+  };
+}
+
+function PinShape({ pin }: { pin: UpfitPin }) {
+  const scheme = getColorScheme(pin.colorScheme);
+  const { width, height, horizontal } = pinDims(pin);
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: `${pin.x * 100}%`,
+        top: `${pin.y * 100}%`,
+        width,
+        height,
+        marginLeft: -width / 2,
+        marginTop: -height / 2,
+        borderWidth: 0.6,
+        borderColor: "#000000",
+        flexDirection: horizontal ? "row" : "column",
+      }}
+    >
+      {scheme.segments.map((c, i) => (
+        <View key={i} style={{ flex: 1, backgroundColor: c }} />
+      ))}
+      {/* Number badge — small black dot in the top-left corner so techs
+          can still cross-reference the equipment table. */}
+      <View
+        style={{
+          position: "absolute",
+          top: -5,
+          left: -5,
+          width: 10,
+          height: 10,
+          borderRadius: 5,
+          backgroundColor: "#000000",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text style={{ fontSize: 6, fontWeight: 700, color: "#ffffff" }}>
+          {String(pin.number)}
+        </Text>
+      </View>
+      {/* Caption pill rendered below the rectangle. */}
+      {pin.caption ? (
+        <View
+          style={{
+            position: "absolute",
+            top: height + 1,
+            left: 0,
+            alignItems: "center",
+            width: "100%",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#ffffff",
+              borderWidth: 0.4,
+              borderColor: "#000000",
+              paddingHorizontal: 2,
+              paddingVertical: 0.5,
+            }}
+          >
+            <Text style={{ fontSize: 5.5, fontWeight: 700, color: "#000000" }}>
+              {pin.caption}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 export function UpfitDocument({ data }: { data: UpfitPdfData }) {
   const styles = sharedStyles;
@@ -117,41 +207,19 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
               </Text>
             </View>
           )}
-          {/* Pins overlaid by percentage so they track the image at any
-              aspect ratio. Centered on the point via the -PIN_D/2 offset. */}
           {data.pins.map((pin) => (
-            <View
-              key={pin.id}
-              style={{
-                position: "absolute",
-                left: `${pin.x * 100}%`,
-                top: `${pin.y * 100}%`,
-                width: PIN_D,
-                height: PIN_D,
-                marginLeft: -PIN_D / 2,
-                marginTop: -PIN_D / 2,
-                borderRadius: PIN_D / 2,
-                backgroundColor: pin.color ?? "#f59e0b",
-                borderWidth: 1.5,
-                borderColor: "#000000",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ fontSize: 9, fontWeight: 700, color: "#000000" }}>
-                {String(pin.number)}
-              </Text>
-            </View>
+            <PinShape key={pin.id} pin={pin} />
           ))}
         </View>
 
         <Text style={styles.sectionTitle}>Equipment &amp; placement</Text>
         <View style={styles.table}>
           <View style={[styles.tableRow, styles.tableHeader]}>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "8%" }]}>#</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "52%" }]}>Equipment</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "15%" }]}>SKU</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>Placement note</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "6%" }]}>#</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "38%" }]}>Equipment</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "13%" }]}>SKU</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "21%" }]}>Caption</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>Placement note</Text>
           </View>
           {data.pins.length === 0 ? (
             <View style={styles.tableRowLast}>
@@ -164,14 +232,17 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
               const last = idx === data.pins.length - 1;
               return (
                 <View key={pin.id} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "8%", fontWeight: 700 }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "6%", fontWeight: 700 }]}>
                     {pin.number}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "52%" }]}>{pin.label}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "15%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "38%" }]}>{pin.label}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "13%" }]}>
                     {pin.partSku ?? "—"}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "21%" }]}>
+                    {pin.caption ?? ""}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>
                     {pin.notes ?? ""}
                   </Text>
                 </View>

@@ -596,8 +596,21 @@ export type UpfitPin = {
   x: number;
   y: number;
   label: string;
+  // Short caption rendered on the diagram next to the pin (e.g.
+  // "VXE SMOKED LENS RED/WHITE"). Distinct from `notes`, which is an
+  // internal placement note that prints in the equipment table only.
+  caption?: string;
+  // Visual config. All optional with defaults handled by the renderer
+  // so existing pins (circles) keep working.
+  size?: "small" | "medium" | "large" | "strip";
+  // Color scheme slug — solid color, 50/50 split, or multi-segment.
+  // See COLOR_SCHEMES in src/lib/upfit/templates.ts.
+  colorScheme?: string;
+  orientation?: "horizontal" | "vertical";
   partId?: string | null;
   partSku?: string | null;
+  // Legacy single-color field (the old circle fill). Kept so older
+  // saved pins still render; new pins use `colorScheme` instead.
   color?: string;
   notes?: string;
 };

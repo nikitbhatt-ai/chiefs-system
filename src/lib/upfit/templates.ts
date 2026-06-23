@@ -103,3 +103,113 @@ export const PIN_PALETTE = [
 export function nextPinColor(existing: number): string {
   return PIN_PALETTE[existing % PIN_PALETTE.length];
 }
+
+// --- Pin shapes -----------------------------------------------------------
+//
+// Equipment pins are drawn as colored rectangles sized to match the kind of
+// light/equipment they represent. Dimensions are in *image-fraction* units
+// (multiplied by the rendered diagram width/height at draw time) so the
+// pin scales with whatever size the diagram is shown at — small in the
+// editor sidebar, full in the printed PDF. Width is the long axis for
+// horizontal pins; the renderer swaps width/height for `orientation =
+// "vertical"`.
+
+export type PinSizeKey = "small" | "medium" | "large" | "strip";
+
+export type PinSize = {
+  key: PinSizeKey;
+  label: string;
+  // Long-axis width as a fraction of the diagram's rendered width.
+  // 0.025 ≈ 25px on a 1000px-wide diagram.
+  widthFrac: number;
+  // Short-axis height as a fraction of the diagram's rendered height.
+  heightFrac: number;
+};
+
+export const PIN_SIZES: Record<PinSizeKey, PinSize> = {
+  small: { key: "small", label: "Small", widthFrac: 0.024, heightFrac: 0.018 },
+  medium: { key: "medium", label: "Medium", widthFrac: 0.038, heightFrac: 0.024 },
+  large: { key: "large", label: "Large", widthFrac: 0.060, heightFrac: 0.032 },
+  // Strip = lightbar / tracer array — the long thin one in the rocker
+  // panel on the OnPoint reference.
+  strip: { key: "strip", label: "Strip / Tracer", widthFrac: 0.260, heightFrac: 0.022 },
+};
+
+export const PIN_SIZE_ORDER: PinSizeKey[] = ["small", "medium", "large", "strip"];
+
+// --- Color schemes --------------------------------------------------------
+//
+// A color scheme is one or more segments rendered side-by-side across the
+// rectangle's long axis. Solid colors are a single segment; split colors
+// are two; the multi-segment schemes mimic the alternating red/white
+// pattern of a tracer/lightbar.
+
+export type ColorScheme = {
+  key: string;
+  label: string;
+  // Ordered segments rendered left → right (or top → bottom when vertical).
+  segments: string[];
+};
+
+export const COLOR_SCHEMES: Record<string, ColorScheme> = {
+  // --- Solids ---
+  red: { key: "red", label: "Red", segments: ["#dc2626"] },
+  white: { key: "white", label: "White", segments: ["#ffffff"] },
+  blue: { key: "blue", label: "Blue", segments: ["#1d4ed8"] },
+  amber: { key: "amber", label: "Amber", segments: ["#f59e0b"] },
+  green: { key: "green", label: "Green", segments: ["#16a34a"] },
+  // --- 50/50 splits (the most common law-enforcement combos) ---
+  red_white: { key: "red_white", label: "Red / White", segments: ["#dc2626", "#ffffff"] },
+  blue_white: { key: "blue_white", label: "Blue / White", segments: ["#1d4ed8", "#ffffff"] },
+  amber_white: { key: "amber_white", label: "Amber / White", segments: ["#f59e0b", "#ffffff"] },
+  red_blue: { key: "red_blue", label: "Red / Blue", segments: ["#dc2626", "#1d4ed8"] },
+  green_white: { key: "green_white", label: "Green / White", segments: ["#16a34a", "#ffffff"] },
+  // --- Multi-segment tracer / lightbar patterns ---
+  rwrw_4: {
+    key: "rwrw_4",
+    label: "Red / White × 4",
+    segments: ["#dc2626", "#ffffff", "#dc2626", "#ffffff"],
+  },
+  rwrw_6: {
+    key: "rwrw_6",
+    label: "Red / White × 6",
+    segments: ["#dc2626", "#ffffff", "#dc2626", "#ffffff", "#dc2626", "#ffffff"],
+  },
+  bwbw_4: {
+    key: "bwbw_4",
+    label: "Blue / White × 4",
+    segments: ["#1d4ed8", "#ffffff", "#1d4ed8", "#ffffff"],
+  },
+  rbrb_4: {
+    key: "rbrb_4",
+    label: "Red / Blue × 4",
+    segments: ["#dc2626", "#1d4ed8", "#dc2626", "#1d4ed8"],
+  },
+};
+
+export const COLOR_SCHEME_ORDER = [
+  "red",
+  "white",
+  "blue",
+  "amber",
+  "green",
+  "red_white",
+  "blue_white",
+  "amber_white",
+  "red_blue",
+  "green_white",
+  "rwrw_4",
+  "rwrw_6",
+  "bwbw_4",
+  "rbrb_4",
+];
+
+export function getColorScheme(key: string | undefined | null): ColorScheme {
+  if (key && COLOR_SCHEMES[key]) return COLOR_SCHEMES[key];
+  return COLOR_SCHEMES.red_white;
+}
+
+export function getPinSize(key: string | undefined | null): PinSize {
+  if (key && (key in PIN_SIZES)) return PIN_SIZES[key as PinSizeKey];
+  return PIN_SIZES.medium;
+}

@@ -1,10 +1,15 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import {
   BODY_STYLES,
+  COLOR_SCHEMES,
+  COLOR_SCHEME_ORDER,
+  PIN_SIZES,
+  PIN_SIZE_ORDER,
+  getColorScheme,
+  getPinSize,
   getTemplate,
-  nextPinColor,
 } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
@@ -44,6 +49,10 @@ export function UpfitBuilder({
   const [notes, setNotes] = useState(initialNotes);
   const [selectedPartId, setSelectedPartId] = useState<string>("");
   const [customLabel, setCustomLabel] = useState("");
+  const [pendingCaption, setPendingCaption] = useState("");
+  const [pendingSize, setPendingSize] = useState<UpfitPin["size"]>("medium");
+  const [pendingColorScheme, setPendingColorScheme] = useState<string>("red_white");
+  const [pendingOrientation, setPendingOrientation] = useState<UpfitPin["orientation"]>("horizontal");
   const [activePinId, setActivePinId] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -72,6 +81,7 @@ export function UpfitBuilder({
   const stopPlacing = () => {
     setSelectedPartId("");
     setCustomLabel("");
+    setPendingCaption("");
   };
 
   const renumber = (arr: UpfitPin[]): UpfitPin[] =>
@@ -105,7 +115,10 @@ export function UpfitBuilder({
         label: pendingSelection.label,
         partId: pendingSelection.partId,
         partSku: pendingSelection.partSku,
-        color: nextPinColor(cur.length),
+        caption: pendingCaption.trim() || undefined,
+        size: pendingSize,
+        colorScheme: pendingColorScheme,
+        orientation: pendingOrientation,
       },
     ]);
     setActivePinId(id);
@@ -197,47 +210,118 @@ export function UpfitBuilder({
       </div>
 
       {/* Equipment toolbar */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-        <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
-          Pick a part from inventory
-          <select
-            value={selectedPartId}
-            onChange={(e) => {
-              setSelectedPartId(e.target.value);
-              if (e.target.value) setCustomLabel("");
-            }}
-            className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            Pick a part from inventory
+            <select
+              value={selectedPartId}
+              onChange={(e) => {
+                setSelectedPartId(e.target.value);
+                if (e.target.value) setCustomLabel("");
+              }}
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            >
+              <option value="">— select part —</option>
+              {parts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.sku} — {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            …or custom label
+            <input
+              value={customLabel}
+              onChange={(e) => {
+                setCustomLabel(e.target.value);
+                if (e.target.value) setSelectedPartId("");
+              }}
+              placeholder="e.g. Whelen Liberty II"
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            />
+          </label>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isPending}
+            className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-1.5 font-semibold disabled:opacity-60"
           >
-            <option value="">— select part —</option>
-            {parts.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.sku} — {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
+            {isPending ? "Saving…" : "Save upfit"}
+          </button>
+        </div>
 
-        <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
-          …or custom label
-          <input
-            value={customLabel}
-            onChange={(e) => {
-              setCustomLabel(e.target.value);
-              if (e.target.value) setSelectedPartId("");
-            }}
-            placeholder="e.g. Whelen Liberty II"
-            className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+        {/* Shape controls — what the next placed pin will look like. */}
+        <div className="grid grid-cols-2 md:grid-cols-[1fr_1fr_1fr_1fr] gap-3 items-end pt-2 border-t border-white/5">
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            Color
+            <select
+              value={pendingColorScheme}
+              onChange={(e) => setPendingColorScheme(e.target.value)}
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            >
+              {COLOR_SCHEME_ORDER.map((k) => (
+                <option key={k} value={k}>
+                  {COLOR_SCHEMES[k].label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            Size
+            <select
+              value={pendingSize}
+              onChange={(e) => setPendingSize(e.target.value as UpfitPin["size"])}
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            >
+              {PIN_SIZE_ORDER.map((k) => (
+                <option key={k} value={k}>
+                  {PIN_SIZES[k].label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            Orientation
+            <select
+              value={pendingOrientation}
+              onChange={(e) =>
+                setPendingOrientation(e.target.value as UpfitPin["orientation"])
+              }
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            >
+              <option value="horizontal">Horizontal</option>
+              <option value="vertical">Vertical</option>
+            </select>
+          </label>
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            Caption on diagram (optional)
+            <input
+              value={pendingCaption}
+              onChange={(e) => setPendingCaption(e.target.value)}
+              placeholder="e.g. VXE SMOKED LENS R/W"
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            />
+          </label>
+        </div>
+
+        {/* Live preview of what the next pin will look like. */}
+        <div className="flex items-center gap-3 text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+          <span>Preview:</span>
+          <PinPreview
+            colorScheme={pendingColorScheme}
+            size={pendingSize ?? "medium"}
+            orientation={pendingOrientation ?? "horizontal"}
           />
-        </label>
-
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isPending}
-          className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-1.5 font-semibold disabled:opacity-60"
-        >
-          {isPending ? "Saving…" : "Save upfit"}
-        </button>
+          {pendingCaption.trim() ? (
+            <span className="text-[10px] text-zinc-300 normal-case tracking-normal">
+              {pendingCaption.trim()}
+            </span>
+          ) : null}
+        </div>
       </div>
 
       {/* Hint banner */}
@@ -289,32 +373,16 @@ export function UpfitBuilder({
               className="w-full h-auto block pointer-events-none"
               draggable={false}
             />
-            {pins.map((pin) => {
-              const isActive = activePinId === pin.id;
-              return (
-                <button
-                  key={pin.id}
-                  type="button"
-                  onPointerDown={(e) => handlePinPointerDown(e, pin)}
-                  onPointerMove={handlePinPointerMove}
-                  onPointerUp={handlePinPointerUp}
-                  onClick={(e) => e.stopPropagation()}
-                  className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-black text-black text-[11px] font-bold flex items-center justify-center"
-                  style={{
-                    left: `${pin.x * 100}%`,
-                    top: `${pin.y * 100}%`,
-                    width: isActive ? 26 : 22,
-                    height: isActive ? 26 : 22,
-                    backgroundColor: pin.color ?? "#f59e0b",
-                    cursor: "grab",
-                    touchAction: "none",
-                    boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
-                  }}
-                >
-                  {pin.number}
-                </button>
-              );
-            })}
+            {pins.map((pin) => (
+              <PlacedPin
+                key={pin.id}
+                pin={pin}
+                isActive={activePinId === pin.id}
+                onPointerDown={(e) => handlePinPointerDown(e, pin)}
+                onPointerMove={handlePinPointerMove}
+                onPointerUp={handlePinPointerUp}
+              />
+            ))}
           </div>
         </div>
 
@@ -340,12 +408,14 @@ export function UpfitBuilder({
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span
-                        className="inline-flex items-center justify-center text-[10px] font-bold text-black rounded-full w-5 h-5"
-                        style={{ backgroundColor: pin.color ?? "#f59e0b" }}
-                      >
+                      <span className="text-[10px] font-bold text-zinc-400 w-4 text-center">
                         {pin.number}
                       </span>
+                      <PinPreview
+                        colorScheme={pin.colorScheme ?? pin.color ?? "red_white"}
+                        size={pin.size ?? "medium"}
+                        orientation={pin.orientation ?? "horizontal"}
+                      />
                       <span className="text-[11px] text-zinc-300 font-body flex-1 truncate">
                         {pin.label}
                       </span>
@@ -357,10 +427,56 @@ export function UpfitBuilder({
                         remove
                       </button>
                     </div>
+
+                    <div className="mt-2 grid grid-cols-3 gap-1.5">
+                      <select
+                        value={pin.colorScheme ?? "red_white"}
+                        onChange={(e) => updatePin(pin.id, { colorScheme: e.target.value })}
+                        className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body"
+                      >
+                        {COLOR_SCHEME_ORDER.map((k) => (
+                          <option key={k} value={k}>
+                            {COLOR_SCHEMES[k].label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={pin.size ?? "medium"}
+                        onChange={(e) =>
+                          updatePin(pin.id, { size: e.target.value as UpfitPin["size"] })
+                        }
+                        className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body"
+                      >
+                        {PIN_SIZE_ORDER.map((k) => (
+                          <option key={k} value={k}>
+                            {PIN_SIZES[k].label}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={pin.orientation ?? "horizontal"}
+                        onChange={(e) =>
+                          updatePin(pin.id, {
+                            orientation: e.target.value as UpfitPin["orientation"],
+                          })
+                        }
+                        className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body"
+                      >
+                        <option value="horizontal">Horizontal</option>
+                        <option value="vertical">Vertical</option>
+                      </select>
+                    </div>
+
+                    <input
+                      value={pin.caption ?? ""}
+                      onChange={(e) => updatePin(pin.id, { caption: e.target.value })}
+                      placeholder="caption (shown on diagram)"
+                      className="mt-1.5 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white font-body"
+                    />
                     <input
                       value={pin.notes ?? ""}
                       onChange={(e) => updatePin(pin.id, { notes: e.target.value })}
-                      placeholder="placement note (optional)"
+                      placeholder="internal placement note (PDF table only)"
                       className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-[10px] text-white font-body"
                     />
                   </li>
@@ -384,5 +500,111 @@ export function UpfitBuilder({
         </div>
       </div>
     </div>
+  );
+}
+
+// Small inline preview of a pin — the same shape rendering logic the
+// diagram uses, just sized to fit in a sidebar row.
+function PinPreview({
+  colorScheme,
+  size,
+  orientation,
+}: {
+  colorScheme: string;
+  size: NonNullable<UpfitPin["size"]>;
+  orientation: NonNullable<UpfitPin["orientation"]>;
+}) {
+  const scheme = getColorScheme(colorScheme);
+  const sz = getPinSize(size);
+  // Tiny sidebar scale — the live diagram uses the fractional values
+  // against the rendered image, this preview just shows the shape.
+  const long = sz.key === "strip" ? 56 : sz.key === "large" ? 28 : sz.key === "small" ? 14 : 20;
+  const short = sz.key === "strip" ? 10 : sz.key === "large" ? 14 : sz.key === "small" ? 8 : 11;
+  const w = orientation === "horizontal" ? long : short;
+  const h = orientation === "horizontal" ? short : long;
+  return (
+    <span
+      className="inline-block border border-black/70 shrink-0"
+      style={{ width: w, height: h }}
+    >
+      <span
+        className="flex w-full h-full"
+        style={{ flexDirection: orientation === "horizontal" ? "row" : "column" }}
+      >
+        {scheme.segments.map((c, i) => (
+          <span key={i} style={{ flex: 1, backgroundColor: c }} />
+        ))}
+      </span>
+    </span>
+  );
+}
+
+// A single pin placed on the diagram — segmented rectangle + number
+// badge + caption text rendered below. All sizing is relative so the
+// pin looks consistent in the editor and prints identically in the PDF.
+function PlacedPin({
+  pin,
+  isActive,
+  onPointerDown,
+  onPointerMove,
+  onPointerUp,
+}: {
+  pin: UpfitPin;
+  isActive: boolean;
+  onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
+}) {
+  const scheme = getColorScheme(pin.colorScheme);
+  const sz = getPinSize(pin.size);
+  const widthPct = (pin.orientation === "vertical" ? sz.heightFrac : sz.widthFrac) * 100;
+  const heightPct = (pin.orientation === "vertical" ? sz.widthFrac : sz.heightFrac) * 100;
+
+  return (
+    <button
+      type="button"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onClick={(e) => e.stopPropagation()}
+      className="absolute -translate-x-1/2 -translate-y-1/2 p-0 m-0 border border-black bg-transparent text-[0] focus:outline-none"
+      style={{
+        left: `${pin.x * 100}%`,
+        top: `${pin.y * 100}%`,
+        width: `${widthPct}%`,
+        height: `${heightPct}%`,
+        cursor: "grab",
+        touchAction: "none",
+        boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
+      }}
+      title={pin.caption || pin.label}
+    >
+      <span
+        className="flex w-full h-full"
+        style={{ flexDirection: pin.orientation === "vertical" ? "column" : "row" }}
+      >
+        {scheme.segments.map((c, i) => (
+          <span key={i} style={{ flex: 1, backgroundColor: c }} />
+        ))}
+      </span>
+      {/* Number badge — small dark dot in the corner so techs can still
+          cross-reference the equipment table. */}
+      <span
+        className="absolute -top-2 -left-2 inline-flex items-center justify-center text-[9px] font-bold text-white bg-black rounded-full w-4 h-4"
+        style={{ lineHeight: 1 }}
+      >
+        {pin.number}
+      </span>
+      {/* Caption rendered below the pin in a small white-background pill
+          so it stays legible against any vehicle color. */}
+      {pin.caption ? (
+        <span
+          className="absolute left-1/2 -translate-x-1/2 mt-0.5 px-1 py-px bg-white/95 border border-black/40 text-[8px] font-bold text-black whitespace-nowrap"
+          style={{ top: "100%", letterSpacing: "0.02em" }}
+        >
+          {pin.caption}
+        </span>
+      ) : null}
+    </button>
   );
 }
