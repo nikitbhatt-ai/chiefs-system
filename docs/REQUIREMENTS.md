@@ -1091,9 +1091,31 @@ customer sees and the techs build to. One upfit per quote.
       label, click-to-place pins on the single blueprint image,
       **pointer-drag to reposition placed pins** (1%-of-box threshold
       separates click-to-select from drag-to-move), per-pin placement
-      note, autocolor from a 12-color palette, build notes textarea.
-      Pins are HTML overlays positioned by percentage over the `<img>`.
-      "Save upfit" persists via a server action on the page.
+      note, build notes textarea. Pins are HTML overlays positioned by
+      percentage over the `<img>`. "Save upfit" persists via a server
+      action on the page.
+- [x] **Equipment-styled pins** — pins are drawn as colored rectangles
+      (not circles), matching how real lights look on a build sheet.
+      Each pin has:
+      - **Size**: `small` / `medium` / `large` / `strip` (for
+        lightbars and tracer arrays). Dimensions defined as fractions
+        of the diagram so they scale consistently between editor and
+        PDF.
+      - **Color scheme**: solids (red, white, blue, amber, green),
+        50/50 splits (red/white, blue/white, amber/white, red/blue,
+        green/white), and multi-segment tracer patterns (R/W ×4, R/W
+        ×6, B/W ×4, R/B ×4). Stored as a slug; segments rendered
+        side-by-side in the rectangle.
+      - **Orientation**: `horizontal` (default) or `vertical` for
+        pillar / quarter-window lights.
+      - **Caption**: short label drawn on the diagram below the
+        rectangle (e.g. "VXE SMOKED LENS R/W"). Distinct from `notes`,
+        which is internal and only prints in the equipment table.
+      Catalogs live in `src/lib/upfit/templates.ts` (`PIN_SIZES`,
+      `COLOR_SCHEMES`). All visual fields are optional on the pin
+      record so older saved pins keep rendering (defaults: medium /
+      red_white / horizontal). The PDF mirrors the same rendering for
+      a byte-for-byte match between editor and print.
 - [x] **Place same part multiple times** — picking a part (or typing a
       label) enters "placement mode" and stays in it across clicks, so
       the same SKU can be placed on every corner/pillar of the vehicle
@@ -1104,8 +1126,10 @@ customer sees and the techs build to. One upfit per quote.
       deletes when the quote is deleted.
 - [x] **PDF spec sheet** — `src/lib/pdf/templates/upfit.tsx` renders
       branded header + customer/vehicle block + the full-width
-      blueprint image with numbered pins overlaid by percentage +
-      equipment table (# · label · SKU · placement note) + build notes.
+      blueprint image with rectangle pins (matching the editor's size,
+      color scheme, orientation, and on-diagram caption) overlaid by
+      percentage + equipment table (# · label · SKU · caption ·
+      placement note) + build notes.
       Streamed from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
       `record_type = upfit`). Download button on the upfit tab.
 - [x] **Customer-folder auto-link** — `upsertUpfitLink(quoteId)` in
