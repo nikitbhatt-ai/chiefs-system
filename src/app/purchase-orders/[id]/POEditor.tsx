@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { POLineItem } from "@/db/schema";
+import { PartSearchCombobox } from "@/components/PartSearchCombobox";
 
 function fmt(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
@@ -14,7 +15,6 @@ export function POEditor({
   expectedAt,
   initialLines,
   vendors,
-  parts,
   status,
   saveDraft,
   receivePO,
@@ -25,7 +25,6 @@ export function POEditor({
   expectedAt: string;
   initialLines: POLineItem[];
   vendors: { id: string; name: string }[];
-  parts: { id: string; sku: string; name: string; cost: string | null }[];
   status: string;
   saveDraft: (formData: FormData) => Promise<void>;
   receivePO: (formData: FormData) => Promise<void>;
@@ -52,15 +51,6 @@ export function POEditor({
       ...prev,
       { description: "", quantity: 1, quantityReceived: 0, unitCost: 0 },
     ]);
-  }
-  function pickPart(i: number, partId: string) {
-    const p = parts.find((x) => x.id === partId);
-    if (!p) return update(i, { partId: undefined });
-    update(i, {
-      partId: p.id,
-      description: `${p.sku} — ${p.name}`,
-      unitCost: p.cost ? Number(p.cost) : 0,
-    });
   }
 
   const fullyReceived = status === "received";
@@ -124,26 +114,29 @@ export function POEditor({
                   key={i}
                   className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body"
                 >
-                  <select
-                    value={l.partId ?? ""}
-                    onChange={(e) => pickPart(i, e.target.value)}
-                    disabled={fullyReceived}
-                    className="col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
-                  >
-                    <option value="">— Pick part —</option>
-                    {parts.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.sku} — {p.name}
-                      </option>
-                    ))}
-                  </select>
-                  <input
-                    value={l.description ?? ""}
-                    onChange={(e) => update(i, { description: e.target.value })}
-                    disabled={fullyReceived}
-                    placeholder="Description"
-                    className="col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
-                  />
+                  {fullyReceived ? (
+                    <input
+                      value={l.description ?? ""}
+                      disabled
+                      className="col-span-6 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
+                    />
+                  ) : (
+                    <div className="col-span-6">
+                      <PartSearchCombobox
+                        mode="inline"
+                        value={l.description ?? ""}
+                        onText={(s) => update(i, { description: s })}
+                        onPick={(p) =>
+                          update(i, {
+                            partId: p.id,
+                            description: `${p.sku} — ${p.name}`,
+                            unitCost: p.cost ? Number(p.cost) : 0,
+                          })
+                        }
+                        placeholder="Search part by SKU, name, or part #…"
+                      />
+                    </div>
+                  )}
                   <input
                     type="number"
                     min="0"
