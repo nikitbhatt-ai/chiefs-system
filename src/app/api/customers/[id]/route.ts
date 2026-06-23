@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
-import { customers } from "@/db/schema";
+import { customers, customerType } from "@/db/schema";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await auth();
@@ -18,6 +19,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
+  if ("type" in body && !customerType.enumValues.includes(body.type)) {
+    return NextResponse.json({ error: "invalid customer type" }, { status: 400 });
+  }
   const [row] = await db
     .update(customers)
     .set({
@@ -39,6 +43,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  if (!canDelete(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   await db.delete(customers).where(eq(customers.id, id));
   return NextResponse.json({ ok: true });
 }

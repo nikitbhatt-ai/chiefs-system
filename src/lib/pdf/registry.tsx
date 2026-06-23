@@ -10,13 +10,15 @@ import React from "react";
 import { renderToBuffer } from "@react-pdf/renderer";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, purchaseOrders, vendors, upfitConfigs } from "@/db/schema";
+import { quotes, customers, purchaseOrders, vendors, upfitConfigs, workOrders } from "@/db/schema";
 import { QuoteDocument, type QuoteData, type QuoteLine } from "./templates/quote";
 import { PurchaseOrderDocument, type PurchaseOrderData, type POLine } from "./templates/purchaseOrder";
 import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
+import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
+import { resolvePartsFromLineItems } from "@/lib/workOrderParts";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
 
-export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit";
+export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit" | "work_order";
 
 export type ResolvedPdf = {
   buffer: Buffer;
@@ -90,9 +92,49 @@ async function resolveUpfit(quoteId: string): Promise<UpfitPdfData | null> {
     createdAt: q.createdAt,
     customerName: customer?.name ?? null,
     vehicleSummary: vehicleSummary || null,
-    bodyStyle: config?.bodyStyle ?? "suv",
+    bodyStyle: config?.bodyStyle ?? "tahoe",
     pins: config?.pins ?? [],
     notes: config?.notes ?? null,
+  };
+}
+
+// Work-order build sheet. Sourced from the linked estimate's line items so it
+// always matches the estimate/invoice exactly, then stripped of all pricing:
+// only part name, brand (manufacturer), manufacturer part number, and quantity.
+// Fee lines are dropped entirely (they're pricing artifacts).
+async function resolveWorkOrder(workOrderId: string): Promise<WorkOrderData | null> {
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.id, workOrderId));
+  if (!wo) return null;
+
+  const customer = wo.customerId
+    ? (await db.select().from(customers).where(eq(customers.id, wo.customerId)))[0] ?? null
+    : null;
+
+  let lineItems: WorkOrderData["lineItems"] = [];
+  let quoteNumber: string | null = null;
+  let quoteForVehicle: typeof quotes.$inferSelect | null = null;
+  if (wo.quoteId) {
+    const [q] = await db.select().from(quotes).where(eq(quotes.id, wo.quoteId));
+    if (q) {
+      lineItems = await resolvePartsFromLineItems(q.lineItems);
+      quoteNumber = q.quoteNumber;
+      quoteForVehicle = q;
+    }
+  }
+
+  const vehicleSummary = quoteForVehicle ? await resolveVehicleLabel(quoteForVehicle) : null;
+
+  return {
+    workOrderId: wo.id,
+    woNumber: wo.woNumber,
+    quoteNumber,
+    createdAt: wo.createdAt,
+    status: wo.status,
+    customerName: customer?.name ?? null,
+    customerAddress: customer?.address ?? null,
+    vehicleSummary: vehicleSummary || null,
+    lineItems,
+    notes: wo.notes ?? null,
   };
 }
 
@@ -130,6 +172,15 @@ export async function renderRecordPdf(
     const fileName = `PO_${docNumber}_${dateStr}.pdf`;
     const buffer = await renderToBuffer(<PurchaseOrderDocument data={data} />);
     return { buffer, fileName, template: "purchase_order_default" };
+  }
+  if (recordType === "work_order") {
+    const data = await resolveWorkOrder(recordId);
+    if (!data) return null;
+    const docNumber = data.woNumber ?? `WO-${data.workOrderId.slice(0, 8)}`;
+    const dateStr = new Date(data.createdAt).toISOString().slice(0, 10).replace(/-/g, "");
+    const fileName = `WorkOrder_${docNumber}_${dateStr}.pdf`;
+    const buffer = await renderToBuffer(<WorkOrderDocument data={data} />);
+    return { buffer, fileName, template: "work_order_default" };
   }
   return null;
 }

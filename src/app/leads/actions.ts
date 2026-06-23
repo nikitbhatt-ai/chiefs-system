@@ -5,6 +5,8 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { leads, customers, deals } from "@/db/schema";
 import { pipelineForCustomerType } from "@/lib/pipelines";
+import { auth } from "@/auth";
+import { canDelete } from "@/lib/rbac";
 
 type CustomerTypeValue = "government" | "commercial" | "retail" | "walk_in_credentialed";
 
@@ -50,6 +52,8 @@ export async function createLeadAction(formData: FormData) {
 }
 
 export async function deleteLeadAction(formData: FormData) {
+  const session = await auth();
+  if (!canDelete(session)) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.delete(leads).where(eq(leads.id, id));

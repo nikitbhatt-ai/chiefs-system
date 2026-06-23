@@ -5,6 +5,7 @@
 // ones in unstable_cache with sensible TTLs per the spec.
 
 import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sum } from "drizzle-orm";
+import { unstable_cache } from "next/cache";
 import { db } from "@/db";
 import {
   deals,
@@ -48,7 +49,12 @@ const ACTIVE_WO_STATUSES = ["confirmed", "awaiting_parts", "next_in_line", "in_p
 
 // ---------- Sales ----------
 
-export async function salesKpis(userId: string | null) {
+// KPI cards tolerate a little staleness, so cache the heavier roll-ups for
+// 60s to spare the DB on every dashboard load. Action-item lists below are
+// left uncached — they drive "do this now" workflows and must stay fresh.
+export const salesKpis = unstable_cache(salesKpisImpl, ["dashboard:salesKpis"], { revalidate: 60 });
+
+async function salesKpisImpl(userId: string | null) {
   void userId; // surface per-user filtering later; today the KPIs are global
   const monthStart = startOfMonth();
   const ninetyAgo = daysAgo(90);
@@ -184,25 +190,30 @@ export async function salesActionItems(userId: string | null) {
 
 // ---------- Operations ----------
 
-export async function operationsKpis() {
+export const operationsKpis = unstable_cache(operationsKpisImpl, ["dashboard:operationsKpis"], { revalidate: 60 });
+
+async function operationsKpisImpl() {
   const ninetyAgo = daysAgo(90);
   const weekStart = startOfWeek();
   const weekEnd = endOfWeek();
   const now = new Date();
 
+  // Pure counts run as SQL count() aggregates instead of selecting every row
+  // and measuring array length. `completed` still needs its timestamps for the
+  // avg-build-days computation, so it stays a row select.
   const [active, scheduled, ready, completed, pastDue] = await Promise.all([
-    db.select({ id: workOrders.id }).from(workOrders).where(inArray(workOrders.status, ACTIVE_WO_STATUSES)),
+    db.select({ n: count() }).from(workOrders).where(inArray(workOrders.status, ACTIVE_WO_STATUSES)),
     db
-      .select({ id: workOrders.id })
+      .select({ n: count() })
       .from(workOrders)
       .where(and(gte(workOrders.targetBuildStartDate, weekStart), lte(workOrders.targetBuildStartDate, weekEnd))),
-    db.select({ id: workOrders.id }).from(workOrders).where(eq(workOrders.status, "completed")),
+    db.select({ n: count() }).from(workOrders).where(eq(workOrders.status, "completed")),
     db
       .select({ createdAt: workOrders.createdAt, completedAt: workOrders.completedAt })
       .from(workOrders)
       .where(and(eq(workOrders.status, "delivered"), gte(workOrders.updatedAt, ninetyAgo))),
     db
-      .select({ id: workOrders.id })
+      .select({ n: count() })
       .from(workOrders)
       .where(and(inArray(workOrders.status, ACTIVE_WO_STATUSES), lt(workOrders.targetBuildStartDate, now))),
   ]);
@@ -234,12 +245,12 @@ export async function operationsKpis() {
   }
 
   return {
-    activeBuilds: active.length,
-    scheduledThisWeek: scheduled.length,
-    readyForDelivery: ready.length,
+    activeBuilds: Number(active[0]?.n ?? 0),
+    scheduledThisWeek: Number(scheduled[0]?.n ?? 0),
+    readyForDelivery: Number(ready[0]?.n ?? 0),
     avgBuildDays,
     onTimePct,
-    pastDue: pastDue.length,
+    pastDue: Number(pastDue[0]?.n ?? 0),
   };
 }
 
@@ -268,7 +279,9 @@ export async function operationsActionItems() {
 
 // ---------- Admin ----------
 
-export async function adminKpis() {
+export const adminKpis = unstable_cache(adminKpisImpl, ["dashboard:adminKpis"], { revalidate: 60 });
+
+async function adminKpisImpl() {
   const monthStart = startOfMonth();
   const ninetyAgo = daysAgo(90);
 
@@ -450,7 +463,6 @@ export async function adminActionItems() {
 
 // Unused-import guards — keeps the imports above honest as we add cache
 // wrappers in a later PR.
-void count;
 void sum;
 void or;
 void partReceipts;

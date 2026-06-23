@@ -4,7 +4,7 @@ import { put } from "@vercel/blob";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { deals, customerDocuments } from "@/db/schema";
-import { categoryForKind } from "@/lib/customerDocuments";
+import { categoryForKind, categoryVisibleTo } from "@/lib/customerDocuments";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +33,19 @@ export async function POST(
   if (!(file instanceof File) || file.size === 0) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 });
   }
+  // Cap upload size (25 MB) so a single request can't blow past the function
+  // body limit or fill blob storage.
+  if (file.size > 25 * 1024 * 1024) {
+    return NextResponse.json({ error: "File exceeds the 25 MB limit" }, { status: 413 });
+  }
 
   const category = categoryForKind(kind);
+  // Write-side RBAC: the same category access that gates downloads must gate
+  // uploads, otherwise a low-privilege user could drop documents into
+  // manager-only folders (contracts, credentials, invoices, compliance).
+  if (!categoryVisibleTo(category, session.user.role)) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
   const blob = await put(`customers/${deal.customerId}/${Date.now()}-${file.name}`, file, {
     access: "public",
     addRandomSuffix: true,

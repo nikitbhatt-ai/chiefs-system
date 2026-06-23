@@ -1,13 +1,15 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, asc, sql, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, parts, workOrders, partReceipts, deals, dealCredentials } from "@/db/schema";
+import { quotes, customers, parts, workOrders, deals, dealCredentials } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { QuoteTabs } from "@/components/QuoteTabs";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { credentialCoversPart } from "@/lib/credentials";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
+import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
+import { qcComplete } from "@/lib/qc";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +105,13 @@ async function moveStage(formData: FormData) {
   if (!q) return;
 
   let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
+
+  // Build-close gate: don't advance into completed/delivered until QC passes.
+  if (stage === "completed" || stage === "delivered") {
+    const passed = wo ? await qcComplete(wo.id) : false;
+    if (!passed) return;
+  }
+
   if (!wo && stage !== "estimate") {
     const woNumber = `WO-${Date.now().toString().slice(-7)}`;
     const inserted = await db
@@ -122,40 +131,20 @@ async function moveStage(formData: FormData) {
       .where(eq(workOrders.id, wo.id));
   }
 
-  if (stage === "in_progress" && wo && !wo.partsConsumed) {
-    const lines = (q.lineItems as unknown as QuoteLine[]) ?? [];
-    for (const line of lines) {
-      if (line.kind !== "item" || !line.partId) continue;
-      const qty = Number(line.quantity || 0);
-      if (qty <= 0) continue;
-      const layers = await db
-        .select()
-        .from(partReceipts)
-        .where(eq(partReceipts.partId, line.partId))
-        .orderBy(asc(partReceipts.receivedAt));
-      let need = qty;
-      for (const layer of layers) {
-        if (need <= 0) break;
-        if (layer.quantityRemaining <= 0) continue;
-        const take = Math.min(need, layer.quantityRemaining);
-        await db
-          .update(partReceipts)
-          .set({ quantityRemaining: layer.quantityRemaining - take })
-          .where(eq(partReceipts.id, layer.id));
-        need -= take;
-      }
-      await db
-        .update(parts)
-        .set({
-          quantityOnHand: sql`${parts.quantityOnHand} - ${qty}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(parts.id, line.partId));
+  // FIFO consumption is keyed off the build crossing into in_progress.
+  // consumeWorkOrderParts / restoreWorkOrderParts are transactional and
+  // idempotent (the work_orders.parts_consumed latch), so advancing to or past
+  // in_progress consumes exactly once and walking back before it restores the
+  // drained layers. This replaces the old inline, non-transactional loop that
+  // could double-consume or drive stock negative.
+  if (wo) {
+    const idx = WORKFLOW_STAGES.indexOf(stage as (typeof WORKFLOW_STAGES)[number]);
+    const inProgressIdx = WORKFLOW_STAGES.indexOf("in_progress");
+    if (idx >= inProgressIdx) {
+      await consumeWorkOrderParts(wo.id);
+    } else {
+      await restoreWorkOrderParts(wo.id);
     }
-    await db
-      .update(workOrders)
-      .set({ partsConsumed: true, updatedAt: new Date() })
-      .where(eq(workOrders.id, wo.id));
   }
 
   await db

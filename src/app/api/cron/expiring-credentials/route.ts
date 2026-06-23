@@ -3,6 +3,7 @@ import { and, eq, isNull, lte, or } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, dealCredentials, customers } from "@/db/schema";
 import { notify } from "@/lib/notifications";
+import { secretEquals } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -21,11 +22,10 @@ const DEDUP_DAYS = 7;
 
 export async function GET(req: Request) {
   const auth = req.headers.get("authorization") ?? "";
-  const expected = process.env.CRON_SECRET;
-  // Fail closed: if CRON_SECRET is unset OR the header doesn't match, 401.
-  // Previously `if (expected && …)` left the endpoint wide open when the
-  // env var was missing.
-  if (!expected || auth !== `Bearer ${expected}`) {
+  const provided = auth.startsWith("Bearer ") ? auth.slice("Bearer ".length) : "";
+  // Fail closed (secretEquals returns false when CRON_SECRET is unset) and
+  // compare in constant time to avoid leaking the secret via response timing.
+  if (!secretEquals(provided, process.env.CRON_SECRET)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

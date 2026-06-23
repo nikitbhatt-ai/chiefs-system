@@ -1,9 +1,17 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, arrayContains, count, desc, eq, ilike, inArray } from "drizzle-orm";
+import { auth } from "@/auth";
+import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
 import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { ListRowControls } from "@/components/ListRowControls";
+import { ListFilters } from "@/components/ListFilters";
+import { parsePagination } from "@/lib/pagination";
 import { fmtDateTime } from "@/lib/datetime";
+
+const WO_STATUSES = ["confirmed", "awaiting_parts", "next_in_line", "in_progress", "qc_check", "completed", "delivered"];
 import {
   buildPartPlan,
   criticalPathForPlan,
@@ -31,6 +39,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 async function deleteWO(formData: FormData) {
   "use server";
+  const session = await auth();
+  if (!canDelete(session)) return;
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   await db.delete(workOrders).where(eq(workOrders.id, id));
@@ -54,8 +64,37 @@ async function setProcurementPlan(formData: FormData) {
   revalidatePath("/procurement/parts-to-order");
 }
 
-export default async function WorkOrdersPage() {
-  const rows = await db.select().from(workOrders).orderBy(desc(workOrders.createdAt));
+export default async function WorkOrdersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; status?: string; page?: string; view?: string; tag?: string }>;
+}) {
+  const sp = await searchParams;
+  const q = (sp.q ?? "").trim();
+  const status = (sp.status ?? "").trim();
+  const view = sp.view === "archived" ? "archived" : "active";
+  const tag = (sp.tag ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
+
+  const filters = [eq(workOrders.archived, view === "archived")];
+  if (tag) filters.push(arrayContains(workOrders.tags, [tag]));
+  if (status) filters.push(eq(workOrders.status, status));
+  if (q) filters.push(ilike(workOrders.woNumber, `%${q}%`));
+  const where = and(...filters);
+  const baseQuery = (() => {
+    const qs = new URLSearchParams();
+    if (q) qs.set("q", q);
+    if (status) qs.set("status", status);
+    if (view === "archived") qs.set("view", "archived");
+    if (tag) qs.set("tag", tag);
+    return qs.toString();
+  })();
+
+  const [totalRows, rows] = await Promise.all([
+    db.select({ n: count() }).from(workOrders).where(where),
+    db.select().from(workOrders).where(where).orderBy(desc(workOrders.createdAt)).limit(perPage).offset(offset),
+  ]);
+  const total = Number(totalRows[0]?.n ?? 0);
 
   const customerIds = Array.from(
     new Set(rows.map((r) => r.customerId).filter(Boolean) as string[]),
@@ -205,6 +244,20 @@ export default async function WorkOrdersPage() {
       title="Work Orders"
       subtitle="Builds in motion — created automatically when a quote moves past Estimate"
     >
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+        <form method="get" className="flex flex-wrap items-center gap-2">
+          {view === "archived" && <input type="hidden" name="view" value="archived" />}
+          {tag && <input type="hidden" name="tag" value={tag} />}
+          <input name="q" defaultValue={q} placeholder="Search WO #…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[200px]" />
+          <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
+            <option value="">All stages</option>
+            {WO_STATUSES.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
+          </select>
+          <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
+          {(q || status) && (<a href="/work-orders" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
+        </form>
+        <ListFilters basePath="/work-orders" view={view} tag={tag} carry={{ q, status }} />
+      </div>
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
@@ -236,8 +289,10 @@ export default async function WorkOrdersPage() {
                 const v = w.vehicleId ? vehicleMap.get(w.vehicleId) : null;
                 return (
                   <tr key={w.id} className="border-t border-white/5">
-                    <td className="px-3 py-2 font-mono text-xs text-white">
-                      {w.woNumber ?? w.id.slice(0, 8)}
+                    <td className="px-3 py-2 font-mono text-xs">
+                      <a href={`/work-orders/${w.id}`} className="text-white hover:text-amber-300">
+                        {w.woNumber ?? w.id.slice(0, 8)}
+                      </a>
                     </td>
                     <td className="px-3 py-2 text-xs">
                       {q ? (
@@ -338,6 +393,16 @@ export default async function WorkOrdersPage() {
                     </td>
                     <td className="px-3 py-2 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(w.createdAt)}</td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="work-orders" id={w.id} tags={w.tags ?? []} archived={w.archived} /></div>
+                      <a
+                        href={`/api/pdf/work-orders/${w.id}`}
+                        target="_blank"
+                        rel="noopener"
+                        className="text-[11px] text-amber-400 hover:text-amber-300 mr-3"
+                        title="Build sheet — no pricing"
+                      >
+                        WO PDF
+                      </a>
                       {w.quoteId ? (
                         <a
                           href={`/quotes/${w.quoteId}`}
@@ -362,6 +427,7 @@ export default async function WorkOrdersPage() {
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={baseQuery} />
       </div>
     </AppShell>
   );

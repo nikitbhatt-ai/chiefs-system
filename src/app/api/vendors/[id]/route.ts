@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
+import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
 import { vendors } from "@/db/schema";
 
@@ -42,6 +43,7 @@ export async function DELETE(_req: Request, { params }: { params: Promise<{ id: 
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const { id } = await params;
+  if (!canDelete(session)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
   await db.delete(vendors).where(eq(vendors.id, id));
   return NextResponse.json({ ok: true });
 }

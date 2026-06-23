@@ -1,8 +1,11 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq, and, sql } from "drizzle-orm";
+import { desc, eq, and, sql, count, arrayContains } from "drizzle-orm";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { Pagination } from "@/components/Pagination";
+import { ListRowControls } from "@/components/ListRowControls";
+import { parsePagination } from "@/lib/pagination";
 import { PartAddForm } from "./PartAddForm";
 
 async function createPart(formData: FormData) {
@@ -18,6 +21,7 @@ async function createPart(formData: FormData) {
     sku,
     name,
     description: String(formData.get("description") ?? "").trim() || null,
+    mfgPartNumber: String(formData.get("mfgPartNumber") ?? "").trim() || null,
     category: String(formData.get("category") ?? "").trim() || null,
     quantityOnHand: num("quantityOnHand") ?? 0,
     quantityOnOrder: num("quantityOnOrder") ?? 0,
@@ -69,14 +73,18 @@ function pct(cost: string | null, price: string | null) {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; vendor?: string; archived?: string }>;
+  searchParams: Promise<{ category?: string; vendor?: string; archived?: string; page?: string; tag?: string }>;
 }) {
   const sp = await searchParams;
+  const tag = (sp.tag ?? "").trim();
+  const { page, perPage, offset } = parsePagination(sp.page);
   const filters = [];
   if (sp.category) filters.push(eq(parts.category, sp.category));
   if (sp.vendor) filters.push(eq(parts.vendorId, sp.vendor));
+  if (tag) filters.push(arrayContains(parts.tags, [tag]));
   if (sp.archived === "1") filters.push(eq(parts.archived, true));
   else filters.push(eq(parts.archived, false));
+  const where = filters.length ? and(...filters) : undefined;
 
   const vendorRows = await db
     .select({ id: vendors.id, name: vendors.name })
@@ -84,11 +92,11 @@ export default async function InventoryPage({
     .orderBy(vendors.name);
   const vendorMap = new Map(vendorRows.map((v) => [v.id, v.name]));
 
-  const rows = await db
-    .select()
-    .from(parts)
-    .where(filters.length ? and(...filters) : undefined)
-    .orderBy(desc(parts.createdAt));
+  const [totalRows, rows] = await Promise.all([
+    db.select({ n: count() }).from(parts).where(where),
+    db.select().from(parts).where(where).orderBy(desc(parts.createdAt)).limit(perPage).offset(offset),
+  ]);
+  const total = Number(totalRows[0]?.n ?? 0);
 
   const categoriesRaw = await db
     .selectDistinct({ category: parts.category })
@@ -101,9 +109,11 @@ export default async function InventoryPage({
     if (sp.category) qs.set("category", sp.category);
     if (sp.vendor) qs.set("vendor", sp.vendor);
     if (sp.archived === "1") qs.set("archived", "1");
+    if (tag) qs.set("tag", tag);
     const s = qs.toString();
     return s ? `?${s}` : "";
   })();
+  const pagerBaseQuery = printQs.replace(/^\?/, "");
 
   return (
     <AppShell title="Inventory" subtitle="Parts and supplies">
@@ -221,6 +231,7 @@ export default async function InventoryPage({
                       {margin != null ? `${margin.toFixed(1)}%` : "—"}
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="parts" id={p.id} tags={p.tags ?? []} archived={p.archived} showArchive={false} /></div>
                       <a
                         href={`/inventory/${p.id}`}
                         className="text-[11px] text-blue-400 hover:text-blue-300 mr-3"
@@ -259,6 +270,7 @@ export default async function InventoryPage({
             )}
           </tbody>
         </table>
+        <Pagination page={page} total={total} perPage={perPage} baseQuery={pagerBaseQuery} />
       </div>
     </AppShell>
   );

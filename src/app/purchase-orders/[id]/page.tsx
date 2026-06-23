@@ -1,17 +1,11 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import {
-  purchaseOrders,
-  vendors,
-  parts,
-  partReceipts,
-  partCostHistory,
-  type POLineItem,
-} from "@/db/schema";
+import { purchaseOrders, vendors, parts, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
+import { receivePurchaseOrder } from "@/lib/inventory";
 
 async function saveDraft(formData: FormData) {
   "use server";
@@ -45,65 +39,24 @@ async function receivePO(formData: FormData) {
   "use server";
   const id = String(formData.get("id") ?? "");
   if (!id) return;
-  const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
+  // Read the line count to know which receive_<i> fields to collect; the
+  // authoritative quantities are re-read inside the locked transaction in
+  // receivePurchaseOrder, which makes the whole receipt atomic and idempotent
+  // (concurrent double-submits can't double-increment stock).
+  const [po] = await db
+    .select({ lineItems: purchaseOrders.lineItems })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, id));
   if (!po) return;
   const lines = (po.lineItems as POLineItem[]) ?? [];
-  const updatedLines: POLineItem[] = [];
-  let allFullyReceived = true;
-  let anyReceivedThisRound = false;
-
+  const receiveByIndex = new Map<number, number>();
   for (let i = 0; i < lines.length; i++) {
-    const l = lines[i];
-    const receiveNowRaw = String(formData.get(`receive_${i}`) ?? "").trim();
-    const receiveNow = receiveNowRaw ? Number(receiveNowRaw) : 0;
-    const remaining = (l.quantity || 0) - (l.quantityReceived || 0);
-    const qty = Math.max(0, Math.min(receiveNow, remaining));
-    if (qty > 0 && l.partId) {
-      anyReceivedThisRound = true;
-      // Append to receipt ledger.
-      await db.insert(partReceipts).values({
-        partId: l.partId,
-        purchaseOrderId: po.id,
-        vendorId: po.vendorId ?? null,
-        quantityReceived: qty,
-        quantityRemaining: qty,
-        unitCost: String(l.unitCost),
-      });
-      // Increment on-hand qty atomically.
-      await db
-        .update(parts)
-        .set({
-          quantityOnHand: sql`${parts.quantityOnHand} + ${qty}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(parts.id, l.partId));
-      // Historical price chart row.
-      await db.insert(partCostHistory).values({
-        partId: l.partId,
-        cost: String(l.unitCost),
-        source: po.poNumber ?? "PO",
-      });
-    }
-    const newReceived = (l.quantityReceived || 0) + qty;
-    if (newReceived < (l.quantity || 0)) allFullyReceived = false;
-    updatedLines.push({ ...l, quantityReceived: newReceived });
+    const raw = String(formData.get(`receive_${i}`) ?? "").trim();
+    const n = raw ? Number(raw) : 0;
+    if (n > 0) receiveByIndex.set(i, n);
   }
 
-  const nextStatus = allFullyReceived
-    ? ("received" as const)
-    : anyReceivedThisRound
-      ? ("partially_received" as const)
-      : po.status;
-
-  await db
-    .update(purchaseOrders)
-    .set({
-      lineItems: updatedLines as never,
-      status: nextStatus,
-      receivedAt: allFullyReceived ? new Date() : po.receivedAt,
-      updatedAt: new Date(),
-    })
-    .where(eq(purchaseOrders.id, id));
+  await receivePurchaseOrder(id, receiveByIndex);
 
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");

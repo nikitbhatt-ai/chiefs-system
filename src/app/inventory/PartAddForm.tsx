@@ -48,6 +48,11 @@ export function PartAddForm({
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2"
         />
         <input
+          name="mfgPartNumber"
+          placeholder="Mfg part # (shown on work orders)"
+          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
+        />
+        <input
           name="category"
           placeholder="Category"
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"

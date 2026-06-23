@@ -22,16 +22,30 @@ export type UpfitPdfData = {
 // off disk at render time. Returns null when the file isn't present yet
 // (user hasn't uploaded that template image); the diagram then renders
 // as an empty labeled box.
+//
+// process.cwd() resolves to different roots in dev (the repo) vs Vercel
+// serverless (/var/task), and Next's file tracer may strip the `public`
+// prefix, so we probe a few candidate locations rather than assuming.
 function loadTemplateImage(imageUrl: string): Buffer | null {
   const local = localImagePath(imageUrl);
   if (!local) return null;
-  const abs = path.join(process.cwd(), local);
-  if (!existsSync(abs)) return null;
-  try {
-    return readFileSync(abs);
-  } catch {
-    return null;
+  const trimmed = local.replace(/^public\//, "");
+  const candidates = [
+    path.join(process.cwd(), local),
+    path.join(process.cwd(), trimmed),
+    path.join(process.cwd(), ".next", "server", local),
+    path.join(process.cwd(), ".next", "server", trimmed),
+  ];
+  for (const abs of candidates) {
+    if (existsSync(abs)) {
+      try {
+        return readFileSync(abs);
+      } catch {
+        // try next candidate
+      }
+    }
   }
+  return null;
 }
 
 // The diagram is one composite image with pins overlaid by percentage
