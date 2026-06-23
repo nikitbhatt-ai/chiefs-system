@@ -4,9 +4,9 @@ import { useMemo, useRef, useState, useTransition } from "react";
 import {
   BODY_STYLES,
   COLOR_SCHEMES,
-  COLOR_SCHEME_ORDER,
   PIN_SIZES,
   PIN_SIZE_ORDER,
+  colorSchemesByGroup,
   getColorScheme,
   getPinSize,
   getTemplate,
@@ -50,6 +50,7 @@ export function UpfitBuilder({
   const [selectedPartId, setSelectedPartId] = useState<string>("");
   const [customLabel, setCustomLabel] = useState("");
   const [pendingCaption, setPendingCaption] = useState("");
+  const [pendingShape, setPendingShape] = useState<UpfitPin["shape"]>("rect");
   const [pendingSize, setPendingSize] = useState<UpfitPin["size"]>("medium");
   const [pendingColorScheme, setPendingColorScheme] = useState<string>("red_white");
   const [pendingOrientation, setPendingOrientation] = useState<UpfitPin["orientation"]>("horizontal");
@@ -58,6 +59,7 @@ export function UpfitBuilder({
   const [isPending, startTransition] = useTransition();
 
   const template = useMemo(() => getTemplate(bodyStyle), [bodyStyle]);
+  const colorGroups = useMemo(() => colorSchemesByGroup(), []);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ pinId: string; startX: number; startY: number; moved: boolean } | null>(
@@ -87,8 +89,6 @@ export function UpfitBuilder({
   const renumber = (arr: UpfitPin[]): UpfitPin[] =>
     arr.map((p, idx) => ({ ...p, number: idx + 1 }));
 
-  // Convert a client (mouse) coordinate into a fractional 0..1 position
-  // inside the image box.
   const toFractional = (clientX: number, clientY: number) => {
     const box = boxRef.current;
     if (!box) return null;
@@ -116,6 +116,7 @@ export function UpfitBuilder({
         partId: pendingSelection.partId,
         partSku: pendingSelection.partSku,
         caption: pendingCaption.trim() || undefined,
+        shape: pendingShape,
         size: pendingSize,
         colorScheme: pendingColorScheme,
         orientation: pendingOrientation,
@@ -178,6 +179,19 @@ export function UpfitBuilder({
       }
     });
   };
+
+  // Render the color dropdown's options grouped by category so the
+  // 40-some schemes don't form one giant flat list.
+  const renderColorOptions = () =>
+    colorGroups.map((g) => (
+      <optgroup key={g.group} label={g.label}>
+        {g.keys.map((k) => (
+          <option key={k} value={k}>
+            {COLOR_SCHEMES[k].label}
+          </option>
+        ))}
+      </optgroup>
+    ));
 
   return (
     <div className="space-y-4">
@@ -255,7 +269,18 @@ export function UpfitBuilder({
         </div>
 
         {/* Shape controls — what the next placed pin will look like. */}
-        <div className="grid grid-cols-2 md:grid-cols-[1fr_1fr_1fr_1fr] gap-3 items-end pt-2 border-t border-white/5">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 items-end pt-2 border-t border-white/5">
+          <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
+            Shape
+            <select
+              value={pendingShape}
+              onChange={(e) => setPendingShape(e.target.value as UpfitPin["shape"])}
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+            >
+              <option value="rect">Rectangle</option>
+              <option value="circle">Circle</option>
+            </select>
+          </label>
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
             Color
             <select
@@ -263,11 +288,7 @@ export function UpfitBuilder({
               onChange={(e) => setPendingColorScheme(e.target.value)}
               className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
             >
-              {COLOR_SCHEME_ORDER.map((k) => (
-                <option key={k} value={k}>
-                  {COLOR_SCHEMES[k].label}
-                </option>
-              ))}
+              {renderColorOptions()}
             </select>
           </label>
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
@@ -292,6 +313,8 @@ export function UpfitBuilder({
                 setPendingOrientation(e.target.value as UpfitPin["orientation"])
               }
               className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-xs text-white font-body"
+              disabled={pendingShape === "circle"}
+              title={pendingShape === "circle" ? "Orientation doesn't apply to circles" : undefined}
             >
               <option value="horizontal">Horizontal</option>
               <option value="vertical">Vertical</option>
@@ -312,6 +335,7 @@ export function UpfitBuilder({
         <div className="flex items-center gap-3 text-[10px] font-body text-zinc-400 uppercase tracking-wider">
           <span>Preview:</span>
           <PinPreview
+            shape={pendingShape ?? "rect"}
             colorScheme={pendingColorScheme}
             size={pendingSize ?? "medium"}
             orientation={pendingOrientation ?? "horizontal"}
@@ -408,16 +432,14 @@ export function UpfitBuilder({
                     }`}
                   >
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-zinc-400 w-4 text-center">
-                        {pin.number}
-                      </span>
                       <PinPreview
+                        shape={pin.shape ?? "rect"}
                         colorScheme={pin.colorScheme ?? pin.color ?? "red_white"}
                         size={pin.size ?? "medium"}
                         orientation={pin.orientation ?? "horizontal"}
                       />
                       <span className="text-[11px] text-zinc-300 font-body flex-1 truncate">
-                        {pin.label}
+                        {pin.caption?.trim() || pin.label}
                       </span>
                       <button
                         type="button"
@@ -428,16 +450,30 @@ export function UpfitBuilder({
                       </button>
                     </div>
 
-                    <div className="mt-2 grid grid-cols-3 gap-1.5">
+                    <div className="mt-2 grid grid-cols-2 gap-1.5">
+                      <select
+                        value={pin.shape ?? "rect"}
+                        onChange={(e) =>
+                          updatePin(pin.id, { shape: e.target.value as UpfitPin["shape"] })
+                        }
+                        className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body"
+                      >
+                        <option value="rect">Rectangle</option>
+                        <option value="circle">Circle</option>
+                      </select>
                       <select
                         value={pin.colorScheme ?? "red_white"}
                         onChange={(e) => updatePin(pin.id, { colorScheme: e.target.value })}
                         className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body"
                       >
-                        {COLOR_SCHEME_ORDER.map((k) => (
-                          <option key={k} value={k}>
-                            {COLOR_SCHEMES[k].label}
-                          </option>
+                        {colorGroups.map((g) => (
+                          <optgroup key={g.group} label={g.label}>
+                            {g.keys.map((k) => (
+                              <option key={k} value={k}>
+                                {COLOR_SCHEMES[k].label}
+                              </option>
+                            ))}
+                          </optgroup>
                         ))}
                       </select>
                       <select
@@ -460,7 +496,8 @@ export function UpfitBuilder({
                             orientation: e.target.value as UpfitPin["orientation"],
                           })
                         }
-                        className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body"
+                        disabled={(pin.shape ?? "rect") === "circle"}
+                        className="bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white font-body disabled:opacity-50"
                       >
                         <option value="horizontal">Horizontal</option>
                         <option value="vertical">Vertical</option>
@@ -506,10 +543,12 @@ export function UpfitBuilder({
 // Small inline preview of a pin — the same shape rendering logic the
 // diagram uses, just sized to fit in a sidebar row.
 function PinPreview({
+  shape,
   colorScheme,
   size,
   orientation,
 }: {
+  shape: NonNullable<UpfitPin["shape"]>;
   colorScheme: string;
   size: NonNullable<UpfitPin["size"]>;
   orientation: NonNullable<UpfitPin["orientation"]>;
@@ -520,16 +559,21 @@ function PinPreview({
   // against the rendered image, this preview just shows the shape.
   const long = sz.key === "strip" ? 56 : sz.key === "large" ? 28 : sz.key === "small" ? 14 : 20;
   const short = sz.key === "strip" ? 10 : sz.key === "large" ? 14 : sz.key === "small" ? 8 : 11;
-  const w = orientation === "horizontal" ? long : short;
-  const h = orientation === "horizontal" ? short : long;
+  // Circles ignore orientation and use the long dimension as diameter.
+  const w = shape === "circle" ? long : orientation === "horizontal" ? long : short;
+  const h = shape === "circle" ? long : orientation === "horizontal" ? short : long;
   return (
     <span
-      className="inline-block border border-black/70 shrink-0"
-      style={{ width: w, height: h }}
+      className="inline-block border border-black/70 shrink-0 overflow-hidden"
+      style={{
+        width: w,
+        height: h,
+        borderRadius: shape === "circle" ? "50%" : undefined,
+      }}
     >
       <span
         className="flex w-full h-full"
-        style={{ flexDirection: orientation === "horizontal" ? "row" : "column" }}
+        style={{ flexDirection: orientation === "horizontal" || shape === "circle" ? "row" : "column" }}
       >
         {scheme.segments.map((c, i) => (
           <span key={i} style={{ flex: 1, backgroundColor: c }} />
@@ -539,9 +583,10 @@ function PinPreview({
   );
 }
 
-// A single pin placed on the diagram — segmented rectangle + number
-// badge + caption text rendered below. All sizing is relative so the
-// pin looks consistent in the editor and prints identically in the PDF.
+// A single pin placed on the diagram — segmented rectangle or circle +
+// caption text rendered below. All sizing is relative so the pin looks
+// consistent in the editor and prints identically in the PDF. No
+// number rendered on the pin itself; the caption is the identifier.
 function PlacedPin({
   pin,
   isActive,
@@ -557,8 +602,15 @@ function PlacedPin({
 }) {
   const scheme = getColorScheme(pin.colorScheme);
   const sz = getPinSize(pin.size);
-  const widthPct = (pin.orientation === "vertical" ? sz.heightFrac : sz.widthFrac) * 100;
-  const heightPct = (pin.orientation === "vertical" ? sz.widthFrac : sz.heightFrac) * 100;
+  const isCircle = pin.shape === "circle";
+  // Circles use widthFrac for both dimensions (uniform diameter, ignores
+  // orientation). Rectangles swap dimensions for vertical orientation.
+  const widthPct = isCircle
+    ? sz.widthFrac * 100
+    : (pin.orientation === "vertical" ? sz.heightFrac : sz.widthFrac) * 100;
+  const heightPct = isCircle
+    ? sz.widthFrac * 100
+    : (pin.orientation === "vertical" ? sz.widthFrac : sz.heightFrac) * 100;
 
   return (
     <button
@@ -567,7 +619,7 @@ function PlacedPin({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onClick={(e) => e.stopPropagation()}
-      className="absolute -translate-x-1/2 -translate-y-1/2 p-0 m-0 border border-black bg-transparent text-[0] focus:outline-none"
+      className="absolute -translate-x-1/2 -translate-y-1/2 p-0 m-0 border border-black bg-transparent text-[0] focus:outline-none overflow-hidden"
       style={{
         left: `${pin.x * 100}%`,
         top: `${pin.y * 100}%`,
@@ -575,25 +627,21 @@ function PlacedPin({
         height: `${heightPct}%`,
         cursor: "grab",
         touchAction: "none",
+        borderRadius: isCircle ? "50%" : undefined,
         boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
       }}
       title={pin.caption || pin.label}
     >
       <span
         className="flex w-full h-full"
-        style={{ flexDirection: pin.orientation === "vertical" ? "column" : "row" }}
+        style={{
+          flexDirection:
+            isCircle || pin.orientation !== "vertical" ? "row" : "column",
+        }}
       >
         {scheme.segments.map((c, i) => (
           <span key={i} style={{ flex: 1, backgroundColor: c }} />
         ))}
-      </span>
-      {/* Number badge — small dark dot in the corner so techs can still
-          cross-reference the equipment table. */}
-      <span
-        className="absolute -top-2 -left-2 inline-flex items-center justify-center text-[9px] font-bold text-white bg-black rounded-full w-4 h-4"
-        style={{ lineHeight: 1 }}
-      >
-        {pin.number}
       </span>
       {/* Caption rendered below the pin in a small white-background pill
           so it stays legible against any vehicle color. */}

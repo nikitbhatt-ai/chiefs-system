@@ -140,69 +140,112 @@ export const PIN_SIZE_ORDER: PinSizeKey[] = ["small", "medium", "large", "strip"
 // --- Color schemes --------------------------------------------------------
 //
 // A color scheme is one or more segments rendered side-by-side across the
-// rectangle's long axis. Solid colors are a single segment; split colors
-// are two; the multi-segment schemes mimic the alternating red/white
-// pattern of a tracer/lightbar.
+// rectangle's long axis (or top → bottom when oriented vertically).
+// Solid colors are a single segment; splits are two; trios are three;
+// and the multi-segment counts (3 / 6 / 9 / 10 / 12) mimic the
+// alternating pattern of a tracer / lightbar / hideaway array.
+
+export type ColorSchemeGroup = "solid" | "split" | "trio" | "count";
 
 export type ColorScheme = {
   key: string;
   label: string;
+  group: ColorSchemeGroup;
   // Ordered segments rendered left → right (or top → bottom when vertical).
   segments: string[];
 };
 
+// Canonical color tokens reused across schemes. Centralized so future
+// branding tweaks (slightly darker red, etc.) propagate everywhere.
+const RED = "#dc2626";
+const WHITE = "#ffffff";
+const BLUE = "#1d4ed8";
+const AMBER = "#f59e0b";
+const GREEN = "#16a34a";
+
+// Build a length-N segment list by cycling through `pattern`. Used for
+// the multi-segment count schemes (R/W ×N, R/W/B ×N, …) so we don't
+// hand-write the longer arrays.
+function cycle(pattern: string[], count: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < count; i++) out.push(pattern[i % pattern.length]);
+  return out;
+}
+
+// Per the user spec: counts of 3, 6, 9, 10, 12. 10 is included for two-
+// color patterns where it makes sense; trio counts only use multiples
+// of 3 (3, 6, 9, 12) since an off-by-one trio looks wrong on a build
+// sheet.
+const TWO_COLOR_COUNTS = [3, 4, 6, 9, 10, 12] as const; // 4 kept for backward-compat with existing pins
+const TRIO_COUNTS = [3, 6, 9, 12] as const;
+
+function makeCountSchemes(
+  prefix: string,
+  patternLabel: string,
+  pattern: string[],
+  counts: readonly number[],
+  group: ColorSchemeGroup,
+): Record<string, ColorScheme> {
+  const out: Record<string, ColorScheme> = {};
+  for (const n of counts) {
+    const key = `${prefix}_${n}`;
+    out[key] = {
+      key,
+      label: `${patternLabel} × ${n}`,
+      group,
+      segments: cycle(pattern, n),
+    };
+  }
+  return out;
+}
+
 export const COLOR_SCHEMES: Record<string, ColorScheme> = {
   // --- Solids ---
-  red: { key: "red", label: "Red", segments: ["#dc2626"] },
-  white: { key: "white", label: "White", segments: ["#ffffff"] },
-  blue: { key: "blue", label: "Blue", segments: ["#1d4ed8"] },
-  amber: { key: "amber", label: "Amber", segments: ["#f59e0b"] },
-  green: { key: "green", label: "Green", segments: ["#16a34a"] },
-  // --- 50/50 splits (the most common law-enforcement combos) ---
-  red_white: { key: "red_white", label: "Red / White", segments: ["#dc2626", "#ffffff"] },
-  blue_white: { key: "blue_white", label: "Blue / White", segments: ["#1d4ed8", "#ffffff"] },
-  amber_white: { key: "amber_white", label: "Amber / White", segments: ["#f59e0b", "#ffffff"] },
-  red_blue: { key: "red_blue", label: "Red / Blue", segments: ["#dc2626", "#1d4ed8"] },
-  green_white: { key: "green_white", label: "Green / White", segments: ["#16a34a", "#ffffff"] },
-  // --- Multi-segment tracer / lightbar patterns ---
-  rwrw_4: {
-    key: "rwrw_4",
-    label: "Red / White × 4",
-    segments: ["#dc2626", "#ffffff", "#dc2626", "#ffffff"],
-  },
-  rwrw_6: {
-    key: "rwrw_6",
-    label: "Red / White × 6",
-    segments: ["#dc2626", "#ffffff", "#dc2626", "#ffffff", "#dc2626", "#ffffff"],
-  },
-  bwbw_4: {
-    key: "bwbw_4",
-    label: "Blue / White × 4",
-    segments: ["#1d4ed8", "#ffffff", "#1d4ed8", "#ffffff"],
-  },
-  rbrb_4: {
-    key: "rbrb_4",
-    label: "Red / Blue × 4",
-    segments: ["#dc2626", "#1d4ed8", "#dc2626", "#1d4ed8"],
-  },
+  red: { key: "red", label: "Red", group: "solid", segments: [RED] },
+  white: { key: "white", label: "White", group: "solid", segments: [WHITE] },
+  blue: { key: "blue", label: "Blue", group: "solid", segments: [BLUE] },
+  amber: { key: "amber", label: "Amber", group: "solid", segments: [AMBER] },
+  green: { key: "green", label: "Green", group: "solid", segments: [GREEN] },
+  // --- 50/50 splits ---
+  red_white: { key: "red_white", label: "Red / White", group: "split", segments: [RED, WHITE] },
+  blue_white: { key: "blue_white", label: "Blue / White", group: "split", segments: [BLUE, WHITE] },
+  amber_white: { key: "amber_white", label: "Amber / White", group: "split", segments: [AMBER, WHITE] },
+  red_blue: { key: "red_blue", label: "Red / Blue", group: "split", segments: [RED, BLUE] },
+  green_white: { key: "green_white", label: "Green / White", group: "split", segments: [GREEN, WHITE] },
+  // --- Trios (3-color combos) ---
+  rwb: { key: "rwb", label: "Red / White / Blue", group: "trio", segments: [RED, WHITE, BLUE] },
+  rwa: { key: "rwa", label: "Red / White / Amber", group: "trio", segments: [RED, WHITE, AMBER] },
+  bwa: { key: "bwa", label: "Blue / White / Amber", group: "trio", segments: [BLUE, WHITE, AMBER] },
+  // --- Multi-segment counts ---
+  ...makeCountSchemes("rwrw", "Red / White", [RED, WHITE], TWO_COLOR_COUNTS, "count"),
+  ...makeCountSchemes("bwbw", "Blue / White", [BLUE, WHITE], TWO_COLOR_COUNTS, "count"),
+  ...makeCountSchemes("rbrb", "Red / Blue", [RED, BLUE], TWO_COLOR_COUNTS, "count"),
+  ...makeCountSchemes("rwb", "Red / White / Blue", [RED, WHITE, BLUE], TRIO_COUNTS, "count"),
 };
 
-export const COLOR_SCHEME_ORDER = [
-  "red",
-  "white",
-  "blue",
-  "amber",
-  "green",
-  "red_white",
-  "blue_white",
-  "amber_white",
-  "red_blue",
-  "green_white",
-  "rwrw_4",
-  "rwrw_6",
-  "bwbw_4",
-  "rbrb_4",
-];
+// Ordered list used to render the dropdown. Generated from the catalog
+// so adding a scheme above automatically picks up here.
+export const COLOR_SCHEME_ORDER: string[] = Object.keys(COLOR_SCHEMES);
+
+export const COLOR_GROUP_LABELS: Record<ColorSchemeGroup, string> = {
+  solid: "Solid",
+  split: "Split (50/50)",
+  trio: "Trio",
+  count: "Multi-segment count",
+};
+
+export const COLOR_GROUP_ORDER: ColorSchemeGroup[] = ["solid", "split", "trio", "count"];
+
+// Return scheme keys grouped, in dropdown order. Used by both the
+// editor (for HTML <optgroup>s) and any consumer that wants a
+// category-aware listing.
+export function colorSchemesByGroup(): { group: ColorSchemeGroup; label: string; keys: string[] }[] {
+  return COLOR_GROUP_ORDER.map((group) => ({
+    group,
+    label: COLOR_GROUP_LABELS[group],
+    keys: COLOR_SCHEME_ORDER.filter((k) => COLOR_SCHEMES[k].group === group),
+  }));
+}
 
 export function getColorScheme(key: string | undefined | null): ColorScheme {
   if (key && COLOR_SCHEMES[key]) return COLOR_SCHEMES[key];
