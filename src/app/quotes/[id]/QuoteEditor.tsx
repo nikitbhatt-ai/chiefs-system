@@ -247,64 +247,121 @@ export function QuoteEditor({
             </button>
           </div>
         </div>
-        <div className="divide-y divide-white/5">
-          <div className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
-            <span className="col-span-1">Order</span>
-            <span className="col-span-3">Description</span>
-            <span className="col-span-1 text-right">Qty</span>
-            <span className="col-span-2 text-right">Unit price</span>
-            <span className="col-span-2 text-right">Discount</span>
-            <span className="col-span-2">Discount type</span>
-            <span className="col-span-1"></span>
-          </div>
-          {lines.length === 0 ? (
-            <div className="px-4 py-8 text-center text-xs text-zinc-500 font-body">
-              No line items yet. Add items, labor, or fees above.
-            </div>
-          ) : (
-            lines.map((l, i) =>
-              l.kind === "item" ? (
-                <div
-                  key={i}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", String(i));
-                    setDraggingIndex(i);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (dragOverIndex !== i) setDragOverIndex(i);
-                  }}
-                  onDragLeave={() => {
-                    if (dragOverIndex === i) setDragOverIndex(null);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = Number(e.dataTransfer.getData("text/plain"));
-                    if (!Number.isNaN(from)) moveLine(from, i);
-                    setDraggingIndex(null);
-                    setDragOverIndex(null);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingIndex(null);
-                    setDragOverIndex(null);
-                  }}
-                  className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body transition-colors ${
-                    draggingIndex === i ? "opacity-40" : ""
-                  } ${
-                    dragOverIndex === i && draggingIndex !== i
-                      ? "bg-amber-500/10 ring-1 ring-amber-500/40"
-                      : ""
-                  }`}
-                >
-                  <ReorderControls
-                    index={i}
-                    count={lines.length}
-                    onMove={moveLine}
-                  />
-                  <div className="col-span-3">
+        {(() => {
+          // Group line indices by kind, preserving their position in the
+          // flat `lines` array. Rendering walks each section in array
+          // order so users see Parts → Labor → Fees with clear dividers,
+          // even though the underlying storage stays flat (and stable
+          // for moveLine).
+          const itemIdx: number[] = [];
+          const laborIdx: number[] = [];
+          const feeIdx: number[] = [];
+          lines.forEach((l, i) => {
+            if (l.kind === "item") itemIdx.push(i);
+            else if (l.kind === "labor") laborIdx.push(i);
+            else feeIdx.push(i);
+          });
+
+          // For a given flat index `i` in a section list, return the
+          // flat-index of its same-kind neighbor above/below (or null
+          // at the section edge). The arrow buttons and drag-drop both
+          // consult these so reorder never crosses section lines.
+          const targets = (sectionList: number[], i: number) => {
+            const pos = sectionList.indexOf(i);
+            return {
+              upTo: pos > 0 ? sectionList[pos - 1] : null,
+              downTo: pos >= 0 && pos < sectionList.length - 1 ? sectionList[pos + 1] : null,
+            };
+          };
+
+          // Drop handler shared by every row. Rejects cross-kind drops
+          // so a labor row can't be dragged into the middle of parts.
+          const rowDropHandlers = (i: number) => ({
+            onDragStart: (e: React.DragEvent<HTMLDivElement>) => {
+              e.dataTransfer.effectAllowed = "move";
+              e.dataTransfer.setData("text/plain", String(i));
+              setDraggingIndex(i);
+            },
+            onDragOver: (e: React.DragEvent<HTMLDivElement>) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dragOverIndex !== i) setDragOverIndex(i);
+            },
+            onDragLeave: () => {
+              if (dragOverIndex === i) setDragOverIndex(null);
+            },
+            onDrop: (e: React.DragEvent<HTMLDivElement>) => {
+              e.preventDefault();
+              const from = Number(e.dataTransfer.getData("text/plain"));
+              if (!Number.isNaN(from) && lines[from]?.kind === lines[i]?.kind) {
+                moveLine(from, i);
+              }
+              setDraggingIndex(null);
+              setDragOverIndex(null);
+            },
+            onDragEnd: () => {
+              setDraggingIndex(null);
+              setDragOverIndex(null);
+            },
+          });
+
+          if (lines.length === 0) {
+            return (
+              <div className="px-4 py-8 text-center text-xs text-zinc-500 font-body">
+                No line items yet. Add items, labor, or fees above.
+              </div>
+            );
+          }
+
+          return (
+            <div>
+              {/* === Parts & Items === */}
+              <div className="px-4 py-2 bg-zinc-800/50 border-y border-white/10 text-[11px] uppercase tracking-wider text-zinc-300 font-body font-semibold flex justify-between">
+                <span>Parts &amp; Items</span>
+                <span className="text-zinc-500 normal-case tracking-normal">
+                  {itemIdx.length} {itemIdx.length === 1 ? "row" : "rows"}
+                </span>
+              </div>
+              {itemIdx.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-zinc-500 font-body italic">
+                  No parts on this quote yet.
+                </div>
+              ) : (
+                <>
+                  <div className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
+                    <span className="col-span-1">Order</span>
+                    <span className="col-span-3">Description</span>
+                    <span className="col-span-1 text-right">Qty</span>
+                    <span className="col-span-2 text-right">Unit price</span>
+                    <span className="col-span-2 text-right">Discount</span>
+                    <span className="col-span-2">Discount type</span>
+                    <span className="col-span-1"></span>
+                  </div>
+                  <div className="divide-y divide-white/5">
+                    {itemIdx.map((i) => {
+                      const l = lines[i];
+                      if (l.kind !== "item") return null;
+                      const { upTo, downTo } = targets(itemIdx, i);
+                      return (
+                        <div
+                          key={i}
+                          draggable
+                          {...rowDropHandlers(i)}
+                          className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body transition-colors ${
+                            draggingIndex === i ? "opacity-40" : ""
+                          } ${
+                            dragOverIndex === i && draggingIndex !== i
+                              ? "bg-amber-500/10 ring-1 ring-amber-500/40"
+                              : ""
+                          }`}
+                        >
+                          <ReorderControls
+                            fromIndex={i}
+                            upTo={upTo}
+                            downTo={downTo}
+                            onMove={moveLine}
+                          />
+                          <div className="col-span-3">
                     <PartSearchCombobox
                       mode="inline"
                       value={l.description}
@@ -383,156 +440,176 @@ export function QuoteEditor({
                     })()}
                   </div>
                 </div>
-              ) : l.kind === "labor" ? (
-                <div
-                  key={i}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", String(i));
-                    setDraggingIndex(i);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (dragOverIndex !== i) setDragOverIndex(i);
-                  }}
-                  onDragLeave={() => {
-                    if (dragOverIndex === i) setDragOverIndex(null);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = Number(e.dataTransfer.getData("text/plain"));
-                    if (!Number.isNaN(from)) moveLine(from, i);
-                    setDraggingIndex(null);
-                    setDragOverIndex(null);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingIndex(null);
-                    setDragOverIndex(null);
-                  }}
-                  className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-blue-500/5 transition-colors ${
-                    draggingIndex === i ? "opacity-40" : ""
-                  } ${
-                    dragOverIndex === i && draggingIndex !== i
-                      ? "ring-1 ring-amber-500/40"
-                      : ""
-                  }`}
-                >
-                  <ReorderControls
-                    index={i}
-                    count={lines.length}
-                    onMove={moveLine}
-                  />
-                  <input
-                    value={l.description}
-                    onChange={(e) => updateLine(i, { description: e.target.value })}
-                    placeholder="Labor description (e.g. Install lightbar)"
-                    className="col-span-5 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.25"
-                    value={l.hours}
-                    onChange={(e) => updateLine(i, { hours: Number(e.target.value) })}
-                    placeholder="Hours"
-                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={l.rate}
-                    onChange={(e) => updateLine(i, { rate: Number(e.target.value) })}
-                    placeholder="Rate / hr"
-                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
-                  />
-                  <span className="col-span-1 text-right text-[11px] text-white font-semibold">
-                    {fmt((l.hours || 0) * (l.rate || 0))}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeLine(i)}
-                    className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
-                  <div className="col-span-12 text-right text-[10px] uppercase tracking-wider text-blue-300/70">
-                    Labor
+                      );
+                    })}
                   </div>
+                </>
+              )}
+
+              {/* === Labor === */}
+              <div className="px-4 py-2 mt-3 bg-blue-500/15 border-y border-blue-500/30 text-[11px] uppercase tracking-wider text-blue-200 font-body font-semibold flex justify-between">
+                <span>Labor</span>
+                <span className="text-blue-300/60 normal-case tracking-normal">
+                  {laborIdx.length} {laborIdx.length === 1 ? "row" : "rows"}
+                </span>
+              </div>
+              {laborIdx.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-zinc-500 font-body italic">
+                  No labor on this quote yet.
                 </div>
               ) : (
-                <div
-                  key={i}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = "move";
-                    e.dataTransfer.setData("text/plain", String(i));
-                    setDraggingIndex(i);
-                  }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                    if (dragOverIndex !== i) setDragOverIndex(i);
-                  }}
-                  onDragLeave={() => {
-                    if (dragOverIndex === i) setDragOverIndex(null);
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = Number(e.dataTransfer.getData("text/plain"));
-                    if (!Number.isNaN(from)) moveLine(from, i);
-                    setDraggingIndex(null);
-                    setDragOverIndex(null);
-                  }}
-                  onDragEnd={() => {
-                    setDraggingIndex(null);
-                    setDragOverIndex(null);
-                  }}
-                  className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-amber-500/5 transition-colors ${
-                    draggingIndex === i ? "opacity-40" : ""
-                  } ${
-                    dragOverIndex === i && draggingIndex !== i
-                      ? "ring-1 ring-amber-500/40"
-                      : ""
-                  }`}
-                >
-                  <ReorderControls
-                    index={i}
-                    count={lines.length}
-                    onMove={moveLine}
-                  />
-                  <input
-                    value={l.description}
-                    onChange={(e) => updateLine(i, { description: e.target.value })}
-                    placeholder="Fee description"
-                    className="col-span-6 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={l.amount}
-                    onChange={(e) => updateLine(i, { amount: Number(e.target.value) })}
-                    placeholder="Amount"
-                    className="col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
-                  />
-                  <span className="col-span-1 text-[10px] uppercase text-amber-400 tracking-wider">
-                    {l.fixed ? "Fixed" : "Custom"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => removeLine(i)}
-                    className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
-                  >
-                    Remove
-                  </button>
+                <>
+                  <div className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
+                    <span className="col-span-1">Order</span>
+                    <span className="col-span-5">Description</span>
+                    <span className="col-span-2 text-right">Hours</span>
+                    <span className="col-span-2 text-right">Rate / hr</span>
+                    <span className="col-span-1 text-right">Total</span>
+                    <span className="col-span-1"></span>
+                  </div>
+                  <div className="divide-y divide-white/5">
+                    {laborIdx.map((i) => {
+                      const l = lines[i];
+                      if (l.kind !== "labor") return null;
+                      const { upTo, downTo } = targets(laborIdx, i);
+                      return (
+                        <div
+                          key={i}
+                          draggable
+                          {...rowDropHandlers(i)}
+                          className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-blue-500/5 transition-colors ${
+                            draggingIndex === i ? "opacity-40" : ""
+                          } ${
+                            dragOverIndex === i && draggingIndex !== i
+                              ? "ring-1 ring-amber-500/40"
+                              : ""
+                          }`}
+                        >
+                          <ReorderControls
+                            fromIndex={i}
+                            upTo={upTo}
+                            downTo={downTo}
+                            onMove={moveLine}
+                          />
+                          <input
+                            value={l.description}
+                            onChange={(e) => updateLine(i, { description: e.target.value })}
+                            placeholder="Labor description (e.g. Install lightbar)"
+                            className="col-span-5 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            value={l.hours}
+                            onChange={(e) => updateLine(i, { hours: Number(e.target.value) })}
+                            placeholder="Hours"
+                            className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={l.rate}
+                            onChange={(e) => updateLine(i, { rate: Number(e.target.value) })}
+                            placeholder="Rate / hr"
+                            className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                          />
+                          <span className="col-span-1 text-right text-[11px] text-white font-semibold">
+                            {fmt((l.hours || 0) * (l.rate || 0))}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeLine(i)}
+                            className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              {/* === Fees & Add-ons === */}
+              <div className="px-4 py-2 mt-3 bg-amber-500/15 border-y border-amber-500/30 text-[11px] uppercase tracking-wider text-amber-200 font-body font-semibold flex justify-between">
+                <span>Fees &amp; Add-ons</span>
+                <span className="text-amber-300/60 normal-case tracking-normal">
+                  {feeIdx.length} {feeIdx.length === 1 ? "row" : "rows"}
+                </span>
+              </div>
+              {feeIdx.length === 0 ? (
+                <div className="px-4 py-3 text-xs text-zinc-500 font-body italic">
+                  No fees on this quote yet.
                 </div>
-              ),
-            )
-          )}
-        </div>
+              ) : (
+                <>
+                  <div className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
+                    <span className="col-span-1">Order</span>
+                    <span className="col-span-6">Description</span>
+                    <span className="col-span-3 text-right">Amount</span>
+                    <span className="col-span-1">Type</span>
+                    <span className="col-span-1"></span>
+                  </div>
+                  <div className="divide-y divide-white/5">
+                    {feeIdx.map((i) => {
+                      const l = lines[i];
+                      if (l.kind !== "fee") return null;
+                      const { upTo, downTo } = targets(feeIdx, i);
+                      return (
+                        <div
+                          key={i}
+                          draggable
+                          {...rowDropHandlers(i)}
+                          className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-amber-500/5 transition-colors ${
+                            draggingIndex === i ? "opacity-40" : ""
+                          } ${
+                            dragOverIndex === i && draggingIndex !== i
+                              ? "ring-1 ring-amber-500/40"
+                              : ""
+                          }`}
+                        >
+                          <ReorderControls
+                            fromIndex={i}
+                            upTo={upTo}
+                            downTo={downTo}
+                            onMove={moveLine}
+                          />
+                          <input
+                            value={l.description}
+                            onChange={(e) => updateLine(i, { description: e.target.value })}
+                            placeholder="Fee description"
+                            className="col-span-6 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                          />
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={l.amount}
+                            onChange={(e) => updateLine(i, { amount: Number(e.target.value) })}
+                            placeholder="Amount"
+                            className="col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                          />
+                          <span className="col-span-1 text-[10px] uppercase text-amber-400 tracking-wider">
+                            {l.fixed ? "Fixed" : "Custom"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => removeLine(i)}
+                            className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -610,20 +687,27 @@ function Row({ label, value, big }: { label: string; value: string; big?: boolea
 // parent is `draggable`, this is just the visual grip) plus up / down
 // arrow buttons for keyboard and mobile users where HTML5 DnD is
 // awkward. Occupies col-span-1 of the row's 12-column grid.
+//
+// `upTo` / `downTo` are pre-resolved swap targets in the flat lines
+// array (or null when this row is at the start/end of its section).
+// The parent computes them so reorder is restricted to within a
+// section — labor never swaps with parts and vice versa.
 function ReorderControls({
-  index,
-  count,
+  upTo,
+  downTo,
   onMove,
+  fromIndex,
 }: {
-  index: number;
-  count: number;
+  upTo: number | null;
+  downTo: number | null;
   onMove: (from: number, to: number) => void;
+  fromIndex: number;
 }) {
   return (
     <div className="col-span-1 flex items-center gap-1">
       <span
         aria-hidden
-        title="Drag to reorder"
+        title="Drag to reorder within this section"
         className="text-zinc-500 select-none text-base leading-none"
         style={{ cursor: "grab" }}
       >
@@ -633,8 +717,8 @@ function ReorderControls({
         <button
           type="button"
           aria-label="Move up"
-          disabled={index === 0}
-          onClick={() => onMove(index, index - 1)}
+          disabled={upTo === null}
+          onClick={() => upTo !== null && onMove(fromIndex, upTo)}
           className="text-[9px] text-zinc-500 hover:text-white disabled:opacity-30 leading-none px-0.5"
         >
           ▲
@@ -642,8 +726,8 @@ function ReorderControls({
         <button
           type="button"
           aria-label="Move down"
-          disabled={index === count - 1}
-          onClick={() => onMove(index, index + 1)}
+          disabled={downTo === null}
+          onClick={() => downTo !== null && onMove(fromIndex, downTo)}
           className="text-[9px] text-zinc-500 hover:text-white disabled:opacity-30 leading-none px-0.5"
         >
           ▼
