@@ -18,6 +18,14 @@ export type QuoteLine =
       description: string;
       amount: number;
       fixed: boolean;
+    }
+  | {
+      // Labor: hours × rate. Rolls into the quote subtotal (taxable
+      // base) the same way parts do, so the tax calculation just works.
+      kind: "labor";
+      description: string;
+      hours: number;
+      rate: number;
     };
 
 function fmt(n: number) {
@@ -61,6 +69,7 @@ export function QuoteEditor({
     let subtotal = 0;
     let discountTotal = 0;
     let feeTotal = 0;
+    let laborTotal = 0;
     for (const l of lines) {
       if (l.kind === "item") {
         const gross = (l.quantity || 0) * (l.unitPrice || 0);
@@ -70,14 +79,16 @@ export function QuoteEditor({
             : l.discount || 0;
         subtotal += gross;
         discountTotal += disc;
+      } else if (l.kind === "labor") {
+        laborTotal += (l.hours || 0) * (l.rate || 0);
       } else {
         feeTotal += l.amount || 0;
       }
     }
-    const taxBase = subtotal - discountTotal + feeTotal;
+    const taxBase = subtotal - discountTotal + feeTotal + laborTotal;
     const tax = taxBase * ((Number(taxRate) || 0) / 100);
     const grand = taxBase + tax;
-    return { subtotal, discountTotal, feeTotal, tax, grand };
+    return { subtotal, discountTotal, feeTotal, laborTotal, tax, grand };
   }, [lines, taxRate]);
 
   function updateLine(i: number, patch: Partial<QuoteLine>) {
@@ -147,6 +158,12 @@ export function QuoteEditor({
     setLines((p) => [
       ...p,
       { kind: "fee", description: fixed ? "Fixed fee" : "Custom fee", amount: 0, fixed },
+    ]);
+  }
+  function addLabor() {
+    setLines((p) => [
+      ...p,
+      { kind: "labor", description: "Labor", hours: 0, rate: 0 },
     ]);
   }
 
@@ -221,6 +238,13 @@ export function QuoteEditor({
             >
               + Fixed fee
             </button>
+            <button
+              type="button"
+              onClick={addLabor}
+              className="text-[11px] font-body text-amber-400 hover:text-amber-300"
+            >
+              + Labor
+            </button>
           </div>
         </div>
         <div className="divide-y divide-white/5">
@@ -235,7 +259,7 @@ export function QuoteEditor({
           </div>
           {lines.length === 0 ? (
             <div className="px-4 py-8 text-center text-xs text-zinc-500 font-body">
-              No line items yet. Add items or fees above.
+              No line items yet. Add items, labor, or fees above.
             </div>
           ) : (
             lines.map((l, i) =>
@@ -297,9 +321,17 @@ export function QuoteEditor({
                   <input
                     type="number"
                     min="0"
-                    step="0.01"
+                    step="1"
                     value={l.quantity}
-                    onChange={(e) => updateLine(i, { quantity: Number(e.target.value) })}
+                    onChange={(e) =>
+                      // Force integer quantities — quote lines map to
+                      // discrete inventory units so fractional qtys are
+                      // never valid. Floor any decimal the browser lets
+                      // through (Number("1.5") -> 1).
+                      updateLine(i, {
+                        quantity: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      })
+                    }
                     placeholder="Qty"
                     className="col-span-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
                   />
@@ -349,6 +381,85 @@ export function QuoteEditor({
                           : l.discount || 0;
                       return `Line total: ${fmt(gross - disc)}`;
                     })()}
+                  </div>
+                </div>
+              ) : l.kind === "labor" ? (
+                <div
+                  key={i}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(i));
+                    setDraggingIndex(i);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dragOverIndex !== i) setDragOverIndex(i);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverIndex === i) setDragOverIndex(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = Number(e.dataTransfer.getData("text/plain"));
+                    if (!Number.isNaN(from)) moveLine(from, i);
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-blue-500/5 transition-colors ${
+                    draggingIndex === i ? "opacity-40" : ""
+                  } ${
+                    dragOverIndex === i && draggingIndex !== i
+                      ? "ring-1 ring-amber-500/40"
+                      : ""
+                  }`}
+                >
+                  <ReorderControls
+                    index={i}
+                    count={lines.length}
+                    onMove={moveLine}
+                  />
+                  <input
+                    value={l.description}
+                    onChange={(e) => updateLine(i, { description: e.target.value })}
+                    placeholder="Labor description (e.g. Install lightbar)"
+                    className="col-span-5 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.25"
+                    value={l.hours}
+                    onChange={(e) => updateLine(i, { hours: Number(e.target.value) })}
+                    placeholder="Hours"
+                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={l.rate}
+                    onChange={(e) => updateLine(i, { rate: Number(e.target.value) })}
+                    placeholder="Rate / hr"
+                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                  />
+                  <span className="col-span-1 text-right text-[11px] text-white font-semibold">
+                    {fmt((l.hours || 0) * (l.rate || 0))}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeLine(i)}
+                    className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
+                  >
+                    Remove
+                  </button>
+                  <div className="col-span-12 text-right text-[10px] uppercase tracking-wider text-blue-300/70">
+                    Labor
                   </div>
                 </div>
               ) : (
@@ -440,6 +551,7 @@ export function QuoteEditor({
         <div className="space-y-1.5 text-xs font-body">
           <Row label="Subtotal" value={fmt(totals.subtotal)} />
           <Row label="Discount" value={`− ${fmt(totals.discountTotal)}`} />
+          <Row label="Labor" value={fmt(totals.laborTotal)} />
           <Row label="Fees" value={fmt(totals.feeTotal)} />
           <Row label={`Tax (${Number(taxRate) || 0}%)`} value={fmt(totals.tax)} />
           <div className="border-t border-white/10 pt-2 mt-2">
