@@ -603,7 +603,20 @@ export type UpfitPin = {
   // Visual config. All optional with defaults handled by the renderer
   // so existing pins (circles) keep working.
   shape?: "rect" | "circle";
-  size?: "small" | "medium" | "large" | "strip";
+  size?:
+    | "small"
+    | "medium"
+    | "large"
+    | "strip_small"
+    | "strip_medium"
+    | "strip_large"
+    | "strip";
+  // Per-pin size override (0..1 fractions of the diagram, matching x/y).
+  // When set, the renderer uses these instead of the preset size's
+  // widthFrac/heightFrac so sales can fine-tune each pin by dragging a
+  // resize handle on the diagram.
+  widthFracOverride?: number;
+  heightFracOverride?: number;
   // Color scheme slug — solid color, 50/50 split, or multi-segment.
   // See COLOR_SCHEMES in src/lib/upfit/templates.ts.
   colorScheme?: string;
