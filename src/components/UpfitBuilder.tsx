@@ -557,18 +557,29 @@ function PinPreview({
   const sz = getPinSize(size);
   // Tiny sidebar scale — the live diagram uses the fractional values
   // against the rendered image, this preview just shows the shape.
-  const long = sz.key === "strip" ? 56 : sz.key === "large" ? 28 : sz.key === "small" ? 14 : 20;
-  const short = sz.key === "strip" ? 10 : sz.key === "large" ? 14 : sz.key === "small" ? 8 : 11;
+  const sidebarDims: Record<string, { long: number; short: number }> = {
+    small: { long: 12, short: 7 },
+    medium: { long: 18, short: 10 },
+    large: { long: 26, short: 13 },
+    strip_small: { long: 36, short: 9 },
+    strip_medium: { long: 56, short: 10 },
+    strip_large: { long: 76, short: 11 },
+    strip: { long: 56, short: 10 },
+  };
+  const { long, short } = sidebarDims[sz.key] ?? sidebarDims.medium;
   // Circles ignore orientation and use the long dimension as diameter.
   const w = shape === "circle" ? long : orientation === "horizontal" ? long : short;
   const h = shape === "circle" ? long : orientation === "horizontal" ? short : long;
+  // Subtle rounded corners on rectangles; circles are fully round.
+  const radius =
+    shape === "circle" ? "50%" : `${Math.max(1, Math.round(Math.min(w, h) * 0.25))}px`;
   return (
     <span
       className="inline-block border border-black/70 shrink-0 overflow-hidden"
       style={{
         width: w,
         height: h,
-        borderRadius: shape === "circle" ? "50%" : undefined,
+        borderRadius: radius,
       }}
     >
       <span
@@ -627,7 +638,10 @@ function PlacedPin({
         height: `${heightPct}%`,
         cursor: "grab",
         touchAction: "none",
-        borderRadius: isCircle ? "50%" : undefined,
+        // Rectangles get a subtle pill curve; circles are fully round.
+        // The radius is a fraction of the short axis so longer strips
+        // don't end up half-tube-shaped.
+        borderRadius: isCircle ? "50%" : `${Math.min(widthPct, heightPct) * 0.25}%`,
         boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
       }}
       title={pin.caption || pin.label}

@@ -603,7 +603,14 @@ export type UpfitPin = {
   // Visual config. All optional with defaults handled by the renderer
   // so existing pins (circles) keep working.
   shape?: "rect" | "circle";
-  size?: "small" | "medium" | "large" | "strip";
+  size?:
+    | "small"
+    | "medium"
+    | "large"
+    | "strip_small"
+    | "strip_medium"
+    | "strip_large"
+    | "strip";
   // Color scheme slug — solid color, 50/50 split, or multi-segment.
   // See COLOR_SCHEMES in src/lib/upfit/templates.ts.
   colorScheme?: string;

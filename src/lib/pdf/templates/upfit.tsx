@@ -102,7 +102,9 @@ function PinShape({ pin }: { pin: UpfitPin }) {
         marginTop: -height / 2,
         borderWidth: 0.6,
         borderColor: "#000000",
-        borderRadius: isCircle ? width / 2 : 0,
+        // Circles are fully round; rectangles get a subtle pill curve
+        // proportional to the short axis so long strips don't pinch.
+        borderRadius: isCircle ? width / 2 : Math.min(width, height) * 0.25,
         overflow: "hidden",
         flexDirection: segmentDir,
       }}

@@ -114,28 +114,53 @@ export function nextPinColor(existing: number): string {
 // horizontal pins; the renderer swaps width/height for `orientation =
 // "vertical"`.
 
-export type PinSizeKey = "small" | "medium" | "large" | "strip";
+export type PinSizeKey =
+  | "small"
+  | "medium"
+  | "large"
+  | "strip_small"
+  | "strip_medium"
+  | "strip_large"
+  // Legacy alias — older saved pins use plain "strip" before strip got
+  // its own three sizes. Resolved to "strip_medium" by getPinSize().
+  | "strip";
 
 export type PinSize = {
   key: PinSizeKey;
   label: string;
   // Long-axis width as a fraction of the diagram's rendered width.
-  // 0.025 ≈ 25px on a 1000px-wide diagram.
+  // 0.020 ≈ 20px on a 1000px-wide diagram.
   widthFrac: number;
   // Short-axis height as a fraction of the diagram's rendered height.
   heightFrac: number;
 };
 
+// Tuned smaller than the original catalog — the prior values printed
+// as bulky blobs over the smaller details on the vehicle blueprints.
+// Strip now has its own three variants for short rocker rails, full
+// rocker rails, and full hidden-tracer arrays.
 export const PIN_SIZES: Record<PinSizeKey, PinSize> = {
-  small: { key: "small", label: "Small", widthFrac: 0.024, heightFrac: 0.018 },
-  medium: { key: "medium", label: "Medium", widthFrac: 0.038, heightFrac: 0.024 },
-  large: { key: "large", label: "Large", widthFrac: 0.060, heightFrac: 0.032 },
-  // Strip = lightbar / tracer array — the long thin one in the rocker
-  // panel on the OnPoint reference.
-  strip: { key: "strip", label: "Strip / Tracer", widthFrac: 0.260, heightFrac: 0.022 },
+  small: { key: "small", label: "Small", widthFrac: 0.014, heightFrac: 0.012 },
+  medium: { key: "medium", label: "Medium", widthFrac: 0.022, heightFrac: 0.016 },
+  large: { key: "large", label: "Large", widthFrac: 0.034, heightFrac: 0.022 },
+  // Strip = lightbar / tracer array. Three lengths so sales can mark
+  // anything from a short rocker module to a full tracer rail.
+  strip_small: { key: "strip_small", label: "Strip — Small", widthFrac: 0.120, heightFrac: 0.014 },
+  strip_medium: { key: "strip_medium", label: "Strip — Medium", widthFrac: 0.200, heightFrac: 0.016 },
+  strip_large: { key: "strip_large", label: "Strip — Large", widthFrac: 0.300, heightFrac: 0.018 },
+  // Backward-compat alias — same proportions as strip_medium so saved
+  // pins keep rendering at the size they were drawn at.
+  strip: { key: "strip", label: "Strip — Medium", widthFrac: 0.200, heightFrac: 0.016 },
 };
 
-export const PIN_SIZE_ORDER: PinSizeKey[] = ["small", "medium", "large", "strip"];
+export const PIN_SIZE_ORDER: PinSizeKey[] = [
+  "small",
+  "medium",
+  "large",
+  "strip_small",
+  "strip_medium",
+  "strip_large",
+];
 
 // --- Color schemes --------------------------------------------------------
 //
