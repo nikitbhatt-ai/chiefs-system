@@ -68,14 +68,17 @@ function pinDims(pin: UpfitPin) {
   const sz = getPinSize(pin.size);
   const isCircle = pin.shape === "circle";
   const horizontal = (pin.orientation ?? "horizontal") === "horizontal";
-  // Circles are uniform diameter (widthFrac) regardless of orientation;
-  // rectangles swap long/short axes when rotated.
+  // Per-pin override wins over the preset (sales drag-resized this pin
+  // in the editor). Otherwise fall back to the preset's fractions.
+  const effW = pin.widthFracOverride ?? sz.widthFrac;
+  const effH = pin.heightFracOverride ?? sz.heightFrac;
+  // Circles are uniform diameter — use effW for both axes.
   if (isCircle) {
-    const d = sz.widthFrac * PANEL_W;
+    const d = effW * PANEL_W;
     return { width: d, height: d, horizontal, isCircle };
   }
-  const longPt = sz.widthFrac * PANEL_W;
-  const shortPt = sz.heightFrac * ASSUMED_PANEL_H;
+  const longPt = effW * PANEL_W;
+  const shortPt = effH * ASSUMED_PANEL_H;
   return {
     width: horizontal ? longPt : shortPt,
     height: horizontal ? shortPt : longPt,

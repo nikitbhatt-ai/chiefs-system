@@ -125,7 +125,7 @@ export function UpfitBuilder({
     setActivePinId(id);
   };
 
-  const handlePinPointerDown = (e: React.PointerEvent<HTMLButtonElement>, pin: UpfitPin) => {
+  const handlePinPointerDown = (e: React.PointerEvent<HTMLDivElement>, pin: UpfitPin) => {
     e.stopPropagation();
     const f = toFractional(e.clientX, e.clientY);
     if (!f) return;
@@ -133,7 +133,7 @@ export function UpfitBuilder({
     e.currentTarget.setPointerCapture(e.pointerId);
   };
 
-  const handlePinPointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const handlePinPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     const f = toFractional(e.clientX, e.clientY);
@@ -145,7 +145,7 @@ export function UpfitBuilder({
     setPins((cur) => cur.map((p) => (p.id === drag.pinId ? { ...p, x: f.x, y: f.y } : p)));
   };
 
-  const handlePinPointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const handlePinPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
@@ -160,6 +160,42 @@ export function UpfitBuilder({
 
   const updatePin = (id: string, patch: Partial<UpfitPin>) => {
     setPins((cur) => cur.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  };
+
+  // Lower bound stops the pin from collapsing to nothing while dragging
+  // the handle; upper bound stops it from eating the whole diagram.
+  const clampSize = (v: number) => Math.max(0.006, Math.min(0.6, v));
+
+  // Resize handler invoked by PlacedPin as the user drags its handle.
+  // The pin is centered on (x, y), so the cursor-to-center distance
+  // gives the half-extent — doubled for width/height.
+  const resizePin = (id: string, clientX: number, clientY: number) => {
+    const f = toFractional(clientX, clientY);
+    if (!f) return;
+    setPins((cur) =>
+      cur.map((p) => {
+        if (p.id !== id) return p;
+        const w = clampSize(Math.abs(f.x - p.x) * 2);
+        const h = clampSize(Math.abs(f.y - p.y) * 2);
+        // Circles stay round — use the larger drag axis as diameter so
+        // a diagonal drag feels natural.
+        if (p.shape === "circle") {
+          const d = Math.max(w, h);
+          return { ...p, widthFracOverride: d, heightFracOverride: d };
+        }
+        return { ...p, widthFracOverride: w, heightFracOverride: h };
+      }),
+    );
+  };
+
+  const resetPinSize = (id: string) => {
+    setPins((cur) =>
+      cur.map((p) =>
+        p.id === id
+          ? { ...p, widthFracOverride: undefined, heightFracOverride: undefined }
+          : p,
+      ),
+    );
   };
 
   const handleSave = () => {
@@ -405,6 +441,7 @@ export function UpfitBuilder({
                 onPointerDown={(e) => handlePinPointerDown(e, pin)}
                 onPointerMove={handlePinPointerMove}
                 onPointerUp={handlePinPointerUp}
+                onResize={resizePin}
               />
             ))}
           </div>
@@ -504,6 +541,23 @@ export function UpfitBuilder({
                       </select>
                     </div>
 
+                    {(pin.widthFracOverride !== undefined ||
+                      pin.heightFracOverride !== undefined) && (
+                      <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] font-body text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
+                        <span>
+                          Custom size · W {((pin.widthFracOverride ?? 0) * 100).toFixed(1)}% · H{" "}
+                          {((pin.heightFracOverride ?? 0) * 100).toFixed(1)}%
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => resetPinSize(pin.id)}
+                          className="text-[10px] text-amber-200 hover:text-white underline"
+                        >
+                          reset
+                        </button>
+                      </div>
+                    )}
+
                     <input
                       value={pin.caption ?? ""}
                       onChange={(e) => updatePin(pin.id, { caption: e.target.value })}
@@ -598,75 +652,136 @@ function PinPreview({
 // caption text rendered below. All sizing is relative so the pin looks
 // consistent in the editor and prints identically in the PDF. No
 // number rendered on the pin itself; the caption is the identifier.
+//
+// When the pin is selected (isActive), a resize handle appears in the
+// bottom-right corner. Dragging it adjusts widthFracOverride /
+// heightFracOverride directly, overriding the preset size for that pin
+// only.
 function PlacedPin({
   pin,
   isActive,
   onPointerDown,
   onPointerMove,
   onPointerUp,
+  onResize,
 }: {
   pin: UpfitPin;
   isActive: boolean;
-  onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerMove: (e: React.PointerEvent<HTMLButtonElement>) => void;
-  onPointerUp: (e: React.PointerEvent<HTMLButtonElement>) => void;
+  onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => void;
+  onResize: (id: string, clientX: number, clientY: number) => void;
 }) {
   const scheme = getColorScheme(pin.colorScheme);
   const sz = getPinSize(pin.size);
   const isCircle = pin.shape === "circle";
-  // Circles use widthFrac for both dimensions (uniform diameter, ignores
-  // orientation). Rectangles swap dimensions for vertical orientation.
+  // Effective width/height: per-pin override wins; falls back to the
+  // preset. Circles use the same value for both axes.
+  const effW = pin.widthFracOverride ?? sz.widthFrac;
+  const effH = pin.heightFracOverride ?? sz.heightFrac;
   const widthPct = isCircle
-    ? sz.widthFrac * 100
-    : (pin.orientation === "vertical" ? sz.heightFrac : sz.widthFrac) * 100;
+    ? effW * 100
+    : (pin.orientation === "vertical" ? effH : effW) * 100;
   const heightPct = isCircle
-    ? sz.widthFrac * 100
-    : (pin.orientation === "vertical" ? sz.widthFrac : sz.heightFrac) * 100;
+    ? effW * 100
+    : (pin.orientation === "vertical" ? effW : effH) * 100;
+
+  const resizingRef = useRef(false);
+
+  const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    resizingRef.current = true;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    onResize(pin.id, e.clientX, e.clientY);
+  };
+
+  const handleResizePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizingRef.current) return;
+    e.stopPropagation();
+    onResize(pin.id, e.clientX, e.clientY);
+  };
+
+  const handleResizePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!resizingRef.current) return;
+    e.stopPropagation();
+    resizingRef.current = false;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+  };
 
   return (
-    <button
-      type="button"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onClick={(e) => e.stopPropagation()}
-      className="absolute -translate-x-1/2 -translate-y-1/2 p-0 m-0 border border-black bg-transparent text-[0] focus:outline-none overflow-hidden"
+    <div
+      className="absolute -translate-x-1/2 -translate-y-1/2"
       style={{
         left: `${pin.x * 100}%`,
         top: `${pin.y * 100}%`,
         width: `${widthPct}%`,
         height: `${heightPct}%`,
-        cursor: "grab",
-        touchAction: "none",
-        // Rectangles get a subtle pill curve; circles are fully round.
-        // The radius is a fraction of the short axis so longer strips
-        // don't end up half-tube-shaped.
-        borderRadius: isCircle ? "50%" : `${Math.min(widthPct, heightPct) * 0.25}%`,
-        boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
       }}
       title={pin.caption || pin.label}
     >
-      <span
-        className="flex w-full h-full"
+      {/* The shape itself — captures pin-drag (move) pointer events. */}
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={(e) => e.stopPropagation()}
+        className="absolute inset-0 border border-black overflow-hidden"
         style={{
-          flexDirection:
-            isCircle || pin.orientation !== "vertical" ? "row" : "column",
+          cursor: "grab",
+          touchAction: "none",
+          borderRadius: isCircle ? "50%" : `${Math.min(widthPct, heightPct) * 0.25}%`,
+          boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
         }}
       >
-        {scheme.segments.map((c, i) => (
-          <span key={i} style={{ flex: 1, backgroundColor: c }} />
-        ))}
-      </span>
+        <div
+          className="flex w-full h-full"
+          style={{
+            flexDirection:
+              isCircle || pin.orientation !== "vertical" ? "row" : "column",
+          }}
+        >
+          {scheme.segments.map((c, i) => (
+            <div key={i} style={{ flex: 1, backgroundColor: c }} />
+          ))}
+        </div>
+      </div>
+
+      {/* Resize handle — only visible when this pin is selected. Sits
+          on the bottom-right outside the shape so it stays grabbable
+          even when the shape is tiny. */}
+      {isActive ? (
+        <div
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerUp}
+          onClick={(e) => e.stopPropagation()}
+          className="absolute"
+          style={{
+            right: -6,
+            bottom: -6,
+            width: 12,
+            height: 12,
+            backgroundColor: "#f59e0b",
+            border: "1.5px solid #000",
+            borderRadius: 2,
+            cursor: "nwse-resize",
+            touchAction: "none",
+            zIndex: 2,
+          }}
+          title="Drag to resize"
+        />
+      ) : null}
+
       {/* Caption rendered below the pin in a small white-background pill
           so it stays legible against any vehicle color. */}
       {pin.caption ? (
-        <span
-          className="absolute left-1/2 -translate-x-1/2 mt-0.5 px-1 py-px bg-white/95 border border-black/40 text-[8px] font-bold text-black whitespace-nowrap"
+        <div
+          className="absolute left-1/2 -translate-x-1/2 mt-0.5 px-1 py-px bg-white/95 border border-black/40 text-[8px] font-bold text-black whitespace-nowrap pointer-events-none"
           style={{ top: "100%", letterSpacing: "0.02em" }}
         >
           {pin.caption}
-        </span>
+        </div>
       ) : null}
-    </button>
+    </div>
   );
 }

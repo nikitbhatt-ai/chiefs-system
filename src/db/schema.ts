@@ -611,6 +611,12 @@ export type UpfitPin = {
     | "strip_medium"
     | "strip_large"
     | "strip";
+  // Per-pin size override (0..1 fractions of the diagram, matching x/y).
+  // When set, the renderer uses these instead of the preset size's
+  // widthFrac/heightFrac so sales can fine-tune each pin by dragging a
+  // resize handle on the diagram.
+  widthFracOverride?: number;
+  heightFracOverride?: number;
   // Color scheme slug — solid color, 50/50 split, or multi-segment.
   // See COLOR_SCHEMES in src/lib/upfit/templates.ts.
   colorScheme?: string;
