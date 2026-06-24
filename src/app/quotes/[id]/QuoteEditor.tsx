@@ -49,6 +49,10 @@ export function QuoteEditor({
   // even after the underlying record changes — that's the 'reverts to
   // draft' visual bug.
   const [statusValue, setStatusValue] = useState<typeof status>(status);
+  // Drag-reorder state for line items. `draggingIndex` styles the row
+  // being dragged (faded out); `dragOverIndex` highlights the drop slot.
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   useEffect(() => {
     setStatusValue(status);
   }, [status]);
@@ -83,6 +87,20 @@ export function QuoteEditor({
   }
   function removeLine(i: number) {
     setLines((prev) => prev.filter((_, idx) => idx !== i));
+  }
+  // Reorder a line. Used by both the drag handle (HTML5 DnD) and the
+  // up/down arrow buttons. Bails on no-op or out-of-range moves so
+  // callers don't have to bounds-check.
+  function moveLine(from: number, to: number) {
+    setLines((prev) => {
+      if (from === to || from < 0 || to < 0 || from >= prev.length || to >= prev.length) {
+        return prev;
+      }
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
   }
   function addItem() {
     setLines((p) => [
@@ -207,7 +225,8 @@ export function QuoteEditor({
         </div>
         <div className="divide-y divide-white/5">
           <div className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
-            <span className="col-span-4">Description</span>
+            <span className="col-span-1">Order</span>
+            <span className="col-span-3">Description</span>
             <span className="col-span-1 text-right">Qty</span>
             <span className="col-span-2 text-right">Unit price</span>
             <span className="col-span-2 text-right">Discount</span>
@@ -223,9 +242,45 @@ export function QuoteEditor({
               l.kind === "item" ? (
                 <div
                   key={i}
-                  className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(i));
+                    setDraggingIndex(i);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dragOverIndex !== i) setDragOverIndex(i);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverIndex === i) setDragOverIndex(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = Number(e.dataTransfer.getData("text/plain"));
+                    if (!Number.isNaN(from)) moveLine(from, i);
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body transition-colors ${
+                    draggingIndex === i ? "opacity-40" : ""
+                  } ${
+                    dragOverIndex === i && draggingIndex !== i
+                      ? "bg-amber-500/10 ring-1 ring-amber-500/40"
+                      : ""
+                  }`}
                 >
-                  <div className="col-span-4">
+                  <ReorderControls
+                    index={i}
+                    count={lines.length}
+                    onMove={moveLine}
+                  />
+                  <div className="col-span-3">
                     <PartSearchCombobox
                       mode="inline"
                       value={l.description}
@@ -299,13 +354,49 @@ export function QuoteEditor({
               ) : (
                 <div
                   key={i}
-                  className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-amber-500/5"
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = "move";
+                    e.dataTransfer.setData("text/plain", String(i));
+                    setDraggingIndex(i);
+                  }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    if (dragOverIndex !== i) setDragOverIndex(i);
+                  }}
+                  onDragLeave={() => {
+                    if (dragOverIndex === i) setDragOverIndex(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = Number(e.dataTransfer.getData("text/plain"));
+                    if (!Number.isNaN(from)) moveLine(from, i);
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  onDragEnd={() => {
+                    setDraggingIndex(null);
+                    setDragOverIndex(null);
+                  }}
+                  className={`px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body bg-amber-500/5 transition-colors ${
+                    draggingIndex === i ? "opacity-40" : ""
+                  } ${
+                    dragOverIndex === i && draggingIndex !== i
+                      ? "ring-1 ring-amber-500/40"
+                      : ""
+                  }`}
                 >
+                  <ReorderControls
+                    index={i}
+                    count={lines.length}
+                    onMove={moveLine}
+                  />
                   <input
                     value={l.description}
                     onChange={(e) => updateLine(i, { description: e.target.value })}
                     placeholder="Fee description"
-                    className="col-span-7 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                    className="col-span-6 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
                   />
                   <input
                     type="number"
@@ -399,6 +490,53 @@ function Row({ label, value, big }: { label: string; value: string; big?: boolea
       <span className={big ? "text-white font-bold text-lg" : "text-white"}>
         {value}
       </span>
+    </div>
+  );
+}
+
+// Reorder controls for a single line: a draggable handle (the row's
+// parent is `draggable`, this is just the visual grip) plus up / down
+// arrow buttons for keyboard and mobile users where HTML5 DnD is
+// awkward. Occupies col-span-1 of the row's 12-column grid.
+function ReorderControls({
+  index,
+  count,
+  onMove,
+}: {
+  index: number;
+  count: number;
+  onMove: (from: number, to: number) => void;
+}) {
+  return (
+    <div className="col-span-1 flex items-center gap-1">
+      <span
+        aria-hidden
+        title="Drag to reorder"
+        className="text-zinc-500 select-none text-base leading-none"
+        style={{ cursor: "grab" }}
+      >
+        ≡
+      </span>
+      <div className="flex flex-col">
+        <button
+          type="button"
+          aria-label="Move up"
+          disabled={index === 0}
+          onClick={() => onMove(index, index - 1)}
+          className="text-[9px] text-zinc-500 hover:text-white disabled:opacity-30 leading-none px-0.5"
+        >
+          ▲
+        </button>
+        <button
+          type="button"
+          aria-label="Move down"
+          disabled={index === count - 1}
+          onClick={() => onMove(index, index + 1)}
+          className="text-[9px] text-zinc-500 hover:text-white disabled:opacity-30 leading-none px-0.5"
+        >
+          ▼
+        </button>
+      </div>
     </div>
   );
 }
