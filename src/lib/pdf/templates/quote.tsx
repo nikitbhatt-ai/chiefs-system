@@ -92,70 +92,128 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
           </View>
         </View>
 
-        <View style={styles.table}>
-          <View style={[styles.tableRow, styles.tableHeader]}>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Unit price</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Disc</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Total</Text>
-          </View>
-          {data.lineItems.length === 0 ? (
-            <View style={styles.tableRowLast}>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "100%", color: "#888" }]}>
-                No line items.
-              </Text>
-            </View>
-          ) : (
-            data.lineItems.map((l, idx) => {
-              const last = idx === data.lineItems.length - 1;
-              if (l.kind === "item") {
-                const gross = (l.quantity || 0) * (l.unitPrice || 0);
-                const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : (l.discount || 0);
-                return (
-                  <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
-                    <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
-                      {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
-                    </Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
-                  </View>
-                );
-              }
-              if (l.kind === "labor") {
-                const total = (l.hours || 0) * (l.rate || 0);
-                return (
-                  <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
-                    <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>
-                      {l.description} (labor)
-                    </Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
-                      {l.hours || 0} hr
-                    </Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>
-                      {money(l.rate || 0)}/hr
-                    </Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>—</Text>
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(total)}</Text>
-                  </View>
-                );
-              }
-              return (
-                <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%", fontStyle: "italic" }]}>
-                    {l.description} (fee)
+        {/* Lines grouped into three sections so Parts, Labor, and Fees
+            stay visually distinct on the customer-facing document. The
+            underlying lineItems jsonb array is flat; we partition at
+            render time. */}
+        {(() => {
+          const items = data.lineItems.filter((l) => l.kind === "item");
+          const labor = data.lineItems.filter((l) => l.kind === "labor");
+          const fees = data.lineItems.filter((l) => l.kind === "fee");
+
+          if (data.lineItems.length === 0) {
+            return (
+              <View style={[styles.table, { marginTop: 12 }]}>
+                <View style={styles.tableRowLast}>
+                  <Text
+                    style={[
+                      styles.tableCell,
+                      styles.cellLeft,
+                      { width: "100%", color: "#888" },
+                    ]}
+                  >
+                    No line items.
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>—</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>—</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>—</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(l.amount || 0)}</Text>
                 </View>
-              );
-            })
-          )}
-        </View>
+              </View>
+            );
+          }
+
+          return (
+            <View>
+              {/* === Parts === */}
+              {items.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.sectionTitle}>Parts &amp; Items</Text>
+                  <View style={styles.table}>
+                    <View style={[styles.tableRow, styles.tableHeader]}>
+                      <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Unit price</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Disc</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Total</Text>
+                    </View>
+                    {items.map((l, idx) => {
+                      if (l.kind !== "item") return null;
+                      const last = idx === items.length - 1;
+                      const gross = (l.quantity || 0) * (l.unitPrice || 0);
+                      const disc =
+                        l.discountKind === "pct"
+                          ? gross * ((l.discount || 0) / 100)
+                          : l.discount || 0;
+                      return (
+                        <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
+                          <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
+                            {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
+                          </Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {/* === Labor === */}
+              {labor.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.sectionTitle}>Labor</Text>
+                  <View style={styles.table}>
+                    <View style={[styles.tableRow, styles.tableHeader]}>
+                      <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Hours</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Rate / hr</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Total</Text>
+                    </View>
+                    {labor.map((l, idx) => {
+                      if (l.kind !== "labor") return null;
+                      const last = idx === labor.length - 1;
+                      const total = (l.hours || 0) * (l.rate || 0);
+                      return (
+                        <View key={`labor-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
+                          <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{l.hours || 0}</Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.rate || 0)}</Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(total)}</Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+
+              {/* === Fees === */}
+              {fees.length > 0 && (
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.sectionTitle}>Fees &amp; Add-ons</Text>
+                  <View style={styles.table}>
+                    <View style={[styles.tableRow, styles.tableHeader]}>
+                      <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>Description</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>Amount</Text>
+                    </View>
+                    {fees.map((l, idx) => {
+                      if (l.kind !== "fee") return null;
+                      const last = idx === fees.length - 1;
+                      return (
+                        <View key={`fee-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
+                          <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>
+                            {l.description} {l.fixed ? "(fixed fee)" : "(custom fee)"}
+                          </Text>
+                          <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>
+                            {money(l.amount || 0)}
+                          </Text>
+                        </View>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
+            </View>
+          );
+        })()}
 
         <View style={styles.totals}>
           <View style={styles.totalRow}>
