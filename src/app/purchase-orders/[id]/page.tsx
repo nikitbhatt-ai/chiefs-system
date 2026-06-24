@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { purchaseOrders, vendors, parts, type POLineItem } from "@/db/schema";
+import { purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
 import { receivePurchaseOrder } from "@/lib/inventory";
@@ -77,16 +77,6 @@ export default async function POPage({
     .from(vendors)
     .orderBy(vendors.name);
 
-  const partRows = await db
-    .select({
-      id: parts.id,
-      sku: parts.sku,
-      name: parts.name,
-      cost: parts.cost,
-    })
-    .from(parts)
-    .orderBy(parts.sku);
-
   const initial = (po.lineItems as POLineItem[]) ?? [];
 
   return (
@@ -108,7 +98,6 @@ export default async function POPage({
         expectedAt={po.expectedAt ? new Date(po.expectedAt).toISOString().slice(0, 10) : ""}
         initialLines={initial}
         vendors={vendorRows}
-        parts={partRows}
         status={po.status}
         saveDraft={saveDraft}
         receivePO={receivePO}
