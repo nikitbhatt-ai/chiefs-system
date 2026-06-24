@@ -39,6 +39,7 @@ async function saveQuote(formData: FormData) {
   let subtotal = 0;
   let discountTotal = 0;
   let feeTotal = 0;
+  let laborTotal = 0;
   for (const l of lines) {
     if (l.kind === "item") {
       const gross = (l.quantity || 0) * (l.unitPrice || 0);
@@ -48,12 +49,14 @@ async function saveQuote(formData: FormData) {
           : l.discount || 0;
       subtotal += gross;
       discountTotal += disc;
+    } else if (l.kind === "labor") {
+      laborTotal += (l.hours || 0) * (l.rate || 0);
     } else if (l.kind === "fee") {
       feeTotal += l.amount || 0;
     }
   }
   const taxRate = Number(formData.get("taxRate") ?? "0") || 0;
-  const taxableBase = subtotal - discountTotal + feeTotal;
+  const taxableBase = subtotal - discountTotal + feeTotal + laborTotal;
   const taxTotal = taxableBase * (taxRate / 100);
   const grandTotal = taxableBase + taxTotal;
 

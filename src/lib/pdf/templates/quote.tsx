@@ -5,7 +5,8 @@ import { BRANDING } from "../branding";
 
 export type QuoteLine =
   | { kind: "item"; description: string; quantity: number; unitPrice: number; discount: number; discountKind: "pct" | "amt"; partId?: string }
-  | { kind: "fee"; description: string; amount: number; fixed: boolean };
+  | { kind: "fee"; description: string; amount: number; fixed: boolean }
+  | { kind: "labor"; description: string; hours: number; rate: number };
 
 export type QuoteData = {
   quoteNumber: string | null;
@@ -33,12 +34,15 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   let subtotal = 0;
   let discountTotal = 0;
   let feeTotal = 0;
+  let laborTotal = 0;
   for (const l of data.lineItems) {
     if (l.kind === "item") {
       const gross = (l.quantity || 0) * (l.unitPrice || 0);
       const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : (l.discount || 0);
       subtotal += gross;
       discountTotal += disc;
+    } else if (l.kind === "labor") {
+      laborTotal += (l.hours || 0) * (l.rate || 0);
     } else {
       feeTotal += l.amount || 0;
     }
@@ -120,6 +124,24 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                   </View>
                 );
               }
+              if (l.kind === "labor") {
+                const total = (l.hours || 0) * (l.rate || 0);
+                return (
+                  <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
+                    <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>
+                      {l.description} (labor)
+                    </Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
+                      {l.hours || 0} hr
+                    </Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>
+                      {money(l.rate || 0)}/hr
+                    </Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>—</Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(total)}</Text>
+                  </View>
+                );
+              }
               return (
                 <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
                   <Text style={[styles.tableCell, styles.cellLeft, { width: "55%", fontStyle: "italic" }]}>
@@ -144,6 +166,12 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             <View style={styles.totalRow}>
               <Text>Discount</Text>
               <Text>−{money(discountTotal)}</Text>
+            </View>
+          )}
+          {laborTotal > 0 && (
+            <View style={styles.totalRow}>
+              <Text>Labor</Text>
+              <Text>{money(laborTotal)}</Text>
             </View>
           )}
           {feeTotal > 0 && (
