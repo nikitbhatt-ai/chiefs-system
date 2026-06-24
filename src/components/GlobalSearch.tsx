@@ -88,7 +88,7 @@ export function GlobalSearch() {
     (results?.workOrders.length ?? 0);
 
   return (
-    <div ref={wrapRef} className="relative w-72">
+    <div ref={wrapRef} className="relative w-full sm:w-72">
       <div className="relative">
         <svg
           className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-500 pointer-events-none"
