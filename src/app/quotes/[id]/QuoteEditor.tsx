@@ -1,112 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-
-type PartOption = {
-  id: string;
-  sku: string;
-  name: string;
-  price: string | null;
-  cost: string | null;
-  restricted: boolean;
-  restrictionCategory: string | null;
-};
-
-function PartAutocomplete({
-  value,
-  parts,
-  onPick,
-  onText,
-}: {
-  value: string;
-  parts: PartOption[];
-  onPick: (p: PartOption) => void;
-  onText: (s: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [focusIdx, setFocusIdx] = useState(0);
-
-  const matches = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    if (!q) return [];
-    return parts
-      .filter(
-        (p) =>
-          p.sku.toLowerCase().includes(q) ||
-          p.name.toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-  }, [value, parts]);
-
-  return (
-    <div className="relative">
-      <input
-        value={value}
-        onChange={(e) => {
-          onText(e.target.value);
-          setOpen(true);
-          setFocusIdx(0);
-        }}
-        onFocus={() => value && setOpen(true)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        onKeyDown={(e) => {
-          if (!open || matches.length === 0) return;
-          if (e.key === "ArrowDown") {
-            e.preventDefault();
-            setFocusIdx((i) => Math.min(i + 1, matches.length - 1));
-          } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            setFocusIdx((i) => Math.max(i - 1, 0));
-          } else if (e.key === "Enter") {
-            e.preventDefault();
-            const m = matches[focusIdx];
-            if (m) {
-              onPick(m);
-              setOpen(false);
-            }
-          } else if (e.key === "Escape") {
-            setOpen(false);
-          }
-        }}
-        placeholder="Description (type SKU or name to search inventory)"
-        className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
-      />
-      {open && matches.length > 0 ? (
-        <ul className="absolute left-0 right-0 top-full z-20 mt-1 bg-[#161624] border border-white/10 rounded-md shadow-lg max-h-60 overflow-y-auto">
-          {matches.map((m, i) => (
-            <li
-              key={m.id}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                onPick(m);
-                setOpen(false);
-              }}
-              onMouseEnter={() => setFocusIdx(i)}
-              className={`px-3 py-2 text-xs font-body cursor-pointer ${
-                i === focusIdx ? "bg-white/10" : ""
-              }`}
-            >
-              <div className="text-white">
-                <span className="font-mono text-amber-400">{m.sku}</span>{" "}
-                {m.name}
-                {m.restricted ? (
-                  <span className="ml-2 inline-block text-[9px] uppercase tracking-wider rounded border border-red-500/40 bg-red-500/10 text-red-300 px-1.5 py-0.5">
-                    Restricted{m.restrictionCategory ? ` · ${m.restrictionCategory.replace(/_/g, " ")}` : ""}
-                  </span>
-                ) : null}
-              </div>
-              <div className="text-[10px] text-zinc-500">
-                {m.price
-                  ? `$${Number(m.price).toFixed(2)}`
-                  : "(no price set)"}
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-    </div>
-  );
-}
+import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
 
 export type QuoteLine =
   | {
@@ -136,7 +31,6 @@ export function QuoteEditor({
   notes,
   initialLines,
   customers,
-  parts,
   action,
 }: {
   id: string;
@@ -145,7 +39,6 @@ export function QuoteEditor({
   notes: string;
   initialLines: QuoteLine[];
   customers: { id: string; name: string }[];
-  parts: PartOption[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
@@ -204,10 +97,7 @@ export function QuoteEditor({
       },
     ]);
   }
-  function addPart(partId: string) {
-    if (!partId) return;
-    const part = parts.find((p) => p.id === partId);
-    if (!part) return;
+  function addPart(part: PartHit) {
     setLines((prev) => {
       // If this part is already on the quote as an item line, bump its
       // quantity by 1 instead of appending a duplicate row.
@@ -289,21 +179,9 @@ export function QuoteEditor({
             Line items
           </h3>
           <div className="flex gap-2 items-center">
-            <select
-              defaultValue=""
-              onChange={(e) => {
-                addPart(e.target.value);
-                e.target.value = "";
-              }}
-              className="bg-black/40 border border-white/10 rounded px-2 py-1 text-[11px] text-white max-w-[200px]"
-            >
-              <option value="">+ Add from inventory…</option>
-              {parts.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.sku} — {p.name}
-                </option>
-              ))}
-            </select>
+            <div className="w-[260px]">
+              <PartSearchCombobox mode="adder" placeholder="+ Search inventory to add…" onPick={addPart} />
+            </div>
             <button
               type="button"
               onClick={addItem}
@@ -348,9 +226,9 @@ export function QuoteEditor({
                   className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body"
                 >
                   <div className="col-span-4">
-                    <PartAutocomplete
+                    <PartSearchCombobox
+                      mode="inline"
                       value={l.description}
-                      parts={parts}
                       onText={(s) => updateLine(i, { description: s })}
                       onPick={(p) =>
                         updateLine(i, {
