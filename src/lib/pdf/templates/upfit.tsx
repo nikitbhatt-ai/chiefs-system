@@ -66,19 +66,33 @@ const ASSUMED_PANEL_H = PANEL_W * 0.5;
 
 function pinDims(pin: UpfitPin) {
   const sz = getPinSize(pin.size);
-  const longPt = sz.widthFrac * PANEL_W;
-  const shortPt = sz.heightFrac * ASSUMED_PANEL_H;
+  const isCircle = pin.shape === "circle";
   const horizontal = (pin.orientation ?? "horizontal") === "horizontal";
+  // Per-pin override wins over the preset (sales drag-resized this pin
+  // in the editor). Otherwise fall back to the preset's fractions.
+  const effW = pin.widthFracOverride ?? sz.widthFrac;
+  const effH = pin.heightFracOverride ?? sz.heightFrac;
+  // Circles are uniform diameter — use effW for both axes.
+  if (isCircle) {
+    const d = effW * PANEL_W;
+    return { width: d, height: d, horizontal, isCircle };
+  }
+  const longPt = effW * PANEL_W;
+  const shortPt = effH * ASSUMED_PANEL_H;
   return {
     width: horizontal ? longPt : shortPt,
     height: horizontal ? shortPt : longPt,
     horizontal,
+    isCircle,
   };
 }
 
 function PinShape({ pin }: { pin: UpfitPin }) {
   const scheme = getColorScheme(pin.colorScheme);
-  const { width, height, horizontal } = pinDims(pin);
+  const { width, height, horizontal, isCircle } = pinDims(pin);
+  // Circle segments flow side-by-side (clipped to a disc by the
+  // border-radius); rectangle segments follow the pin's orientation.
+  const segmentDir: "row" | "column" = isCircle ? "row" : horizontal ? "row" : "column";
   return (
     <View
       style={{
@@ -91,32 +105,17 @@ function PinShape({ pin }: { pin: UpfitPin }) {
         marginTop: -height / 2,
         borderWidth: 0.6,
         borderColor: "#000000",
-        flexDirection: horizontal ? "row" : "column",
+        // Circles are fully round; rectangles get a subtle pill curve
+        // proportional to the short axis so long strips don't pinch.
+        borderRadius: isCircle ? width / 2 : Math.min(width, height) * 0.25,
+        overflow: "hidden",
+        flexDirection: segmentDir,
       }}
     >
       {scheme.segments.map((c, i) => (
         <View key={i} style={{ flex: 1, backgroundColor: c }} />
       ))}
-      {/* Number badge — small black dot in the top-left corner so techs
-          can still cross-reference the equipment table. */}
-      <View
-        style={{
-          position: "absolute",
-          top: -5,
-          left: -5,
-          width: 10,
-          height: 10,
-          borderRadius: 5,
-          backgroundColor: "#000000",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Text style={{ fontSize: 6, fontWeight: 700, color: "#ffffff" }}>
-          {String(pin.number)}
-        </Text>
-      </View>
-      {/* Caption pill rendered below the rectangle. */}
+      {/* Caption pill rendered below the shape. */}
       {pin.caption ? (
         <View
           style={{
@@ -215,11 +214,10 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
         <Text style={styles.sectionTitle}>Equipment &amp; placement</Text>
         <View style={styles.table}>
           <View style={[styles.tableRow, styles.tableHeader]}>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "6%" }]}>#</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "38%" }]}>Equipment</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "13%" }]}>SKU</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "21%" }]}>Caption</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>Placement note</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>Equipment</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "14%" }]}>SKU</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>Caption</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "24%" }]}>Placement note</Text>
           </View>
           {data.pins.length === 0 ? (
             <View style={styles.tableRowLast}>
@@ -232,17 +230,14 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
               const last = idx === data.pins.length - 1;
               return (
                 <View key={pin.id} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "6%", fontWeight: 700 }]}>
-                    {pin.number}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "38%" }]}>{pin.label}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "13%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>{pin.label}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "14%" }]}>
                     {pin.partSku ?? "—"}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "21%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>
                     {pin.caption ?? ""}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "24%" }]}>
                     {pin.notes ?? ""}
                   </Text>
                 </View>

@@ -19,6 +19,12 @@ type Line =
       description: string;
       amount: number;
       fixed: boolean;
+    }
+  | {
+      kind: "labor";
+      description: string;
+      hours: number;
+      rate: number;
     };
 
 function fmt(n: number) {
@@ -39,24 +45,24 @@ export default async function PrintQuotePage({
     : null;
 
   const lines = (q.lineItems as unknown as Line[]) ?? [];
+  const items = lines.filter((l): l is Extract<Line, { kind: "item" }> => l.kind === "item");
+  const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
+  const fees = lines.filter((l): l is Extract<Line, { kind: "fee" }> => l.kind === "fee");
+
   let subtotal = 0;
   let discountTotal = 0;
-  let feeTotal = 0;
-  for (const l of lines) {
-    if (l.kind === "item") {
-      const gross = (l.quantity || 0) * (l.unitPrice || 0);
-      const disc =
-        l.discountKind === "pct"
-          ? gross * ((l.discount || 0) / 100)
-          : l.discount || 0;
-      subtotal += gross;
-      discountTotal += disc;
-    } else {
-      feeTotal += l.amount || 0;
-    }
+  for (const l of items) {
+    const gross = (l.quantity || 0) * (l.unitPrice || 0);
+    const disc =
+      l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+    subtotal += gross;
+    discountTotal += disc;
   }
+  const laborTotal = labor.reduce((s, l) => s + (l.hours || 0) * (l.rate || 0), 0);
+  const feeTotal = fees.reduce((s, l) => s + (l.amount || 0), 0);
   const tax = Number(q.taxTotal) || 0;
-  const grand = Number(q.grandTotal) || subtotal - discountTotal + feeTotal + tax;
+  const grand =
+    Number(q.grandTotal) || subtotal - discountTotal + laborTotal + feeTotal + tax;
 
   return (
     <div className="print-doc">
@@ -88,6 +94,16 @@ export default async function PrintQuotePage({
           font-size: 13pt;
         }
         .print-doc .right { text-align: right; }
+        .print-doc .section-title {
+          font-size: 10pt;
+          font-weight: bold;
+          text-transform: uppercase;
+          letter-spacing: 0.5pt;
+          color: #444;
+          padding: 6pt 0 3pt;
+          border-bottom: 1pt solid #999;
+          margin-bottom: 4pt;
+        }
         .print-doc .header {
           display: flex;
           justify-content: space-between;
@@ -157,57 +173,110 @@ export default async function PrintQuotePage({
         {customer?.phone ? <div>{customer.phone}</div> : null}
       </div>
 
-      <table>
-        <thead>
-          <tr>
-            <th style={{ width: "55%" }}>Description</th>
-            <th className="right" style={{ width: "8%" }}>Qty</th>
-            <th className="right" style={{ width: "12%" }}>Unit price</th>
-            <th className="right" style={{ width: "12%" }}>Discount</th>
-            <th className="right" style={{ width: "13%" }}>Line total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {lines.length === 0 ? (
-            <tr>
-              <td colSpan={5} style={{ textAlign: "center", color: "#666" }}>
-                (no line items)
-              </td>
-            </tr>
-          ) : (
-            lines.map((l, i) => {
-              if (l.kind === "item") {
-                const gross = (l.quantity || 0) * (l.unitPrice || 0);
-                const disc =
-                  l.discountKind === "pct"
-                    ? gross * ((l.discount || 0) / 100)
-                    : l.discount || 0;
-                const discLabel =
-                  l.discount > 0
-                    ? l.discountKind === "pct"
-                      ? `${l.discount}% (−${fmt(disc)})`
-                      : `−${fmt(l.discount)}`
-                    : "—";
-                return (
-                  <tr key={i}>
-                    <td>{l.description || "Item"}</td>
-                    <td className="right">{l.quantity}</td>
-                    <td className="right">{fmt(l.unitPrice)}</td>
-                    <td className="right">{discLabel}</td>
-                    <td className="right">{fmt(gross - disc)}</td>
+      {lines.length === 0 ? (
+        <div style={{ textAlign: "center", color: "#666", padding: "16pt 0" }}>
+          (no line items)
+        </div>
+      ) : (
+        <>
+          {/* === Parts === */}
+          {items.length > 0 ? (
+            <div style={{ marginBottom: "12pt" }}>
+              <div className="section-title">Parts &amp; Items</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: "55%" }}>Description</th>
+                    <th className="right" style={{ width: "8%" }}>Qty</th>
+                    <th className="right" style={{ width: "12%" }}>Unit price</th>
+                    <th className="right" style={{ width: "12%" }}>Discount</th>
+                    <th className="right" style={{ width: "13%" }}>Line total</th>
                   </tr>
-                );
-              }
-              return (
-                <tr key={i}>
-                  <td colSpan={4}>{l.description} <em style={{ color: "#666" }}>({l.fixed ? "fixed fee" : "custom fee"})</em></td>
-                  <td className="right">{fmt(l.amount)}</td>
-                </tr>
-              );
-            })
-          )}
-        </tbody>
-      </table>
+                </thead>
+                <tbody>
+                  {items.map((l, i) => {
+                    const gross = (l.quantity || 0) * (l.unitPrice || 0);
+                    const disc =
+                      l.discountKind === "pct"
+                        ? gross * ((l.discount || 0) / 100)
+                        : l.discount || 0;
+                    const discLabel =
+                      l.discount > 0
+                        ? l.discountKind === "pct"
+                          ? `${l.discount}% (−${fmt(disc)})`
+                          : `−${fmt(l.discount)}`
+                        : "—";
+                    return (
+                      <tr key={`item-${i}`}>
+                        <td>{l.description || "Item"}</td>
+                        <td className="right">{l.quantity}</td>
+                        <td className="right">{fmt(l.unitPrice)}</td>
+                        <td className="right">{discLabel}</td>
+                        <td className="right">{fmt(gross - disc)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {/* === Labor === */}
+          {labor.length > 0 ? (
+            <div style={{ marginBottom: "12pt" }}>
+              <div className="section-title">Labor</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: "55%" }}>Description</th>
+                    <th className="right" style={{ width: "15%" }}>Hours</th>
+                    <th className="right" style={{ width: "15%" }}>Rate / hr</th>
+                    <th className="right" style={{ width: "15%" }}>Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {labor.map((l, i) => (
+                    <tr key={`labor-${i}`}>
+                      <td>{l.description || "Labor"}</td>
+                      <td className="right">{l.hours || 0}</td>
+                      <td className="right">{fmt(l.rate || 0)}</td>
+                      <td className="right">{fmt((l.hours || 0) * (l.rate || 0))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {/* === Fees === */}
+          {fees.length > 0 ? (
+            <div style={{ marginBottom: "12pt" }}>
+              <div className="section-title">Fees &amp; Add-ons</div>
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: "75%" }}>Description</th>
+                    <th className="right" style={{ width: "25%" }}>Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {fees.map((l, i) => (
+                    <tr key={`fee-${i}`}>
+                      <td>
+                        {l.description}{" "}
+                        <em style={{ color: "#666" }}>
+                          ({l.fixed ? "fixed fee" : "custom fee"})
+                        </em>
+                      </td>
+                      <td className="right">{fmt(l.amount || 0)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+        </>
+      )}
 
       <table className="totals" style={{ marginTop: "12pt" }}>
         <tbody>
@@ -219,6 +288,12 @@ export default async function PrintQuotePage({
             <tr>
               <td className="right">Discount</td>
               <td className="right">− {fmt(discountTotal)}</td>
+            </tr>
+          ) : null}
+          {laborTotal > 0 ? (
+            <tr>
+              <td className="right">Labor</td>
+              <td className="right">{fmt(laborTotal)}</td>
             </tr>
           ) : null}
           {feeTotal > 0 ? (

@@ -1816,6 +1816,32 @@ Intuit OAuth 2.0; chart-of-accounts mapping screen; pull payroll labor totals
 for P&L reconciliation; one-direction sync into a QBO **sandbox** first, with
 explicit user confirmation before any production company; sync log.
 
+### Searchable part picker (shipped)
+
+Requirement: when building quotes / estimates / POs, the team must be able
+to **search** for a part (type-ahead) as well as browse — a plain dropdown
+won't scale once the catalog is large.
+
+- [x] **`GET /api/parts/search?q=`** — type-ahead lookup matching SKU,
+  name, and manufacturer part number; excludes archived; capped at 25
+  rows. Empty query returns the first page so it doubles as a browse
+  dropdown. Nothing is loaded into the page up front, so it scales to any
+  catalog size.
+- [x] **`src/components/PartSearchCombobox.tsx`** — reusable server-backed
+  combobox (debounced fetch, browse-on-focus, keyboard nav, restricted
+  badges, auto-fills price/cost on pick). Two modes: `adder` (pick →
+  add a line, box clears) and `inline` (the line's description IS the
+  search box; typing edits free text, picking links the part).
+- [x] **Quote editor** now uses it for both the top "add a line" control
+  and each line's description; the old client-side autocomplete that
+  loaded the entire parts table into the page is gone.
+- [x] **PO editor** lines are now the searchable combobox instead of a
+  dropdown.
+- Both the quote and PO pages no longer query the full `parts` table on
+  load.
+
+No schema change.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW
