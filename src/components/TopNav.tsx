@@ -100,8 +100,8 @@ export function TopNav({ role }: { role?: string | null }) {
   }, []);
 
   return (
-    <nav className="border-b border-white/5 px-6" ref={navRef}>
-      <ul className="flex gap-1 overflow-visible">
+    <nav className="border-b border-white/5 px-4 sm:px-6" ref={navRef}>
+      <ul className="flex flex-wrap gap-1 overflow-visible">
         {nav.map((group, idx) => {
           const active = isGroupActive(pathname, group);
           const baseClasses = "inline-block px-3 py-2.5 text-xs font-body border-b-2 transition-colors whitespace-nowrap";

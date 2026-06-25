@@ -67,7 +67,7 @@ export default async function TimeClockPage() {
         <div className="space-y-6">
           <TimeClockPanel open={open} workOrders={woOptions} />
 
-          <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+          <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
             <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
               Your recent punches
             </div>
