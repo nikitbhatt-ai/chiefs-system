@@ -4,7 +4,12 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { sharedStyles } from "../styles";
 import { BRANDING } from "../branding";
-import { getTemplate, localImagePath } from "@/lib/upfit/templates";
+import {
+  getColorScheme,
+  getPinSize,
+  getTemplate,
+  localImagePath,
+} from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
 export type UpfitPdfData = {
@@ -22,25 +27,123 @@ export type UpfitPdfData = {
 // off disk at render time. Returns null when the file isn't present yet
 // (user hasn't uploaded that template image); the diagram then renders
 // as an empty labeled box.
+//
+// process.cwd() resolves to different roots in dev (the repo) vs Vercel
+// serverless (/var/task), and Next's file tracer may strip the `public`
+// prefix, so we probe a few candidate locations rather than assuming.
 function loadTemplateImage(imageUrl: string): Buffer | null {
   const local = localImagePath(imageUrl);
   if (!local) return null;
-  const abs = path.join(process.cwd(), local);
-  if (!existsSync(abs)) return null;
-  try {
-    return readFileSync(abs);
-  } catch {
-    return null;
+  const trimmed = local.replace(/^public\//, "");
+  const candidates = [
+    path.join(process.cwd(), local),
+    path.join(process.cwd(), trimmed),
+    path.join(process.cwd(), ".next", "server", local),
+    path.join(process.cwd(), ".next", "server", trimmed),
+  ];
+  for (const abs of candidates) {
+    if (existsSync(abs)) {
+      try {
+        return readFileSync(abs);
+      } catch {
+        // try next candidate
+      }
+    }
   }
+  return null;
 }
 
-// The diagram is one composite image with pins overlaid by percentage
-// position. PANEL_W is the page content width (Letter minus the 48pt
-// horizontal padding from sharedStyles.page). Pin diameter is fixed in
-// points; positions are percent of the panel so they line up with the
-// editor regardless of the image's native aspect ratio.
+// PANEL_W is the page content width (Letter minus the 48pt horizontal
+// padding from sharedStyles.page). Pin sizes are stored as fractions of
+// the diagram's dimensions and applied as actual points off PANEL_W
+// (assuming roughly the rendered vehicle aspect) so the printed pin
+// looks like the on-screen editor pin.
 const PANEL_W = 612 - 96;
-const PIN_D = 16;
+// Most of our vehicle templates render at roughly 2:1 (wide and short).
+// Used to convert heightFrac → points; this is approximate but the only
+// alternative is to inspect every image and embed its true aspect.
+const ASSUMED_PANEL_H = PANEL_W * 0.5;
+
+function pinDims(pin: UpfitPin) {
+  const sz = getPinSize(pin.size);
+  const isCircle = pin.shape === "circle";
+  const horizontal = (pin.orientation ?? "horizontal") === "horizontal";
+  // Per-pin override wins over the preset (sales drag-resized this pin
+  // in the editor). Otherwise fall back to the preset's fractions.
+  const effW = pin.widthFracOverride ?? sz.widthFrac;
+  const effH = pin.heightFracOverride ?? sz.heightFrac;
+  // Circles are uniform diameter — use effW for both axes.
+  if (isCircle) {
+    const d = effW * PANEL_W;
+    return { width: d, height: d, horizontal, isCircle };
+  }
+  const longPt = effW * PANEL_W;
+  const shortPt = effH * ASSUMED_PANEL_H;
+  return {
+    width: horizontal ? longPt : shortPt,
+    height: horizontal ? shortPt : longPt,
+    horizontal,
+    isCircle,
+  };
+}
+
+function PinShape({ pin }: { pin: UpfitPin }) {
+  const scheme = getColorScheme(pin.colorScheme);
+  const { width, height, horizontal, isCircle } = pinDims(pin);
+  // Circle segments flow side-by-side (clipped to a disc by the
+  // border-radius); rectangle segments follow the pin's orientation.
+  const segmentDir: "row" | "column" = isCircle ? "row" : horizontal ? "row" : "column";
+  return (
+    <View
+      style={{
+        position: "absolute",
+        left: `${pin.x * 100}%`,
+        top: `${pin.y * 100}%`,
+        width,
+        height,
+        marginLeft: -width / 2,
+        marginTop: -height / 2,
+        borderWidth: 0.6,
+        borderColor: "#000000",
+        // Circles are fully round; rectangles get a subtle pill curve
+        // proportional to the short axis so long strips don't pinch.
+        borderRadius: isCircle ? width / 2 : Math.min(width, height) * 0.25,
+        overflow: "hidden",
+        flexDirection: segmentDir,
+      }}
+    >
+      {scheme.segments.map((c, i) => (
+        <View key={i} style={{ flex: 1, backgroundColor: c }} />
+      ))}
+      {/* Caption pill rendered below the shape. */}
+      {pin.caption ? (
+        <View
+          style={{
+            position: "absolute",
+            top: height + 1,
+            left: 0,
+            alignItems: "center",
+            width: "100%",
+          }}
+        >
+          <View
+            style={{
+              backgroundColor: "#ffffff",
+              borderWidth: 0.4,
+              borderColor: "#000000",
+              paddingHorizontal: 2,
+              paddingVertical: 0.5,
+            }}
+          >
+            <Text style={{ fontSize: 5.5, fontWeight: 700, color: "#000000" }}>
+              {pin.caption}
+            </Text>
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
 
 export function UpfitDocument({ data }: { data: UpfitPdfData }) {
   const styles = sharedStyles;
@@ -103,41 +206,18 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
               </Text>
             </View>
           )}
-          {/* Pins overlaid by percentage so they track the image at any
-              aspect ratio. Centered on the point via the -PIN_D/2 offset. */}
           {data.pins.map((pin) => (
-            <View
-              key={pin.id}
-              style={{
-                position: "absolute",
-                left: `${pin.x * 100}%`,
-                top: `${pin.y * 100}%`,
-                width: PIN_D,
-                height: PIN_D,
-                marginLeft: -PIN_D / 2,
-                marginTop: -PIN_D / 2,
-                borderRadius: PIN_D / 2,
-                backgroundColor: pin.color ?? "#f59e0b",
-                borderWidth: 1.5,
-                borderColor: "#000000",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ fontSize: 9, fontWeight: 700, color: "#000000" }}>
-                {String(pin.number)}
-              </Text>
-            </View>
+            <PinShape key={pin.id} pin={pin} />
           ))}
         </View>
 
         <Text style={styles.sectionTitle}>Equipment &amp; placement</Text>
         <View style={styles.table}>
           <View style={[styles.tableRow, styles.tableHeader]}>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "8%" }]}>#</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "52%" }]}>Equipment</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "15%" }]}>SKU</Text>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>Placement note</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>Equipment</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "14%" }]}>SKU</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>Caption</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "24%" }]}>Placement note</Text>
           </View>
           {data.pins.length === 0 ? (
             <View style={styles.tableRowLast}>
@@ -150,14 +230,14 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
               const last = idx === data.pins.length - 1;
               return (
                 <View key={pin.id} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "8%", fontWeight: 700 }]}>
-                    {pin.number}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "52%" }]}>{pin.label}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "15%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>{pin.label}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "14%" }]}>
                     {pin.partSku ?? "—"}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "22%" }]}>
+                    {pin.caption ?? ""}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "24%" }]}>
                     {pin.notes ?? ""}
                   </Text>
                 </View>

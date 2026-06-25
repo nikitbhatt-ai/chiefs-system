@@ -92,7 +92,7 @@ async function resolveUpfit(quoteId: string): Promise<UpfitPdfData | null> {
     createdAt: q.createdAt,
     customerName: customer?.name ?? null,
     vehicleSummary: vehicleSummary || null,
-    bodyStyle: config?.bodyStyle ?? "suv",
+    bodyStyle: config?.bodyStyle ?? "tahoe",
     pins: config?.pins ?? [],
     notes: config?.notes ?? null,
   };

@@ -1091,9 +1091,31 @@ customer sees and the techs build to. One upfit per quote.
       label, click-to-place pins on the single blueprint image,
       **pointer-drag to reposition placed pins** (1%-of-box threshold
       separates click-to-select from drag-to-move), per-pin placement
-      note, autocolor from a 12-color palette, build notes textarea.
-      Pins are HTML overlays positioned by percentage over the `<img>`.
-      "Save upfit" persists via a server action on the page.
+      note, build notes textarea. Pins are HTML overlays positioned by
+      percentage over the `<img>`. "Save upfit" persists via a server
+      action on the page.
+- [x] **Equipment-styled pins** — pins are drawn as colored rectangles
+      (not circles), matching how real lights look on a build sheet.
+      Each pin has:
+      - **Size**: `small` / `medium` / `large` / `strip` (for
+        lightbars and tracer arrays). Dimensions defined as fractions
+        of the diagram so they scale consistently between editor and
+        PDF.
+      - **Color scheme**: solids (red, white, blue, amber, green),
+        50/50 splits (red/white, blue/white, amber/white, red/blue,
+        green/white), and multi-segment tracer patterns (R/W ×4, R/W
+        ×6, B/W ×4, R/B ×4). Stored as a slug; segments rendered
+        side-by-side in the rectangle.
+      - **Orientation**: `horizontal` (default) or `vertical` for
+        pillar / quarter-window lights.
+      - **Caption**: short label drawn on the diagram below the
+        rectangle (e.g. "VXE SMOKED LENS R/W"). Distinct from `notes`,
+        which is internal and only prints in the equipment table.
+      Catalogs live in `src/lib/upfit/templates.ts` (`PIN_SIZES`,
+      `COLOR_SCHEMES`). All visual fields are optional on the pin
+      record so older saved pins keep rendering (defaults: medium /
+      red_white / horizontal). The PDF mirrors the same rendering for
+      a byte-for-byte match between editor and print.
 - [x] **Place same part multiple times** — picking a part (or typing a
       label) enters "placement mode" and stays in it across clicks, so
       the same SKU can be placed on every corner/pillar of the vehicle
@@ -1104,8 +1126,10 @@ customer sees and the techs build to. One upfit per quote.
       deletes when the quote is deleted.
 - [x] **PDF spec sheet** — `src/lib/pdf/templates/upfit.tsx` renders
       branded header + customer/vehicle block + the full-width
-      blueprint image with numbered pins overlaid by percentage +
-      equipment table (# · label · SKU · placement note) + build notes.
+      blueprint image with rectangle pins (matching the editor's size,
+      color scheme, orientation, and on-diagram caption) overlaid by
+      percentage + equipment table (# · label · SKU · caption ·
+      placement note) + build notes.
       Streamed from `GET /api/pdf/upfit/[quoteId]` (audit-logged with
       `record_type = upfit`). Download button on the upfit tab.
 - [x] **Customer-folder auto-link** — `upsertUpfitLink(quoteId)` in
@@ -1663,6 +1687,134 @@ CREATE INDEX IF NOT EXISTS parts_tags_gin           ON parts USING gin (tags);
 ```
 - [x] `deal_comms` removed from the schema (was dead — no code refs).
   Drop the live table when ready: `DROP TABLE IF EXISTS deal_comms;`
+
+## Accounting module (phased — from the Accounting Build Brief)
+
+A double-entry accounting module that runs **alongside QuickBooks Online**
+(not a replacement). Manages day-to-day finances, AR, AP, aging for both,
+inventory with cost accounting, job costing by work order, and prepares
+figures for tax filings. Two AI agents (AR + AP) assist in Phase 7.
+
+**Stack decision (session 2026-06-23):** the brief was written for a fresh
+Supabase app, but this project already runs on **Neon + Drizzle + NextAuth**
+and is deployed. Per the user, we **adapt the brief's accounting substance to
+the existing stack** rather than migrate to Supabase. Concretely:
+- Database stays Neon; schema changes are applied by hand via SQL in
+  `docs/sql/` (the brief's "checked-in migration files" maps to these), not
+  drizzle-kit migrate/push — same as every prior PR here.
+- Auth stays NextAuth + middleware + role checks; the brief's "Row Level
+  Security" maps to that app-level enforcement, not Postgres RLS.
+- AR reuses the existing `quotes`/`deals` (converted quotes already act as
+  invoices) rather than building a parallel `invoices` table; a
+  receipts/payments table is added when Phase 2 lands.
+
+**Non-negotiable engineering rules (apply to every accounting phase):**
+1. Money stored as integer **cents** (`bigint`), never floating point.
+2. **Double-entry integrity** enforced by a DB trigger (debits = credits),
+   not just app code.
+3. **Posted entries are immutable** — fix mistakes with a reversing entry,
+   never edit/delete history.
+4. Audit trail: `created_at`, `updated_at`, and `created_by` where relevant.
+5. Costing method is per item, `average` is the default (Phase 4).
+6. Inventory subledger must always reconcile to the Inventory ledger account
+   (Phase 4).
+7. Agents may only DRAFT/RECOMMEND; explicit human approval before any
+   external action (Phase 7).
+8. Every cost carries its dimensions — `department_id` (+ `work_order_id`
+   for jobs); job costs come from real labor/material transactions only.
+
+### Phase 1 — Core ledger ✅ (PR: accounting-phase-1)
+
+Schema in `src/db/schema.ts`; SQL to run in Neon at
+`docs/sql/accounting_phase1.sql` (idempotent; creates enums, tables,
+triggers, and seeds).
+
+- [x] **`departments`** (`code`, `name`, `is_active`) — seeded with exactly
+      five: Admin, Upfitting, Mechanics, Body Shop, General.
+- [x] **`gl_accounts`** (chart of accounts) — `code`, `name`, `type`
+      (asset/liability/equity/revenue/expense), `report_group`
+      (revenue/labor/other_expense/none — drives the Phase 6 P&L grouping),
+      `normal_balance` (debit/credit), `is_active`. Named `gl_accounts`
+      because `accounts` is already the NextAuth OAuth-link table.
+- [x] **`journal_entries`** — `entry_date`, `memo`, `source`
+      (manual/ar/ap/system), `status` (draft/posted/void),
+      `reverses_entry_id`, `created_by`, `posted_at`.
+- [x] **`journal_lines`** — `journal_entry_id`, `account_id`, `debit_cents`,
+      `credit_cents` (bigint), optional `department_id` + `work_order_id`
+      cost-dimension tags, `memo`. CHECK constraint: a line is either a debit
+      or a credit, never both, never negative.
+- [x] **DB triggers** (`docs/sql/accounting_phase1.sql`):
+      - balance guard — posting (status → posted) requires non-empty lines
+        with `sum(debit_cents) = sum(credit_cents)`; stamps `posted_at`.
+      - immutability — posted entries can't be updated or deleted; lines of a
+        posted entry can't be inserted/updated/deleted. Reverse instead.
+- [x] **Seed chart of accounts** tagged with `report_group` (Cash, AR,
+      Inventory, WIP, AP, Sales Tax Payable, Owner's Equity, Retained
+      Earnings, Sales Revenue, Wages/Payroll Taxes/Benefits/Contractor Labor,
+      COGS, Rent/Utilities/Software/Supplies/Insurance/Office).
+- [x] **Ledger library** `src/lib/accounting.ts` — `fmtCents`,
+      `centsToDollars`, `dollarsToCents`, `postJournalEntry` (atomic
+      draft→post in a transaction), `postDraft`, `reverseJournalEntry`,
+      `LedgerError`.
+- [x] **API** `GET/POST /api/accounting/accounts`,
+      `GET/POST /api/accounting/journal-entries` (POST validates + posts;
+      400 with a friendly message on imbalance).
+- [x] **Screens**: `/accounting` overview (with live trial-balance check),
+      `/accounting/accounts` (chart of accounts list + add form),
+      `/accounting/journal` (entry list + dynamic-line create form with live
+      balance indicator), `/accounting/journal/[id]` (entry detail with
+      post/delete-draft/reverse actions).
+- [x] **Nav**: new "Accounting" top-nav group (Overview, Chart of Accounts,
+      Journal).
+
+### Phase 2 — Accounts receivable (pending)
+
+`receipts` table for cash received; posting an invoice (converted quote) or
+receipt auto-creates the matching journal entry. Reuse existing
+`quotes`/`customers` as the invoice source per the stack decision above.
+
+### Phase 3 — Accounts payable (pending)
+
+`bills`, `bill_lines`, `payments` (vendors already exist). Posting a bill or
+payment auto-creates the journal entry.
+
+### Phase 4 — Inventory & cost accounting (pending)
+
+`items`/`inventory_transactions`/`cost_layers`; average (default) + FIFO
+costing; receiving posts Dr Inventory / Cr AP-or-Cash; issuing posts Cr
+Inventory / Dr WIP-or-COGS. Subledger must reconcile to the Inventory account.
+(Note: this project already has `parts`/`part_receipts`/`part_cost_history`
+with FIFO+average — Phase 4 should integrate with those rather than duplicate.)
+
+### Phase 5 — Work orders & job costing (pending)
+
+`team_members`, `time_clock_entries`, `work_order_labor`,
+`work_order_materials`, job-cost rollup, WIP→COGS on close. (Existing
+`work_orders` + `time_entries` integrate here.)
+
+### Phase 6 — Reporting: P&L, job costing, dashboards, aging (pending)
+
+P&L by date range grouped Revenue → Labor (by department) → Other Expenses →
+Net, with comparison columns, drill-down, CSV/PDF export; AR/AP aging buckets
+(not yet due, 1–30, 31–60, 61–90, 90+); balance sheet from the ledger.
+
+### Phase 7 — AR and AP agents (pending)
+
+Server-side Anthropic calls. AR agent drafts overdue-invoice reminder emails;
+AP agent flags bills due / anomalies and proposes a payment schedule. Both
+DRAFT only — Approve/Edit/Reject with logging; never act externally on their own.
+
+### Phase 8 — Tax / government tracking (pending)
+
+Track tax liabilities as ledger accounts; period summaries for filings;
+visible "confirm with a qualified accountant" disclaimer; **no hardcoded tax
+rates** — ask the user for jurisdiction, keep rates configurable.
+
+### Phase 9 — QuickBooks Online integration (LAST — do not start early)
+
+Intuit OAuth 2.0; chart-of-accounts mapping screen; pull payroll labor totals
+for P&L reconciliation; one-direction sync into a QBO **sandbox** first, with
+explicit user confirmation before any production company; sync log.
 
 ### Searchable part picker (shipped)
 
