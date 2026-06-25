@@ -148,7 +148,7 @@ export default async function PartDetailPage({
         </div>
       ) : null}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <div className="px-4 py-2.5 border-b border-white/5">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             FIFO layers (oldest first)
