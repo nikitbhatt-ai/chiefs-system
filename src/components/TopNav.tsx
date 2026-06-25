@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-type NavItem = { href: string; label: string };
-type NavGroup = { label: string; href?: string; children?: NavItem[] };
+type NavItem = { href: string; label: string; roles?: readonly string[] };
+type NavGroup = { label: string; href?: string; children?: NavItem[]; roles?: readonly string[] };
 
 const NAV: NavGroup[] = [
   { label: "Dashboard", href: "/" },
@@ -35,6 +35,9 @@ const NAV: NavGroup[] = [
   {
     label: "Admin",
     children: [
+      // Accounting is admin-only — the matching page layout and API routes
+      // enforce the same restriction server-side; this just hides the link.
+      { href: "/accounting", label: "Accounting", roles: ["admin"] },
       { href: "/timeclock", label: "Timeclock" },
       { href: "/reporting", label: "Reporting" },
       { href: "/users", label: "Users" },
@@ -46,6 +49,13 @@ const NAV: NavGroup[] = [
   },
 ];
 
+// Show an item/group to everyone unless it declares `roles`, in which case the
+// current user's role must be in the list.
+function visibleFor(role: string | null | undefined, roles?: readonly string[]): boolean {
+  if (!roles) return true;
+  return !!role && roles.includes(role);
+}
+
 function isActive(pathname: string, href: string): boolean {
   if (href === "/") return pathname === "/";
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -56,10 +66,20 @@ function isGroupActive(pathname: string, group: NavGroup): boolean {
   return !!group.children?.some((c) => isActive(pathname, c.href));
 }
 
-export function TopNav() {
+export function TopNav({ role }: { role?: string | null }) {
   const pathname = usePathname() || "/";
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const navRef = useRef<HTMLDivElement>(null);
+
+  // Filter the nav to what this role may see: drop role-gated items, then drop
+  // any group left with no visible children.
+  const nav = NAV.filter((group) => visibleFor(role, group.roles))
+    .map((group) =>
+      group.children
+        ? { ...group, children: group.children.filter((c) => visibleFor(role, c.roles)) }
+        : group,
+    )
+    .filter((group) => !group.children || group.children.length > 0);
 
   useEffect(() => { setOpenIdx(null); }, [pathname]);
 
@@ -82,7 +102,7 @@ export function TopNav() {
   return (
     <nav className="border-b border-white/5 px-6" ref={navRef}>
       <ul className="flex gap-1 overflow-visible">
-        {NAV.map((group, idx) => {
+        {nav.map((group, idx) => {
           const active = isGroupActive(pathname, group);
           const baseClasses = "inline-block px-3 py-2.5 text-xs font-body border-b-2 transition-colors whitespace-nowrap";
           const stateClasses = active

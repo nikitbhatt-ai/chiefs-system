@@ -5,6 +5,7 @@ import {
   timestamp,
   boolean,
   integer,
+  bigint,
   numeric,
   jsonb,
   pgEnum,
@@ -642,6 +643,85 @@ export const upfitConfigs = pgTable("upfit_configs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("upfit_configs_quote_idx").on(t.quoteId)]);
+
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 1: core double-entry ledger
+//
+// Money is stored as integer cents (bigint), never floating point. Every
+// financial transaction is a `journal_entries` row made of two or more
+// `journal_lines`; total debits must equal total credits. That balance rule —
+// plus the immutability of posted entries — is enforced by DB triggers (see
+// docs/sql/accounting_phase1.sql), not just app code.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const glAccountType = pgEnum("gl_account_type", ["asset", "liability", "equity", "revenue", "expense"]);
+// Drives how the P&L (Phase 6) groups each account. Balance-sheet accounts use "none".
+export const glReportGroup = pgEnum("gl_report_group", ["revenue", "labor", "other_expense", "none"]);
+export const glNormalBalance = pgEnum("gl_normal_balance", ["debit", "credit"]);
+export const journalSource = pgEnum("journal_source", ["manual", "ar", "ap", "system"]);
+export const journalStatus = pgEnum("journal_status", ["draft", "posted", "void"]);
+
+// Cost centers. Seeded with exactly five: Admin, Upfitting, Mechanics,
+// Body Shop, General. Every labor/material cost is tagged with one.
+export const departments = pgTable("departments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Chart of accounts. Named `gl_accounts` (not `accounts`) because `accounts`
+// is already taken by the NextAuth OAuth-link table above.
+export const glAccounts = pgTable("gl_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  code: text("code").notNull().unique(),
+  name: text("name").notNull(),
+  type: glAccountType("type").notNull(),
+  reportGroup: glReportGroup("report_group").notNull().default("none"),
+  normalBalance: glNormalBalance("normal_balance").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("gl_accounts_type_idx").on(t.type)]);
+
+export const journalEntries = pgTable("journal_entries", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  entryDate: timestamp("entry_date").notNull().defaultNow(),
+  memo: text("memo"),
+  source: journalSource("source").notNull().default("manual"),
+  status: journalStatus("status").notNull().default("draft"),
+  // When this entry reverses another posted entry, points back at the original.
+  reversesEntryId: uuid("reverses_entry_id").references((): AnyPgColumn => journalEntries.id),
+  createdBy: uuid("created_by").references(() => users.id),
+  postedAt: timestamp("posted_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("journal_entries_status_idx").on(t.status),
+  index("journal_entries_date_idx").on(t.entryDate),
+]);
+
+// Each line is EITHER a debit or a credit, never both (DB CHECK enforces it).
+// Optional department/work-order tags let any cost be sliced by cost center
+// or job. work_order_id stays nullable; work_orders already exists in this app.
+export const journalLines = pgTable("journal_lines", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  journalEntryId: uuid("journal_entry_id").notNull().references(() => journalEntries.id, { onDelete: "cascade" }),
+  accountId: uuid("account_id").notNull().references(() => glAccounts.id),
+  debitCents: bigint("debit_cents", { mode: "number" }).notNull().default(0),
+  creditCents: bigint("credit_cents", { mode: "number" }).notNull().default(0),
+  departmentId: uuid("department_id").references(() => departments.id),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id),
+  memo: text("memo"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("journal_lines_entry_idx").on(t.journalEntryId),
+  index("journal_lines_account_idx").on(t.accountId),
+  index("journal_lines_department_idx").on(t.departmentId),
+  index("journal_lines_work_order_idx").on(t.workOrderId),
+]);
 
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
