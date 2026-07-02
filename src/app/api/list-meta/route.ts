@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { type PgTable } from "drizzle-orm/pg-core";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { deals, customers, leads, quotes, workOrders, purchaseOrders, parts } from "@/db/schema";
+import { deals, customers, leads, quotes, workOrders, purchaseOrders, parts, packages } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,7 @@ const TABLES: Record<string, PgTable> = {
   "work-orders": workOrders,
   "purchase-orders": purchaseOrders,
   parts,
+  packages,
 };
 
 const MAX_TAGS = 20;

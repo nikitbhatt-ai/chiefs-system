@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
+import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
+import { componentsToQuoteLines } from "@/lib/packages";
 
 export type QuoteLine =
   | {
@@ -61,6 +63,10 @@ export function QuoteEditor({
   // being dragged (faded out); `dragOverIndex` highlights the drop slot.
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+  // Feedback for the "Save as package" action (create a reusable package
+  // from the current quote's lines).
+  const [pkgMsg, setPkgMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
+  const [savingPkg, setSavingPkg] = useState(false);
   useEffect(() => {
     setStatusValue(status);
   }, [status]);
@@ -154,6 +160,61 @@ export function QuoteEditor({
       ];
     });
   }
+  function addPackage(pkg: PackageHit) {
+    // Itemized roll-up: expand the package's components into individual,
+    // editable quote lines (parts / labor / fees). The bundle is appended
+    // verbatim — a package can intentionally repeat a part — and the rep
+    // tweaks quantities, prices, or discounts from there.
+    const expanded = componentsToQuoteLines(pkg.components ?? []) as QuoteLine[];
+    if (expanded.length === 0) {
+      setPkgMsg({ tone: "err", text: `"${pkg.name}" has no components.` });
+      return;
+    }
+    setLines((prev) => [...prev, ...expanded]);
+    setPkgMsg({ tone: "ok", text: `Added "${pkg.name}" (${expanded.length} line${expanded.length === 1 ? "" : "s"}).` });
+  }
+
+  async function saveAsPackage() {
+    if (lines.length === 0) {
+      setPkgMsg({ tone: "err", text: "Add some line items before saving a package." });
+      return;
+    }
+    const name = window.prompt("Name this package (e.g. Standard Patrol Upfit):");
+    if (!name || !name.trim()) return;
+    // Map the editor's lines to package components. Per-line discounts are
+    // dropped — a package defines the bundle; discounting happens on the quote.
+    const components = lines.map((l) => {
+      if (l.kind === "labor") return { kind: "labor", description: l.description, hours: l.hours, rate: l.rate };
+      if (l.kind === "fee") return { kind: "fee", description: l.description, amount: l.amount, fixed: l.fixed };
+      return {
+        kind: "item",
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        partId: l.partId ?? null,
+      };
+    });
+    setSavingPkg(true);
+    setPkgMsg(null);
+    try {
+      const res = await fetch("/api/packages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name.trim(), components }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPkgMsg({ tone: "err", text: data?.error ?? "Could not save package." });
+        return;
+      }
+      setPkgMsg({ tone: "ok", text: `Saved package "${name.trim()}". Find it under Operations → Packages.` });
+    } catch {
+      setPkgMsg({ tone: "err", text: "Network error saving package." });
+    } finally {
+      setSavingPkg(false);
+    }
+  }
+
   function addFee(fixed = false) {
     setLines((p) => [
       ...p,
@@ -213,9 +274,12 @@ export function QuoteEditor({
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Line items
           </h3>
-          <div className="flex gap-2 items-center">
-            <div className="w-[260px]">
+          <div className="flex gap-2 items-center flex-wrap justify-end">
+            <div className="w-[240px]">
               <PartSearchCombobox mode="adder" placeholder="+ Search inventory to add…" onPick={addPart} />
+            </div>
+            <div className="w-[220px]">
+              <PackageSearchCombobox placeholder="+ Add package…" onPick={addPackage} />
             </div>
             <button
               type="button"
@@ -245,8 +309,26 @@ export function QuoteEditor({
             >
               + Labor
             </button>
+            <span className="text-white/10">|</span>
+            <button
+              type="button"
+              onClick={saveAsPackage}
+              disabled={savingPkg}
+              className="text-[11px] font-body text-zinc-300 hover:text-white border border-white/10 rounded px-2 py-1 disabled:opacity-40"
+            >
+              {savingPkg ? "Saving…" : "Save as package"}
+            </button>
           </div>
         </div>
+        {pkgMsg ? (
+          <div
+            className={`px-4 py-2 text-[11px] font-body border-b border-white/5 ${
+              pkgMsg.tone === "ok" ? "text-green-300 bg-green-500/5" : "text-red-300 bg-red-500/5"
+            }`}
+          >
+            {pkgMsg.text}
+          </div>
+        ) : null}
         {(() => {
           // Group line indices by kind, preserving their position in the
           // flat `lines` array. Rendering walks each section in array
