@@ -2,6 +2,9 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { journalEntries, journalLines } from "@/db/schema";
 
+/** The transaction handle drizzle hands to db.transaction((tx) => …). */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
 // ── Money: always integer cents internally, dollars only at the edges ─────────
 
 /** Format integer cents as a USD string, e.g. 123456 → "$1,234.56". */
@@ -90,44 +93,52 @@ function validateLines(lines: JournalLineInput[]): { totalDebit: number; totalCr
  * `asDraft` is set.
  */
 export async function postJournalEntry(input: PostJournalEntryInput) {
+  return db.transaction((tx) => postJournalEntryTx(tx, input));
+}
+
+/**
+ * Same as postJournalEntry but runs inside a caller-supplied transaction, so a
+ * higher-level operation (issuing an invoice, recording a receipt) can post the
+ * ledger entry and write its own subledger row atomically — either both land or
+ * neither does. Callers must already be inside db.transaction((tx) => …).
+ */
+export async function postJournalEntryTx(tx: Tx, input: PostJournalEntryInput) {
   const { totalDebit } = validateLines(input.lines);
 
-  return db.transaction(async (tx) => {
-    // Always insert as draft first so the lines exist before the balance
-    // trigger runs on the draft → posted transition.
-    const [entry] = await tx
-      .insert(journalEntries)
-      .values({
-        entryDate: input.entryDate ?? new Date(),
-        memo: input.memo ?? null,
-        source: input.source ?? "manual",
-        status: "draft",
-        createdBy: input.createdBy ?? null,
-      })
+  // Always insert as draft first so the lines exist before the balance
+  // trigger runs on the draft → posted transition.
+  const [entry] = await tx
+    .insert(journalEntries)
+    .values({
+      entryDate: input.entryDate ?? new Date(),
+      memo: input.memo ?? null,
+      source: input.source ?? "manual",
+      status: "draft",
+      createdBy: input.createdBy ?? null,
+    })
+    .returning();
+
+  await tx.insert(journalLines).values(
+    input.lines.map((l) => ({
+      journalEntryId: entry.id,
+      accountId: l.accountId,
+      debitCents: Math.max(0, Math.round(l.debitCents ?? 0)),
+      creditCents: Math.max(0, Math.round(l.creditCents ?? 0)),
+      departmentId: l.departmentId ?? null,
+      workOrderId: l.workOrderId ?? null,
+      memo: l.memo ?? null,
+    })),
+  );
+
+  if (!input.asDraft) {
+    const [posted] = await tx
+      .update(journalEntries)
+      .set({ status: "posted" })
+      .where(eq(journalEntries.id, entry.id))
       .returning();
-
-    await tx.insert(journalLines).values(
-      input.lines.map((l) => ({
-        journalEntryId: entry.id,
-        accountId: l.accountId,
-        debitCents: Math.max(0, Math.round(l.debitCents ?? 0)),
-        creditCents: Math.max(0, Math.round(l.creditCents ?? 0)),
-        departmentId: l.departmentId ?? null,
-        workOrderId: l.workOrderId ?? null,
-        memo: l.memo ?? null,
-      })),
-    );
-
-    if (!input.asDraft) {
-      const [posted] = await tx
-        .update(journalEntries)
-        .set({ status: "posted" })
-        .where(eq(journalEntries.id, entry.id))
-        .returning();
-      return { ...posted, totalCents: totalDebit };
-    }
-    return { ...entry, totalCents: totalDebit };
-  });
+    return { ...posted, totalCents: totalDebit };
+  }
+  return { ...entry, totalCents: totalDebit };
 }
 
 /** Post an existing draft entry (draft → posted). The DB trigger enforces balance. */

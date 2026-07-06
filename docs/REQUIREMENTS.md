@@ -1767,11 +1767,42 @@ triggers, and seeds).
 - [x] **Nav**: new "Accounting" top-nav group (Overview, Chart of Accounts,
       Journal).
 
-### Phase 2 — Accounts receivable (pending)
+### Phase 2 — Accounts receivable ✅ (PR: accounting-phase-2)
 
-`receipts` table for cash received; posting an invoice (converted quote) or
-receipt auto-creates the matching journal entry. Reuse existing
-`quotes`/`customers` as the invoice source per the stack decision above.
+SQL to run in Neon: `docs/sql/accounting_phase2.sql` (idempotent; needs Phase 1
+first). Reuses existing `quotes`/`customers` as the invoice source per the
+stack decision above — no parallel invoices table.
+
+- [x] **`ar_invoices`** — thin AR posting record wrapping a quote (`quote_id`
+      UNIQUE, so one invoice per quote). Totals (`subtotal_cents`, `tax_cents`,
+      `total_cents`) are **snapshotted at issue time** so editing the quote
+      afterward never mutates a posted invoice. Carries `invoice_number`,
+      `invoice_date`, `due_date`, `terms`, `status` (open/paid/void),
+      `journal_entry_id`, audit columns.
+- [x] **`receipts`** — cash received. Optional `invoice_id` applies it to one
+      invoice, else it sits on-account. Carries `receipt_number`, `method`
+      (cash/check/card/ach/other), `reference`, `amount_cents`,
+      `journal_entry_id`, audit columns.
+- [x] **Issue invoice from a quote** auto-posts a balanced entry:
+      Dr Accounts Receivable (1100) / Cr Sales Revenue (4000) /
+      Cr Sales Tax Payable (2100). Revenue is derived as total − tax so the
+      entry always balances even if the quote's stored subtotal drifted.
+- [x] **Record receipt** auto-posts Dr Cash (1000) / Cr Accounts Receivable
+      (1100). Ledger post + subledger row happen in one DB transaction
+      (`postJournalEntryTx`), so either both land or neither does.
+- [x] **Per-invoice open balance** = total − receipts applied; status flips
+      open⇄paid automatically. Overdue = open + past `due_date`.
+- [x] **Void** reverses the invoice's journal entry (history kept) and marks it
+      void; blocked once any receipt is applied.
+- [x] **API** `GET/POST /api/accounting/invoices`,
+      `GET/DELETE /api/accounting/invoices/[id]` (DELETE = void),
+      `GET/POST /api/accounting/receipts` — all admin-only via `requireRole`.
+- [x] **Screens**: `/accounting/invoices` (list + issue-from-quote form, shows
+      outstanding AR and overdue flags), `/accounting/invoices/[id]` (detail,
+      receipts applied, balance, record-receipt + void), `/accounting/receipts`
+      (list + record form). Overview page gained AR + Receipts cards.
+- [ ] Later: split one receipt across multiple invoices (currently one invoice
+      or on-account); customer statements.
 
 ### Phase 3 — Accounts payable (pending)
 
