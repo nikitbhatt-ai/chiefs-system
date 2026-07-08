@@ -84,7 +84,20 @@ export type ImportRow = {
 
 const HEADER_ALIASES: Record<string, string> = {
   sku: "sku",
+  // Real-world export headers use qualified SKU labels (e.g. Whelen/vendor
+  // sheets export "Manufacturer sku"). We key the catalog on this value, so
+  // treat these as the SKU column.
+  manufacturer_sku: "sku",
+  mfg_sku: "sku",
+  mfr_sku: "sku",
+  part_number: "sku",
+  part_no: "sku",
+  partno: "sku",
+  item_number: "sku",
   name: "name",
+  product_name: "name",
+  item_name: "name",
+  part_name: "name",
   description: "description",
   category: "category",
   manufacturer: "manufacturer",
@@ -113,8 +126,15 @@ export function rowsToImport(rows: string[][]): {
 } {
   if (rows.length === 0) return { parsed: [], fatalError: "Empty file" };
   const header = rows[0].map(normalizeHeader);
-  if (!header.includes("sku") || !header.includes("name")) {
-    return { parsed: [], fatalError: "Header must include 'sku' and 'name' columns" };
+  const missing = (["sku", "name"] as const).filter((k) => !header.includes(k));
+  if (missing.length > 0) {
+    const seen = rows[0].map((h) => h.trim()).filter(Boolean).join(", ");
+    return {
+      parsed: [],
+      fatalError:
+        `Header is missing required column${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}. ` +
+        `Detected headers: ${seen || "(none)"}.`,
+    };
   }
   const idx = (k: string) => header.indexOf(k);
 
