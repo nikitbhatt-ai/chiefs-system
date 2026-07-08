@@ -188,5 +188,18 @@ export function rowsToImport(rows: string[][]): {
       errors,
     });
   }
+
+  // Flag in-file duplicate SKUs. The first occurrence wins; later rows with
+  // the same SKU are marked as errors so they surface in the dry-run preview
+  // and are skipped, instead of silently colliding on commit (a new SKU would
+  // hit a unique-constraint error; an existing one would upsert twice).
+  const firstSeen = new Map<string, number>();
+  for (const row of parsed) {
+    if (!row.sku) continue;
+    const firstRow = firstSeen.get(row.sku);
+    if (firstRow === undefined) firstSeen.set(row.sku, row.rowNumber);
+    else row.errors.push(`duplicate sku in file (first seen on row ${firstRow})`);
+  }
+
   return { parsed, fatalError: null };
 }

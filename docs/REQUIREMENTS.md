@@ -912,6 +912,10 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
     or `part_name`. Unrecognized/extra columns (e.g. `Count`, `Current Count`)
     and blank headers are ignored. A missing required column returns a fatal
     error that lists which column is missing and the raw headers detected.
+  - In-file **duplicate SKUs** are handled per row: the first occurrence wins
+    and later rows with the same SKU are flagged (`duplicate sku in file …`)
+    so they show in the dry-run preview and are skipped, rather than silently
+    colliding on commit.
 - [ ] Per-part PO history button — currently shown as the FIFO layers
       table on /inventory/[id]; consider a dedicated button if needed.
 - [ ] Inline "Add new vendor" inside the dropdown (currently links
