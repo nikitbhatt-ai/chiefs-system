@@ -902,6 +902,16 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
       values on the edit form are self-explanatory instead of bare numbers.
 - [x] Manufacturer + Supplier dropdowns sourced from Vendors.
 - [x] Filters on category, vendor, archived.
+- [x] **Sortable columns** on the list — every column header (SKU, Name,
+      Category, Manufacturer, Supplier, On hand, On order, Internal cost,
+      Price, Margin) has up/down arrows. Sorting is server-side via
+      `?sort=&dir=` (so it orders the whole filtered list, not just the
+      current page), keeps filters, and resets to page 1. Vendor sorts use
+      aliased joins on `vendors`; margin sorts on `(price - cost) / price`;
+      NULLs always sort last. Default view is Name A→Z. Shared logic in
+      `@/lib/inventorySort`; headers via `@/components/SortHeader`. The
+      Print / Save-as-PDF export honors the active sort (and shows a
+      "Sorted by" line), so the exported view matches the screen.
 - [x] Edit pencil opens correct row (uses `/inventory/[id]/edit` pattern).
 - [x] **Mass import via CSV/Excel** — `/inventory/import` UI +
       `POST /api/parts/import`. Dry-run preview → confirm; upserts by SKU
