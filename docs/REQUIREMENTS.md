@@ -897,6 +897,9 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Pricing labels: **Internal Cost** + **Price** (single price column).
 - [x] Per-part margin AND markup % live calculation in form.
 - [x] Quick "set price by N% margin/markup" buttons.
+- [x] Every field on the add + edit part forms carries a visible caption
+      label (shared `FormField` in `@/components/FormField`), so pre-filled
+      values on the edit form are self-explanatory instead of bare numbers.
 - [x] Manufacturer + Supplier dropdowns sourced from Vendors.
 - [x] Filters on category, vendor, archived.
 - [x] Edit pencil opens correct row (uses `/inventory/[id]/edit` pattern).
