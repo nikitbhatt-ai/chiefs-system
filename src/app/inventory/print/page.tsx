@@ -1,7 +1,9 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, getTableColumns } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
 import { PrintTrigger } from "../../quotes/[id]/print/PrintTrigger";
+import { normalizeInventorySort, inventoryOrderBy, inventorySortLabel } from "@/lib/inventorySort";
 
 function fmt(v: string | null | undefined) {
   if (v == null) return "—";
@@ -20,39 +22,51 @@ function pct(cost: string | null, price: string | null) {
 export default async function PrintInventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; vendor?: string; archived?: string }>;
+  searchParams: Promise<{
+    category?: string;
+    vendor?: string;
+    archived?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   const sp = await searchParams;
+  const { sort, dir } = normalizeInventorySort(sp.sort, sp.dir);
   const filters = [];
   if (sp.category) filters.push(eq(parts.category, sp.category));
   if (sp.vendor) filters.push(eq(parts.vendorId, sp.vendor));
   if (sp.archived === "1") filters.push(eq(parts.archived, true));
   else filters.push(eq(parts.archived, false));
 
+  // Aliased joins mirror the list page so the export orders (and shows vendor
+  // names) exactly as displayed on screen.
+  const supplier = alias(vendors, "supplier_v");
+  const manufacturer = alias(vendors, "manufacturer_v");
   const rows = await db
-    .select()
+    .select({
+      ...getTableColumns(parts),
+      supplierName: supplier.name,
+      manufacturerName: manufacturer.name,
+    })
     .from(parts)
+    .leftJoin(supplier, eq(parts.vendorId, supplier.id))
+    .leftJoin(manufacturer, eq(parts.manufacturerId, manufacturer.id))
     .where(filters.length ? and(...filters) : undefined)
-    .orderBy(parts.sku);
+    .orderBy(
+      ...inventoryOrderBy(sort, dir, {
+        supplierName: supplier.name,
+        manufacturerName: manufacturer.name,
+      }),
+    );
 
-  const vendorIds = Array.from(
-    new Set(
-      [
-        ...rows.map((r) => r.vendorId),
-        ...rows.map((r) => r.manufacturerId),
-      ].filter(Boolean) as string[],
-    ),
-  );
-  const vMap = new Map(
-    vendorIds.length
-      ? (
-          await db
-            .select({ id: vendors.id, name: vendors.name })
-            .from(vendors)
-            .where(inArray(vendors.id, vendorIds))
-        ).map((v) => [v.id, v.name])
-      : [],
-  );
+  let vendorLabel = sp.vendor ?? "";
+  if (sp.vendor) {
+    const [v] = await db
+      .select({ name: vendors.name })
+      .from(vendors)
+      .where(eq(vendors.id, sp.vendor));
+    vendorLabel = v?.name ?? sp.vendor;
+  }
 
   let totalOnHandValue = 0;
   for (const p of rows) {
@@ -61,7 +75,7 @@ export default async function PrintInventoryPage({
 
   const filterLabels: string[] = [];
   if (sp.category) filterLabels.push(`Category: ${sp.category}`);
-  if (sp.vendor) filterLabels.push(`Vendor: ${vMap.get(sp.vendor) ?? sp.vendor}`);
+  if (sp.vendor) filterLabels.push(`Vendor: ${vendorLabel}`);
   if (sp.archived === "1") filterLabels.push("Archived only");
 
   return (
@@ -143,6 +157,10 @@ export default async function PrintInventoryPage({
         </div>
       ) : null}
 
+      <div style={{ marginBottom: "10pt", fontSize: "10pt" }}>
+        <strong>Sorted by:</strong> {inventorySortLabel(sort, dir)}
+      </div>
+
       <table>
         <thead>
           <tr>
@@ -173,8 +191,8 @@ export default async function PrintInventoryPage({
                   <td style={{ fontFamily: "monospace" }}>{p.sku}</td>
                   <td>{p.name}</td>
                   <td>{p.category ?? "—"}</td>
-                  <td>{p.manufacturerId ? vMap.get(p.manufacturerId) ?? "—" : "—"}</td>
-                  <td>{p.vendorId ? vMap.get(p.vendorId) ?? "—" : "—"}</td>
+                  <td>{p.manufacturerName ?? "—"}</td>
+                  <td>{p.supplierName ?? "—"}</td>
                   <td className="right">{p.quantityOnHand}</td>
                   <td className="right">{p.quantityOnOrder}</td>
                   <td className="right">{fmt(p.cost)}</td>
