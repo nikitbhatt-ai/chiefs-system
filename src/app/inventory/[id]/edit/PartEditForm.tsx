@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { RESTRICTION_CATEGORIES } from "@/lib/credentials";
+import { FormField } from "@/components/FormField";
 
 type Initial = {
   sku: string;
@@ -47,109 +48,133 @@ export function PartEditForm({
       action={action}
       className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl"
     >
-      <input
-        name="sku"
-        required
-        defaultValue={initial.sku}
-        placeholder="SKU *"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
-      />
-      <input
-        name="name"
-        required
-        defaultValue={initial.name}
-        placeholder="Name *"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white md:col-span-2"
-      />
-      <input
-        name="mfgPartNumber"
-        defaultValue={initial.mfgPartNumber}
-        placeholder="Mfg part # (shown on work orders)"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
-      />
-      <input
-        name="category"
-        defaultValue={initial.category}
-        placeholder="Category"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <select
-        name="manufacturerId"
-        defaultValue={initial.manufacturerId}
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      >
-        <option value="">— Manufacturer —</option>
-        {vendors.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name}
-          </option>
-        ))}
-      </select>
-      <select
-        name="vendorId"
-        defaultValue={initial.vendorId}
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      >
-        <option value="">— Supplier —</option>
-        {vendors.map((v) => (
-          <option key={v.id} value={v.id}>
-            {v.name}
-          </option>
-        ))}
-      </select>
-      <input
-        name="quantityOnHand"
-        type="number"
-        min="0"
-        defaultValue={initial.quantityOnHand}
-        placeholder="On hand"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <input
-        name="quantityOnOrder"
-        type="number"
-        min="0"
-        defaultValue={initial.quantityOnOrder}
-        placeholder="On order"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <input
-        name="reorderPoint"
-        type="number"
-        min="0"
-        defaultValue={initial.reorderPoint ?? ""}
-        placeholder="Reorder point"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <input
-        name="leadTimeDays"
-        type="number"
-        min="0"
-        defaultValue={initial.leadTimeDays}
-        placeholder="Lead time (days)"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <input
-        name="cost"
-        type="number"
-        min="0"
-        step="0.01"
-        value={cost}
-        onChange={(e) => setCost(e.target.value)}
-        placeholder="Internal cost"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <input
-        name="price"
-        type="number"
-        min="0"
-        step="0.01"
-        value={price}
-        onChange={(e) => setPrice(e.target.value)}
-        placeholder="Price"
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-      />
-      <div className="text-[11px] text-zinc-400 font-body flex items-center gap-2">
+      <FormField label="SKU" required>
+        <input
+          name="sku"
+          required
+          defaultValue={initial.sku}
+          placeholder="SKU"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
+        />
+      </FormField>
+      <FormField label="Name" required className="md:col-span-2">
+        <input
+          name="name"
+          required
+          defaultValue={initial.name}
+          placeholder="Name"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Mfg part #" hint="shown on work orders">
+        <input
+          name="mfgPartNumber"
+          defaultValue={initial.mfgPartNumber}
+          placeholder="Mfg part #"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
+        />
+      </FormField>
+      <FormField label="Category">
+        <input
+          name="category"
+          defaultValue={initial.category}
+          placeholder="Category"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Manufacturer">
+        <select
+          name="manufacturerId"
+          defaultValue={initial.manufacturerId}
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        >
+          <option value="">— Manufacturer —</option>
+          {vendors.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      </FormField>
+      <FormField label="Supplier">
+        <select
+          name="vendorId"
+          defaultValue={initial.vendorId}
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        >
+          <option value="">— Supplier —</option>
+          {vendors.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+            </option>
+          ))}
+        </select>
+      </FormField>
+      <FormField label="Qty on hand">
+        <input
+          name="quantityOnHand"
+          type="number"
+          min="0"
+          defaultValue={initial.quantityOnHand}
+          placeholder="0"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Qty on order">
+        <input
+          name="quantityOnOrder"
+          type="number"
+          min="0"
+          defaultValue={initial.quantityOnOrder}
+          placeholder="0"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Reorder point">
+        <input
+          name="reorderPoint"
+          type="number"
+          min="0"
+          defaultValue={initial.reorderPoint ?? ""}
+          placeholder="0"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Lead time" hint="days">
+        <input
+          name="leadTimeDays"
+          type="number"
+          min="0"
+          defaultValue={initial.leadTimeDays}
+          placeholder="0"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Internal cost" hint="$">
+        <input
+          name="cost"
+          type="number"
+          min="0"
+          step="0.01"
+          value={cost}
+          onChange={(e) => setCost(e.target.value)}
+          placeholder="0.00"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <FormField label="Sell price" hint="$">
+        <input
+          name="price"
+          type="number"
+          min="0"
+          step="0.01"
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="0.00"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
+      <div className="text-[11px] text-zinc-400 font-body flex items-center gap-2 self-end pb-2">
         <span>
           Margin:{" "}
           <span className="text-white font-semibold">
@@ -214,13 +239,15 @@ export function PartEditForm({
           ))}
         </select>
       </div>
-      <textarea
-        name="description"
-        defaultValue={initial.description}
-        placeholder="Description"
-        rows={3}
-        className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white md:col-span-3"
-      />
+      <FormField label="Description" className="md:col-span-3">
+        <textarea
+          name="description"
+          defaultValue={initial.description}
+          placeholder="Description"
+          rows={3}
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+        />
+      </FormField>
       <div className="md:col-span-3 flex justify-end gap-2">
         <a
           href="/inventory"
