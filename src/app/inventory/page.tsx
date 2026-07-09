@@ -1,5 +1,5 @@
 import { revalidatePath } from "next/cache";
-import { eq, and, sql, count, arrayContains, getTableColumns } from "drizzle-orm";
+import { eq, and, or, ilike, sql, count, arrayContains, getTableColumns } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
@@ -84,16 +84,23 @@ export default async function InventoryPage({
     tag?: string;
     sort?: string;
     dir?: string;
+    q?: string;
   }>;
 }) {
   const sp = await searchParams;
   const tag = (sp.tag ?? "").trim();
+  const q = (sp.q ?? "").trim();
   const { sort, dir } = normalizeInventorySort(sp.sort, sp.dir);
   const { page, perPage, offset } = parsePagination(sp.page);
   const filters = [];
   if (sp.category) filters.push(eq(parts.category, sp.category));
   if (sp.vendor) filters.push(eq(parts.vendorId, sp.vendor));
   if (tag) filters.push(arrayContains(parts.tags, [tag]));
+  // Free-text search by SKU or part name (case-insensitive substring).
+  if (q) {
+    const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    filters.push(or(ilike(parts.sku, like), ilike(parts.name, like))!);
+  }
   if (sp.archived === "1") filters.push(eq(parts.archived, true));
   else filters.push(eq(parts.archived, false));
   const where = filters.length ? and(...filters) : undefined;
@@ -144,6 +151,7 @@ export default async function InventoryPage({
   if (sp.vendor) sortParams.vendor = sp.vendor;
   if (sp.archived === "1") sortParams.archived = "1";
   if (tag) sortParams.tag = tag;
+  if (q) sortParams.q = q;
 
   const printQs = (() => {
     const qs = new URLSearchParams(sortParams);
@@ -163,6 +171,17 @@ export default async function InventoryPage({
       <PartAddForm action={createPart} vendors={vendorRows} />
 
       <form className="bg-[#161624] border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
+        {/* Preserve the active sort (and tag filter) when applying search/filters. */}
+        <input type="hidden" name="sort" value={sort} />
+        <input type="hidden" name="dir" value={dir} />
+        {tag ? <input type="hidden" name="tag" value={tag} /> : null}
+        <input
+          type="search"
+          name="q"
+          defaultValue={q}
+          placeholder="Search SKU or part name…"
+          className="bg-black/40 border border-white/10 rounded px-2 py-1 text-white placeholder:text-zinc-500 min-w-[220px]"
+        />
         <span className="text-zinc-500 uppercase tracking-wider text-[10px]">Filter:</span>
         <select
           name="category"
@@ -256,7 +275,9 @@ export default async function InventoryPage({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={11} className="px-4 py-8 text-center text-xs text-zinc-500">
-                  No parts {sp.archived === "1" ? "archived" : "in inventory"} yet.
+                  {q
+                    ? `No parts match "${q}".`
+                    : `No parts ${sp.archived === "1" ? "archived" : "in inventory"} yet.`}
                 </td>
               </tr>
             ) : (

@@ -902,6 +902,10 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
       values on the edit form are self-explanatory instead of bare numbers.
 - [x] Manufacturer + Supplier dropdowns sourced from Vendors.
 - [x] Filters on category, vendor, archived.
+- [x] **Search by SKU or part name** — `?q=` free-text box on the list
+      (case-insensitive substring, `%`/`_` escaped) filtering the whole list
+      server-side. Combines with the other filters/sort, resets to page 1, and
+      is carried into the Print / Save-as-PDF export (shown in its filter line).
 - [x] **Sortable columns** on the list — every column header (SKU, Name,
       Category, Manufacturer, Supplier, On hand, On order, Internal cost,
       Price, Margin) has up/down arrows. Sorting is server-side via
