@@ -1,4 +1,4 @@
-import { and, eq, getTableColumns } from "drizzle-orm";
+import { and, eq, or, ilike, arrayContains, getTableColumns } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
@@ -28,13 +28,22 @@ export default async function PrintInventoryPage({
     archived?: string;
     sort?: string;
     dir?: string;
+    tag?: string;
+    q?: string;
   }>;
 }) {
   const sp = await searchParams;
   const { sort, dir } = normalizeInventorySort(sp.sort, sp.dir);
+  const tag = (sp.tag ?? "").trim();
+  const q = (sp.q ?? "").trim();
   const filters = [];
   if (sp.category) filters.push(eq(parts.category, sp.category));
   if (sp.vendor) filters.push(eq(parts.vendorId, sp.vendor));
+  if (tag) filters.push(arrayContains(parts.tags, [tag]));
+  if (q) {
+    const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    filters.push(or(ilike(parts.sku, like), ilike(parts.name, like))!);
+  }
   if (sp.archived === "1") filters.push(eq(parts.archived, true));
   else filters.push(eq(parts.archived, false));
 
@@ -74,8 +83,10 @@ export default async function PrintInventoryPage({
   }
 
   const filterLabels: string[] = [];
+  if (q) filterLabels.push(`Search: "${q}"`);
   if (sp.category) filterLabels.push(`Category: ${sp.category}`);
   if (sp.vendor) filterLabels.push(`Vendor: ${vendorLabel}`);
+  if (tag) filterLabels.push(`Tag: ${tag}`);
   if (sp.archived === "1") filterLabels.push("Archived only");
 
   return (
