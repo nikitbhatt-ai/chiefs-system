@@ -2,14 +2,12 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, workOrders, deals, dealCredentials } from "@/db/schema";
+import { quotes, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { QuoteTabs } from "@/components/QuoteTabs";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
-import { credentialCoversPart } from "@/lib/credentials";
+import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
-import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
-import { qcComplete } from "@/lib/qc";
 
 export const dynamic = "force-dynamic";
 
@@ -18,17 +16,21 @@ async function saveQuote(formData: FormData) {
   const id = String(formData.get("id") ?? "");
   if (!id) return;
   const customerId = String(formData.get("customerId") ?? "") || null;
-  const status = String(formData.get("status") ?? "draft") as
-    | "draft"
-    | "sent"
-    | "approved"
-    | "converted";
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const linesJson = String(formData.get("lines") ?? "[]");
   const lines = JSON.parse(linesJson) as QuoteLine[];
 
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) return;
+
+  // Only accept a recognized status. If the field is missing or garbage,
+  // keep the quote's existing status rather than silently clobbering it back
+  // to "draft" (the old `?? "draft"` default was the "reverts to draft" bug).
+  const VALID_STATUSES = ["draft", "sent", "approved", "converted"] as const;
+  const rawStatus = String(formData.get("status") ?? "");
+  const status = (VALID_STATUSES as readonly string[]).includes(rawStatus)
+    ? (rawStatus as (typeof VALID_STATUSES)[number])
+    : q.status;
 
   // NOTE: The restricted-part credential coverage gate that lived here was
   // removed in tandem with PR #23 (which dropped the canAdvanceTo hard
@@ -87,6 +89,10 @@ async function saveQuote(formData: FormData) {
   if (customerId) revalidatePath(`/crm/${customerId}`);
 }
 
+// Ordered workflow stages, shared with the client strip below. The stage
+// move itself (work-order upsert, approval gate, inventory deduction on the
+// in_progress crossing, CRM sync) is owned by POST /api/quotes/[id]/workflow-stage
+// so there is a single code path — the strip just calls that endpoint.
 const WORKFLOW_STAGES = [
   "estimate",
   "confirmed",
@@ -97,70 +103,6 @@ const WORKFLOW_STAGES = [
   "completed",
   "delivered",
 ] as const;
-
-async function moveStage(formData: FormData) {
-  "use server";
-  const id = String(formData.get("id") ?? "");
-  const stage = String(formData.get("stage") ?? "");
-  if (!id || !WORKFLOW_STAGES.includes(stage as (typeof WORKFLOW_STAGES)[number])) return;
-
-  const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
-  if (!q) return;
-
-  let [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, id));
-
-  // Build-close gate: don't advance into completed/delivered until QC passes.
-  if (stage === "completed" || stage === "delivered") {
-    const passed = wo ? await qcComplete(wo.id) : false;
-    if (!passed) return;
-  }
-
-  if (!wo && stage !== "estimate") {
-    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
-    const inserted = await db
-      .insert(workOrders)
-      .values({
-        woNumber,
-        customerId: q.customerId ?? null,
-        quoteId: id,
-        status: stage,
-      })
-      .returning();
-    wo = inserted[0];
-  } else if (wo) {
-    await db
-      .update(workOrders)
-      .set({ status: stage, updatedAt: new Date() })
-      .where(eq(workOrders.id, wo.id));
-  }
-
-  // FIFO consumption is keyed off the build crossing into in_progress.
-  // consumeWorkOrderParts / restoreWorkOrderParts are transactional and
-  // idempotent (the work_orders.parts_consumed latch), so advancing to or past
-  // in_progress consumes exactly once and walking back before it restores the
-  // drained layers. This replaces the old inline, non-transactional loop that
-  // could double-consume or drive stock negative.
-  if (wo) {
-    const idx = WORKFLOW_STAGES.indexOf(stage as (typeof WORKFLOW_STAGES)[number]);
-    const inProgressIdx = WORKFLOW_STAGES.indexOf("in_progress");
-    if (idx >= inProgressIdx) {
-      await consumeWorkOrderParts(wo.id);
-    } else {
-      await restoreWorkOrderParts(wo.id);
-    }
-  }
-
-  await db
-    .update(quotes)
-    .set({ workflowStage: stage, updatedAt: new Date() })
-    .where(eq(quotes.id, id));
-
-  revalidatePath("/workflow");
-  revalidatePath("/quotes");
-  revalidatePath(`/quotes/${id}`);
-  revalidatePath("/inventory");
-  revalidatePath("/work-orders");
-}
 
 export default async function QuotePage({
   params,
@@ -214,32 +156,11 @@ export default async function QuotePage({
         </a>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
-          Workflow stage
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {WORKFLOW_STAGES.map((s, i) => {
-            const active = q.workflowStage === s;
-            return (
-              <form key={s} action={moveStage}>
-                <input type="hidden" name="id" value={q.id} />
-                <input type="hidden" name="stage" value={s} />
-                <button
-                  type="submit"
-                  className={`text-[11px] font-body px-3 py-1.5 rounded border transition-colors ${
-                    active
-                      ? "bg-amber-500 text-black border-amber-400 font-semibold"
-                      : "bg-black/40 text-zinc-300 border-white/10 hover:border-amber-500/50 hover:text-white"
-                  }`}
-                >
-                  {i + 1}. {s.replace(/_/g, " ")}
-                </button>
-              </form>
-            );
-          })}
-        </div>
-      </div>
+      <QuoteWorkflowStrip
+        quoteId={q.id}
+        stages={WORKFLOW_STAGES}
+        currentStage={q.workflowStage}
+      />
 
       <QuoteEditor
         id={q.id}

@@ -20,13 +20,21 @@ const STAGE_KEYS = [
   "delivered",
 ];
 
+// A build can't start (move into in_progress or beyond) until the quote has
+// been approved. "converted" sits after "approved" in the status workflow, so
+// it counts as approved too. This is the single gate that also protects the
+// inventory deduction, which is keyed to the same in_progress crossing.
+const BUILD_START_INDEX = STAGE_KEYS.indexOf("in_progress");
+const STATUSES_CLEARED_TO_BUILD = new Set(["approved", "converted"]);
+
 // POST /api/quotes/[id]/workflow-stage  body: { stage }
-// Moves the quote on the /workflow Kanban. Mirrors the existing
-// moveQuoteStage server action: updates the WO status (creating one if
-// needed and the target isn't 'estimate'), stamps deal_id from the quote
-// when present, deducts parts when stage flips to in_progress for the
-// first time, updates quotes.workflow_stage, then best-effort triggers
-// the reverse CRM sync.
+// The single path for quote-side workflow moves — used by both the
+// /workflow Kanban and the /quotes/[id] workflow strip. Enforces the
+// approval gate, updates the WO status (creating one if needed and the
+// target isn't 'estimate'), stamps deal_id from the quote when present,
+// deducts parts when stage flips to in_progress for the first time,
+// updates quotes.workflow_stage, then best-effort triggers the reverse
+// CRM sync.
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -44,11 +52,27 @@ export async function POST(
         id: quotes.id,
         customerId: quotes.customerId,
         dealId: quotes.dealId,
+        status: quotes.status,
         workflowStage: quotes.workflowStage,
       })
       .from(quotes)
       .where(eq(quotes.id, id));
     if (!q) return NextResponse.json({ error: "quote not found" }, { status: 404 });
+
+    // Approval gate: don't let a build start (and don't deduct inventory)
+    // until the quote is approved. Bail before creating/updating the work
+    // order or touching stock.
+    const targetIndex = STAGE_KEYS.indexOf(stage);
+    if (targetIndex >= BUILD_START_INDEX && !STATUSES_CLEARED_TO_BUILD.has(q.status)) {
+      return NextResponse.json(
+        {
+          error:
+            "Approve the quote before starting the build. Set the quote's status to Approved, then move it to In Progress.",
+          needsApproval: true,
+        },
+        { status: 400 },
+      );
+    }
 
     let [wo] = await db
       .select({
@@ -107,9 +131,7 @@ export async function POST(
     // Advancing to or past in_progress consumes the quote's parts exactly once;
     // walking the build back before in_progress restores the drained layers.
     if (wo) {
-      const idx = STAGE_KEYS.indexOf(stage);
-      const inProgressIdx = STAGE_KEYS.indexOf("in_progress");
-      if (idx >= inProgressIdx) {
+      if (targetIndex >= BUILD_START_INDEX) {
         await consumeWorkOrderParts(wo.id);
       } else {
         await restoreWorkOrderParts(wo.id);
