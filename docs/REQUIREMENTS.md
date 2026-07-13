@@ -866,13 +866,24 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Custom + fixed fees; both can be removed per quote.
 - [x] Live totals: subtotal, discount, fees, tax, grand total.
 - [x] Internal notes per quote.
-- [x] Status workflow: draft → sent → approved → converted.
+- [x] Status workflow: draft → sent → approved → converted. Saving a
+      quote never silently reverts the status: `saveQuote` only accepts a
+      recognized status and otherwise keeps the quote's existing value
+      (the old `?? "draft"` default clobbered the record back to draft
+      whenever the field didn't round-trip — the "reverts to draft" bug).
+- [x] **A build can't start until the quote is approved.** The workflow
+      strip can move the quote up to "next in line" in any status, but
+      moving it to "In Progress" (or beyond) is rejected unless the
+      status is `approved` or `converted`. The strip shows the rejection
+      inline instead of quietly doing nothing.
 - [x] Customer dropdown.
 - [x] Tax rate input per quote.
 - [x] Add parts from inventory to a quote via "+ Add from inventory…"
       dropdown. Adds line with sku/name/price/partId; stock NOT deducted
-      at quote time (deducted when the linked work order moves to
-      "In Progress" on the Workflow board).
+      at quote time. Stock is deducted **only** when the linked work
+      order crosses into "In Progress" on the workflow (gated on the
+      quote being approved), and restored if the build is walked back
+      before "In Progress."
 - [x] Column titles on the line-items table.
 - [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
@@ -1143,7 +1154,8 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
       - Full FIFO layers table, oldest first, depleted layers dimmed.
 - [x] **Consumption depletes FIFO layers** when a work order linked to
       a quote with stock parts moves to "In Progress" on the Workflow
-      board. Idempotent via `work_orders.parts_consumed`.
+      board — which is only allowed once the quote is approved.
+      Idempotent via `work_orders.parts_consumed`.
 - [ ] Restock action (manual reverse if a build is canceled).
 - [ ] Optional moving-weighted-average cache on `parts` for fast lookup.
 
@@ -1484,9 +1496,29 @@ guarded function.
     nothing.
 - [x] **FIFO consumption keyed to stage, both directions.** Advancing a
   quote/WO to or past `in_progress` consumes once; moving it back before
-  `in_progress` restores. Wired into both `/quotes/[id]` `moveStage`
-  and `POST /api/quotes/[id]/workflow-stage` (the two paths now call the
-  same module).
+  `in_progress` restores. Both quote-side stage moves now flow through
+  the **single** `POST /api/quotes/[id]/workflow-stage` endpoint: the
+  `/workflow` Kanban (`WorkflowBoard`) and the `/quotes/[id]` workflow
+  strip (`QuoteWorkflowStrip`) both call it. The old `/quotes/[id]`
+  `moveStage` server action was removed — it duplicated the logic, ran
+  no CRM sync, and failed silently (which read to users as the move
+  "reverting"). The endpoint returns typed 400s the UI surfaces.
+- [x] **Approval gate before a build can start.** The
+  `POST /api/quotes/[id]/workflow-stage` endpoint rejects any move to
+  `in_progress` (or a later stage) unless `quotes.status` is `approved`
+  or `converted`, returning `400 { needsApproval: true }`. This is the
+  single gate that also protects inventory — because deduction is keyed
+  to the same `in_progress` crossing, stock can never leave the system
+  for an unapproved quote. Both the workflow strip and the Kanban board
+  show the rejection message.
+- [ ] **CRM-side entry into `in_progress` (deferred).** `syncDealToWorkflow`
+  can set a work order's status to `in_progress` when a deal's CRM stage
+  moves to `in_production`. That path updates the WO status but does not
+  run `consumeWorkOrderParts` and does not apply the approval gate, so
+  the "deduct at in_progress / only when approved" guarantee holds only
+  for the quote/workflow-board paths today. Consolidating all three
+  entry points behind one guarded "advance work order" helper (calling
+  the idempotent `consumeWorkOrderParts`) is the clean follow-up.
 - [x] **`src/lib/dealStage.ts :: applyDealStageChange`** — the single
   guarded deal-stage transition. Runs `canAdvanceTo` (credential hard
   gate included), captures override/backwards reasons into
