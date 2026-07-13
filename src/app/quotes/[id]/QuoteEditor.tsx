@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
 import { componentsToQuoteLines } from "@/lib/packages";
@@ -53,12 +53,6 @@ export function QuoteEditor({
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
   const [taxRate, setTaxRate] = useState("0");
-  // Controlled status mirrors the prop so the select reflects the latest
-  // value after a save → revalidate cycle. With an uncontrolled
-  // defaultValue, React keeps the original DOM value across re-renders
-  // even after the underlying record changes — that's the 'reverts to
-  // draft' visual bug.
-  const [statusValue, setStatusValue] = useState<typeof status>(status);
   // Drag-reorder state for line items. `draggingIndex` styles the row
   // being dragged (faded out); `dragOverIndex` highlights the drop slot.
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
@@ -67,9 +61,6 @@ export function QuoteEditor({
   // from the current quote's lines).
   const [pkgMsg, setPkgMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [savingPkg, setSavingPkg] = useState(false);
-  useEffect(() => {
-    setStatusValue(status);
-  }, [status]);
 
   const totals = useMemo(() => {
     let subtotal = 0;
@@ -234,7 +225,14 @@ export function QuoteEditor({
       <input type="hidden" name="lines" value={JSON.stringify(lines)} />
 
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Uncontrolled selects: React 19 auto-resets the <form> after a
+            server action, which snaps a *controlled* select back to its
+            first option (Draft) and then won't re-sync the DOM — that was
+            the "reverts to draft" bug. An uncontrolled select resets to its
+            defaultValue instead, and the `key` re-reads defaultValue after a
+            save changes the saved value, so the box always shows the truth. */}
         <select
+          key={`customer-${customerId ?? ""}`}
           name="customerId"
           defaultValue={customerId ?? ""}
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
@@ -247,9 +245,9 @@ export function QuoteEditor({
           ))}
         </select>
         <select
+          key={`status-${status}`}
           name="status"
-          value={statusValue}
-          onChange={(e) => setStatusValue(e.target.value as typeof status)}
+          defaultValue={status}
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         >
           <option value="draft">Draft</option>
