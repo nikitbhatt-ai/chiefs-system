@@ -9,6 +9,7 @@
 import { and, desc, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity, users } from "@/db/schema";
+import { nextDocumentNumber } from "@/lib/documentNumber";
 import { bucketForStage } from "@/lib/pipelineBuckets";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline, stageLabel, type DealStage } from "@/lib/pipelines";
@@ -95,11 +96,13 @@ export async function maybePromoteWonDeal(
     let workOrderId: string | null = null;
     const [existingWo] = await tx.select().from(workOrders).where(eq(workOrders.quoteId, quoteId)).limit(1).for("update");
     if (!existingWo) {
-      const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+      const documentNumber = await nextDocumentNumber();
+      const woNumber = `WO-${documentNumber}`;
       const [wo] = await tx
         .insert(workOrders)
         .values({
           woNumber,
+          documentNumber,
           customerId: d?.customerId ?? null,
           quoteId,
           dealId,
@@ -257,7 +260,8 @@ export async function syncDealToWorkflow(
       });
       return { ok: false, reason: "no_target" };
     }
-    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+    const documentNumber = await nextDocumentNumber();
+    const woNumber = `WO-${documentNumber}`;
     const [q] = await db
       .select()
       .from(quotes)
@@ -268,6 +272,7 @@ export async function syncDealToWorkflow(
       .insert(workOrders)
       .values({
         woNumber,
+        documentNumber,
         customerId: d.customerId ?? null,
         quoteId: q?.id ?? null,
         dealId,

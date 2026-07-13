@@ -6,6 +6,7 @@ import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
 import { qcComplete } from "@/lib/qc";
+import { nextDocumentNumber } from "@/lib/documentNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -100,11 +101,13 @@ export async function POST(
     }
 
     if (!wo && stage !== "estimate") {
-      const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+      const documentNumber = await nextDocumentNumber();
+      const woNumber = `WO-${documentNumber}`;
       const inserted = await db
         .insert(workOrders)
         .values({
           woNumber,
+          documentNumber,
           customerId: q.customerId ?? null,
           quoteId: id,
           dealId: q.dealId ?? null,

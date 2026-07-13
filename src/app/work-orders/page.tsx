@@ -1,9 +1,12 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { and, arrayContains, count, desc, eq, ilike, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
-import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
+import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, invoices, type POLineItem } from "@/db/schema";
+import { createInvoiceFromWorkOrder } from "@/lib/invoices";
+import { fmtDocumentNumber } from "@/lib/documentNumber";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
 import { ListRowControls } from "@/components/ListRowControls";
@@ -46,6 +49,18 @@ async function deleteWO(formData: FormData) {
   await db.delete(workOrders).where(eq(workOrders.id, id));
   revalidatePath("/work-orders");
   revalidatePath("/workflow");
+}
+
+async function generateInvoice(formData: FormData) {
+  "use server";
+  const session = await auth();
+  if (!session?.user) return;
+  const id = String(formData.get("id") ?? "");
+  if (!id) return;
+  const result = await createInvoiceFromWorkOrder(id);
+  revalidatePath("/work-orders");
+  revalidatePath("/invoices");
+  if (result.ok) redirect(`/invoices/${result.invoiceId}`);
 }
 
 async function setProcurementPlan(formData: FormData) {
@@ -148,6 +163,20 @@ export default async function WorkOrdersPage({
   const customerMap = new Map(customerRows.map((r) => [r.id, r.name]));
   const quoteMap = new Map(quoteRows.map((r) => [r.id, r]));
   const vehicleMap = new Map(vehicleRows.map((r) => [r.id, r]));
+
+  const rowWoIds = rows.map((r) => r.id);
+  const invoiceRows = rowWoIds.length
+    ? await db
+        .select({
+          id: invoices.id,
+          workOrderId: invoices.workOrderId,
+          documentNumber: invoices.documentNumber,
+          status: invoices.status,
+        })
+        .from(invoices)
+        .where(inArray(invoices.workOrderId, rowWoIds))
+    : [];
+  const invoiceByWO = new Map(invoiceRows.map((i) => [i.workOrderId ?? "", i]));
 
   // Procurement plan inputs. Gather every part_id mentioned across all the
   // quotes we just loaded, fetch them in a single query with vendor name,
@@ -411,6 +440,32 @@ export default async function WorkOrdersPage({
                           Open quote
                         </a>
                       ) : null}
+                      {(() => {
+                        const inv = invoiceByWO.get(w.id);
+                        if (inv) {
+                          return (
+                            <a
+                              href={`/invoices/${inv.id}`}
+                              className="text-[11px] text-amber-400 hover:text-amber-300 mr-3"
+                              title={`Invoice ${fmtDocumentNumber(inv.documentNumber)} · ${inv.status}`}
+                            >
+                              Invoice {fmtDocumentNumber(inv.documentNumber)}
+                            </a>
+                          );
+                        }
+                        if (!w.quoteId) return null;
+                        return (
+                          <form action={generateInvoice} className="inline">
+                            <input type="hidden" name="id" value={w.id} />
+                            <button
+                              type="submit"
+                              className="text-[11px] text-amber-400 hover:text-amber-300 mr-3"
+                            >
+                              Generate invoice
+                            </button>
+                          </form>
+                        );
+                      })()}
                       <form action={deleteWO} className="inline">
                         <input type="hidden" name="id" value={w.id} />
                         <button

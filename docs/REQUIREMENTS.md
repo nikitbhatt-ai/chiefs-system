@@ -1994,6 +1994,97 @@ won't scale once the catalog is large.
 
 No schema change.
 
+## Invoices as a separate entity (ShopMonkey-style)
+
+Requirement: the work order (internal build sheet for techs) and the
+invoice (customer + accounting document) must be **separate records** but
+share a single **6-digit document number** so the shop floor and the
+customer see the same identifier — the ShopMonkey convention.
+
+- [x] **`document_number_seq`** — Postgres sequence starting at 100000,
+  monotonically increasing. `nextDocumentNumber()` (`src/lib/documentNumber.ts`)
+  reserves the next value; `fmtDocumentNumber(n)` renders it zero-padded
+  to 6 digits.
+- [x] **Work orders** carry `document_number` (unique, nullable for
+  legacy rows). Every code path that inserts a WO (quote workflow-stage
+  transition, direct WO POST, deal triggers on won-deal promotion +
+  workflow sync) assigns one at creation time.
+- [x] **`invoices` table** — separate entity that snapshots the source
+  quote's `lineItems` and totals at generation time. Fields: status
+  (draft | sent | partial | paid | overdue | void), subtotal /
+  discountTotal / taxTotal / grandTotal, amountPaid, balanceDue,
+  dueDate, sentAt, paidAt, lineItems (jsonb snapshot), notes. Linked to
+  the source work order + quote + customer + deal.
+- [x] **`invoice_payments` table** — one row per payment (cash | check |
+  card | ach | other). `recordInvoicePayment()` inserts the row, re-sums
+  `amount_paid`, recomputes `balance_due`, and advances status to
+  `partial` or `paid` inside a single transaction.
+- [x] **`createInvoiceFromWorkOrder(workOrderId)`** — idempotent per WO
+  (returns `already_invoiced` if one exists); reuses the WO's document
+  number (or backfills one for legacy rows so both records share it);
+  snapshots quote lineItems; sets a default 30-day due date.
+- [x] **UI**
+  - `/invoices` — list with KPI cards (outstanding balance, total
+    received, total invoices) and status-colored table.
+  - `/invoices/[id]` — detail with line-item snapshot, payment history,
+    record-payment form, mark-sent action, and invoice PDF link.
+  - `/work-orders` list — per-row **Generate invoice** button (POSTs to
+    the action, redirects to the new invoice); flips to
+    **Invoice XXXXXX** link once an invoice exists for that WO.
+  - Nav: `/invoices` added to Operations menu; breadcrumbs know the
+    section.
+
+SQL (idempotent — user runs in Neon SQL Editor):
+
+```sql
+CREATE SEQUENCE IF NOT EXISTS document_number_seq
+  START WITH 100000 MINVALUE 100000 INCREMENT BY 1 NO CYCLE;
+
+ALTER TABLE work_orders
+  ADD COLUMN IF NOT EXISTS document_number integer UNIQUE;
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  document_number integer NOT NULL UNIQUE,
+  work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
+  quote_id uuid REFERENCES quotes(id) ON DELETE SET NULL,
+  customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
+  deal_id uuid REFERENCES deals(id) ON DELETE SET NULL,
+  status text NOT NULL DEFAULT 'draft',
+  subtotal numeric(12,2) NOT NULL DEFAULT 0,
+  discount_total numeric(12,2) NOT NULL DEFAULT 0,
+  tax_total numeric(12,2) NOT NULL DEFAULT 0,
+  grand_total numeric(12,2) NOT NULL DEFAULT 0,
+  amount_paid numeric(12,2) NOT NULL DEFAULT 0,
+  balance_due numeric(12,2) NOT NULL DEFAULT 0,
+  due_date timestamp,
+  sent_at timestamp,
+  paid_at timestamp,
+  line_items jsonb NOT NULL DEFAULT '[]'::jsonb,
+  notes text,
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS invoices_customer_idx ON invoices(customer_id);
+CREATE INDEX IF NOT EXISTS invoices_deal_idx ON invoices(deal_id);
+CREATE INDEX IF NOT EXISTS invoices_work_order_idx ON invoices(work_order_id);
+CREATE INDEX IF NOT EXISTS invoices_status_idx ON invoices(status);
+
+CREATE TABLE IF NOT EXISTS invoice_payments (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id uuid NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
+  amount numeric(12,2) NOT NULL,
+  method text NOT NULL,
+  reference text,
+  received_at timestamp NOT NULL DEFAULT now(),
+  received_by uuid REFERENCES users(id),
+  notes text,
+  created_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS invoice_payments_invoice_idx
+  ON invoice_payments(invoice_id);
+```
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

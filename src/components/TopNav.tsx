@@ -29,6 +29,7 @@ const NAV: NavGroup[] = [
       { href: "/inventory", label: "Inventory" },
       { href: "/packages", label: "Packages" },
       { href: "/purchase-orders", label: "Purchase Orders" },
+      { href: "/invoices", label: "Invoices" },
       { href: "/procurement", label: "Procurement" },
       { href: "/vendors", label: "Vendors" },
     ],

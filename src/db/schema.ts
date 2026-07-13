@@ -330,6 +330,13 @@ export const workOrders = pgTable("work_orders", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   woNumber: text("wo_number").unique(),
+  // 6-digit numeric ID shared between the work order (internal tech doc)
+  // and the invoice (customer + accounting doc) that eventually closes it
+  // out. Populated on WO creation from `document_number_seq`. When an
+  // invoice is generated from this WO, the invoice reuses this same
+  // number — matches the ShopMonkey convention where the shop's RO # and
+  // the customer's invoice # are one and the same.
+  documentNumber: integer("document_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),
   quoteId: uuid("quote_id").references(() => quotes.id),
@@ -347,6 +354,63 @@ export const workOrders = pgTable("work_orders", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// Invoices are the customer + accounting-facing document that closes out
+// a work order. They share the WO's document_number (6-digit) so the
+// shop's build sheet and the customer's bill carry the same identifier.
+// Line items are snapshotted from the source quote at invoice-generation
+// time — if the quote is later edited, this invoice keeps the original
+// line items so what was billed can't drift.
+export const invoices = pgTable("invoices", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  documentNumber: integer("document_number").notNull().unique(),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "set null" }),
+  customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+  // draft | sent | partial | paid | overdue | void
+  status: text("status").notNull().default("draft"),
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  discountTotal: numeric("discount_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  grandTotal: numeric("grand_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  amountPaid: numeric("amount_paid", { precision: 12, scale: 2 }).notNull().default("0"),
+  balanceDue: numeric("balance_due", { precision: 12, scale: 2 }).notNull().default("0"),
+  dueDate: timestamp("due_date"),
+  sentAt: timestamp("sent_at"),
+  paidAt: timestamp("paid_at"),
+  // Snapshot of the quote's lineItems at invoice-generation time. The
+  // invoice PDF renders from this, not from the live quote — protects
+  // billed history from later edits to the quote.
+  lineItems: jsonb("line_items").notNull().default([]),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("invoices_customer_idx").on(t.customerId),
+  index("invoices_deal_idx").on(t.dealId),
+  index("invoices_work_order_idx").on(t.workOrderId),
+  index("invoices_status_idx").on(t.status),
+]);
+
+// One row per payment received against an invoice. Sum of payments =
+// invoices.amount_paid; invoices.balance_due = grand_total − amount_paid.
+// invoices.status auto-advances (draft → sent → partial → paid) as
+// payments land.
+export const invoicePayments = pgTable("invoice_payments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  // cash | check | card | ach | other
+  method: text("method").notNull(),
+  reference: text("reference"),
+  receivedAt: timestamp("received_at").notNull().defaultNow(),
+  receivedBy: uuid("received_by").references(() => users.id),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("invoice_payments_invoice_idx").on(t.invoiceId),
+]);
 
 export const qcChecklists = pgTable("qc_checklists", {
   id: uuid("id").defaultRandom().primaryKey(),
