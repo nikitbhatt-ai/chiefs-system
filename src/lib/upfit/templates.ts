@@ -62,6 +62,11 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     label: "Ford F-350",
     imageUrl: "/upfit-templates/f350.jpg",
   },
+  transit_custom: {
+    slug: "transit_custom",
+    label: "Ford Transit Custom L2H1",
+    imageUrl: "/upfit-templates/transit_custom.jpg",
+  },
 };
 
 export const BODY_STYLES = Object.values(VEHICLE_TEMPLATES).map((t) => ({
