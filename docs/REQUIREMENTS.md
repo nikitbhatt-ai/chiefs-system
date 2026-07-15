@@ -1195,16 +1195,16 @@ customer sees and the techs build to. One upfit per quote.
       the image and stored as fraction 0..1 of the image box, so the
       same coordinate is identical on screen and in print regardless of
       the image's aspect ratio. Templates are per-vehicle (Tahoe,
-      Suburban, Blazer, Silverado, Durango, Ford PIU, F-150, F-350)
-      rather than per body style, so the diagram on the spec actually
-      matches the truck. The `upfit_configs.body_style` column name is
+      Suburban, Blazer, Silverado, Durango, Ford PIU, F-150, F-350,
+      Ford Transit Custom) rather than per body style, so the diagram
+      on the spec actually matches the truck. The `upfit_configs.body_style` column name is
       preserved for backward-compat; the value now holds the per-vehicle
       slug. (The earlier five-separate-views model was dropped —
       `UpfitPin.view` is retained optional for backward-compat only.)
 - [x] **Template image contract** — drop ONE JPG (or PNG) per vehicle at
       `public/upfit-templates/<slug>.jpg`. Slugs currently shipped:
       `tahoe`, `suburban`, `blazer`, `silverado`, `durango`, `piu`,
-      `f150`, `f350`. Any aspect ratio works (pins track the image by
+      `f150`, `f350`, `transit_custom`. Any aspect ratio works (pins track the image by
       percentage); a missing file degrades to a labeled empty box, no
       crash. No rebuild required — files are read on each render. To add
       a new vehicle: drop the JPG and append an entry to
