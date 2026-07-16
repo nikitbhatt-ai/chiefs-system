@@ -95,6 +95,11 @@ async function resolveUpfit(quoteId: string): Promise<UpfitPdfData | null> {
     bodyStyle: config?.bodyStyle ?? "tahoe",
     pins: config?.pins ?? [],
     notes: config?.notes ?? null,
+    // Page 2 of the spec sheet is the actual quote for this build.
+    quoteLineItems: (q.lineItems as unknown as QuoteLine[]) ?? [],
+    quoteTaxTotal: Number(q.taxTotal ?? 0),
+    quoteGrandTotal: Number(q.grandTotal ?? 0),
+    quoteStatus: q.status,
   };
 }
 
