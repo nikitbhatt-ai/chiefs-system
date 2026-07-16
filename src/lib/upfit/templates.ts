@@ -240,22 +240,27 @@ export const COLOR_SCHEMES: Record<string, ColorScheme> = {
   red_white: { key: "red_white", label: "Red / White", group: "split", segments: [RED, WHITE] },
   blue_white: { key: "blue_white", label: "Blue / White", group: "split", segments: [BLUE, WHITE] },
   amber_white: { key: "amber_white", label: "Amber / White", group: "split", segments: [AMBER, WHITE] },
-  red_blue: { key: "red_blue", label: "Red / Blue", group: "split", segments: [RED, BLUE] },
+  // Blue-driver / red-passenger convention: blue leads (left), red
+  // trails (right). Key stays `red_blue` so pins saved before the flip
+  // keep resolving; only the render order + label change.
+  red_blue: { key: "red_blue", label: "Blue / Red", group: "split", segments: [BLUE, RED] },
   green_white: { key: "green_white", label: "Green / White", group: "split", segments: [GREEN, WHITE] },
   red_amber: { key: "red_amber", label: "Red / Amber", group: "split", segments: [RED, AMBER] },
   blue_amber: { key: "blue_amber", label: "Blue / Amber", group: "split", segments: [BLUE, AMBER] },
   // --- Trios (3-color combos) ---
-  rwb: { key: "rwb", label: "Red / White / Blue", group: "trio", segments: [RED, WHITE, BLUE] },
+  // rwb key retained; now renders blue → white → red per the lightbar
+  // convention above.
+  rwb: { key: "rwb", label: "Blue / White / Red", group: "trio", segments: [BLUE, WHITE, RED] },
   rwa: { key: "rwa", label: "Red / White / Amber", group: "trio", segments: [RED, WHITE, AMBER] },
   bwa: { key: "bwa", label: "Blue / White / Amber", group: "trio", segments: [BLUE, WHITE, AMBER] },
   rab: { key: "rab", label: "Red / Amber / Blue", group: "trio", segments: [RED, AMBER, BLUE] },
   // --- Multi-segment counts ---
   ...makeCountSchemes("rwrw", "Red / White", [RED, WHITE], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("bwbw", "Blue / White", [BLUE, WHITE], TWO_COLOR_COUNTS, "count"),
-  ...makeCountSchemes("rbrb", "Red / Blue", [RED, BLUE], TWO_COLOR_COUNTS, "count"),
+  ...makeCountSchemes("rbrb", "Blue / Red", [BLUE, RED], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("rara", "Red / Amber", [RED, AMBER], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("baba", "Blue / Amber", [BLUE, AMBER], TWO_COLOR_COUNTS, "count"),
-  ...makeCountSchemes("rwb", "Red / White / Blue", [RED, WHITE, BLUE], TRIO_COUNTS, "count"),
+  ...makeCountSchemes("rwb", "Blue / White / Red", [BLUE, WHITE, RED], TRIO_COUNTS, "count"),
   ...makeCountSchemes("rab", "Red / Amber / Blue", [RED, AMBER, BLUE], TRIO_COUNTS, "count"),
 };
 

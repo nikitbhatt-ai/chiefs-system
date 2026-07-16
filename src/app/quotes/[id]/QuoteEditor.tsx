@@ -219,6 +219,64 @@ export function QuoteEditor({
     ]);
   }
 
+  // Add-line toolbar, rendered at BOTH the top and bottom of the line
+  // items so a rep working a long quote never has to scroll back up to
+  // add another part. `withSave` shows the "Save as package" action
+  // (top only) — the bottom copy stays focused on adding.
+  function renderAddControls(withSave: boolean) {
+    return (
+      <div className="flex gap-2 items-center flex-wrap justify-end">
+        <div className="w-[240px]">
+          <PartSearchCombobox mode="adder" placeholder="+ Search inventory to add…" onPick={addPart} />
+        </div>
+        <div className="w-[220px]">
+          <PackageSearchCombobox placeholder="+ Add package…" onPick={addPackage} />
+        </div>
+        <button
+          type="button"
+          onClick={addItem}
+          className="text-[11px] font-body text-amber-400 hover:text-amber-300"
+        >
+          + Custom item
+        </button>
+        <button
+          type="button"
+          onClick={() => addFee(false)}
+          className="text-[11px] font-body text-amber-400 hover:text-amber-300"
+        >
+          + Custom fee
+        </button>
+        <button
+          type="button"
+          onClick={() => addFee(true)}
+          className="text-[11px] font-body text-amber-400 hover:text-amber-300"
+        >
+          + Fixed fee
+        </button>
+        <button
+          type="button"
+          onClick={addLabor}
+          className="text-[11px] font-body text-amber-400 hover:text-amber-300"
+        >
+          + Labor
+        </button>
+        {withSave ? (
+          <>
+            <span className="text-white/10">|</span>
+            <button
+              type="button"
+              onClick={saveAsPackage}
+              disabled={savingPkg}
+              className="text-[11px] font-body text-zinc-300 hover:text-white border border-white/10 rounded px-2 py-1 disabled:opacity-40"
+            >
+              {savingPkg ? "Saving…" : "Save as package"}
+            </button>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
   return (
     <form action={action} className="space-y-4">
       <input type="hidden" name="id" value={id} />
@@ -272,51 +330,7 @@ export function QuoteEditor({
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Line items
           </h3>
-          <div className="flex gap-2 items-center flex-wrap justify-end">
-            <div className="w-[240px]">
-              <PartSearchCombobox mode="adder" placeholder="+ Search inventory to add…" onPick={addPart} />
-            </div>
-            <div className="w-[220px]">
-              <PackageSearchCombobox placeholder="+ Add package…" onPick={addPackage} />
-            </div>
-            <button
-              type="button"
-              onClick={addItem}
-              className="text-[11px] font-body text-amber-400 hover:text-amber-300"
-            >
-              + Custom item
-            </button>
-            <button
-              type="button"
-              onClick={() => addFee(false)}
-              className="text-[11px] font-body text-amber-400 hover:text-amber-300"
-            >
-              + Custom fee
-            </button>
-            <button
-              type="button"
-              onClick={() => addFee(true)}
-              className="text-[11px] font-body text-amber-400 hover:text-amber-300"
-            >
-              + Fixed fee
-            </button>
-            <button
-              type="button"
-              onClick={addLabor}
-              className="text-[11px] font-body text-amber-400 hover:text-amber-300"
-            >
-              + Labor
-            </button>
-            <span className="text-white/10">|</span>
-            <button
-              type="button"
-              onClick={saveAsPackage}
-              disabled={savingPkg}
-              className="text-[11px] font-body text-zinc-300 hover:text-white border border-white/10 rounded px-2 py-1 disabled:opacity-40"
-            >
-              {savingPkg ? "Saving…" : "Save as package"}
-            </button>
-          </div>
+          {renderAddControls(true)}
         </div>
         {pkgMsg ? (
           <div
@@ -690,6 +704,9 @@ export function QuoteEditor({
             </div>
           );
         })()}
+        <div className="px-4 py-3 border-t border-white/10 bg-black/20">
+          {renderAddControls(false)}
+        </div>
       </div>
 
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
