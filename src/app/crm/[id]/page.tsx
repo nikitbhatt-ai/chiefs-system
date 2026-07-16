@@ -301,6 +301,17 @@ export default async function CustomerEntityPage({
 
   return (
     <AppShell title={c.name} subtitle={`${c.type} customer`}>
+      <div className="flex flex-wrap gap-2">
+        <form action={generateQuote}>
+          <button
+            type="submit"
+            className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
+          >
+            + Generate quote
+          </button>
+        </form>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Email:</span>{c.email ?? "—"}</div>
@@ -512,19 +523,7 @@ export default async function CustomerEntityPage({
         )}
       </Section>
 
-      <Section
-        title="Quotes"
-        action={
-          <form action={generateQuote}>
-            <button
-              type="submit"
-              className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
-            >
-              + Generate quote
-            </button>
-          </form>
-        }
-      >
+      <Section title="Quotes">
         {quoteRows.length === 0 ? (<p className="text-xs text-zinc-500 font-body">No quotes.</p>) : (
           <table className="w-full text-xs font-body">
             <thead><tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500"><th className="px-2 py-1">Quote #</th><th className="px-2 py-1">Status</th><th className="px-2 py-1">Stage</th><th className="px-2 py-1 text-right">Total</th><th className="px-2 py-1">Created</th><th className="px-2 py-1"></th></tr></thead>
