@@ -635,8 +635,9 @@ export type UpfitPin = {
   // internal placement note that prints in the equipment table only.
   caption?: string;
   // Visual config. All optional with defaults handled by the renderer
-  // so existing pins (circles) keep working.
-  shape?: "rect" | "circle";
+  // so existing pins (circles) keep working. `pushbar` renders a
+  // push-bumper drawing rather than a colored equipment marker.
+  shape?: "rect" | "circle" | "pushbar";
   size?:
     | "small"
     | "medium"
