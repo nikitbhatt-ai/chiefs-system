@@ -4,8 +4,9 @@ import { db } from "@/db";
 import { quotes, customers } from "@/db/schema";
 import { PrintTrigger } from "./PrintTrigger";
 
+type LineGroup = { groupId?: string; groupTitle?: string };
 type Line =
-  | {
+  | ({
       kind: "item";
       description: string;
       quantity: number;
@@ -13,22 +14,124 @@ type Line =
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
-    }
-  | {
+    } & LineGroup)
+  | ({
       kind: "fee";
       description: string;
       amount: number;
       fixed: boolean;
-    }
-  | {
+    } & LineGroup)
+  | ({
       kind: "labor";
       description: string;
       hours: number;
       rate: number;
-    };
+    } & LineGroup);
 
 function fmt(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+// Parts / Labor / Fees tables for a set of lines. `showTitles` labels
+// each sub-table (loose lines); package groups hide them since the
+// package name is the section header.
+function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: boolean }) {
+  const items = lines.filter((l): l is Extract<Line, { kind: "item" }> => l.kind === "item");
+  const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
+  const fees = lines.filter((l): l is Extract<Line, { kind: "fee" }> => l.kind === "fee");
+  return (
+    <>
+      {items.length > 0 ? (
+        <div style={{ marginBottom: "12pt" }}>
+          {showTitles ? <div className="section-title">Parts &amp; Items</div> : null}
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: "55%" }}>Description</th>
+                <th className="right" style={{ width: "8%" }}>Qty</th>
+                <th className="right" style={{ width: "12%" }}>Unit price</th>
+                <th className="right" style={{ width: "12%" }}>Discount</th>
+                <th className="right" style={{ width: "13%" }}>Line total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((l, i) => {
+                const gross = (l.quantity || 0) * (l.unitPrice || 0);
+                const disc =
+                  l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+                const discLabel =
+                  l.discount > 0
+                    ? l.discountKind === "pct"
+                      ? `${l.discount}% (−${fmt(disc)})`
+                      : `−${fmt(l.discount)}`
+                    : "—";
+                return (
+                  <tr key={`item-${i}`}>
+                    <td>{l.description || "Item"}</td>
+                    <td className="right">{l.quantity}</td>
+                    <td className="right">{fmt(l.unitPrice)}</td>
+                    <td className="right">{discLabel}</td>
+                    <td className="right">{fmt(gross - disc)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {labor.length > 0 ? (
+        <div style={{ marginBottom: "12pt" }}>
+          {showTitles ? <div className="section-title">Labor</div> : null}
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: "55%" }}>Description</th>
+                <th className="right" style={{ width: "15%" }}>Hours</th>
+                <th className="right" style={{ width: "15%" }}>Rate / hr</th>
+                <th className="right" style={{ width: "15%" }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {labor.map((l, i) => (
+                <tr key={`labor-${i}`}>
+                  <td>{l.description || "Labor"}</td>
+                  <td className="right">{l.hours || 0}</td>
+                  <td className="right">{fmt(l.rate || 0)}</td>
+                  <td className="right">{fmt((l.hours || 0) * (l.rate || 0))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {fees.length > 0 ? (
+        <div style={{ marginBottom: "12pt" }}>
+          {showTitles ? <div className="section-title">Fees &amp; Add-ons</div> : null}
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: "75%" }}>Description</th>
+                <th className="right" style={{ width: "25%" }}>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fees.map((l, i) => (
+                <tr key={`fee-${i}`}>
+                  <td>
+                    {l.description}{" "}
+                    <em style={{ color: "#666" }}>({l.fixed ? "fixed fee" : "custom fee"})</em>
+                  </td>
+                  <td className="right">{fmt(l.amount || 0)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 export default async function PrintQuotePage({
@@ -178,104 +281,44 @@ export default async function PrintQuotePage({
           (no line items)
         </div>
       ) : (
-        <>
-          {/* === Parts === */}
-          {items.length > 0 ? (
-            <div style={{ marginBottom: "12pt" }}>
-              <div className="section-title">Parts &amp; Items</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: "55%" }}>Description</th>
-                    <th className="right" style={{ width: "8%" }}>Qty</th>
-                    <th className="right" style={{ width: "12%" }}>Unit price</th>
-                    <th className="right" style={{ width: "12%" }}>Discount</th>
-                    <th className="right" style={{ width: "13%" }}>Line total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map((l, i) => {
-                    const gross = (l.quantity || 0) * (l.unitPrice || 0);
-                    const disc =
-                      l.discountKind === "pct"
-                        ? gross * ((l.discount || 0) / 100)
-                        : l.discount || 0;
-                    const discLabel =
-                      l.discount > 0
-                        ? l.discountKind === "pct"
-                          ? `${l.discount}% (−${fmt(disc)})`
-                          : `−${fmt(l.discount)}`
-                        : "—";
-                    return (
-                      <tr key={`item-${i}`}>
-                        <td>{l.description || "Item"}</td>
-                        <td className="right">{l.quantity}</td>
-                        <td className="right">{fmt(l.unitPrice)}</td>
-                        <td className="right">{discLabel}</td>
-                        <td className="right">{fmt(gross - disc)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          {/* === Labor === */}
-          {labor.length > 0 ? (
-            <div style={{ marginBottom: "12pt" }}>
-              <div className="section-title">Labor</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: "55%" }}>Description</th>
-                    <th className="right" style={{ width: "15%" }}>Hours</th>
-                    <th className="right" style={{ width: "15%" }}>Rate / hr</th>
-                    <th className="right" style={{ width: "15%" }}>Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {labor.map((l, i) => (
-                    <tr key={`labor-${i}`}>
-                      <td>{l.description || "Labor"}</td>
-                      <td className="right">{l.hours || 0}</td>
-                      <td className="right">{fmt(l.rate || 0)}</td>
-                      <td className="right">{fmt((l.hours || 0) * (l.rate || 0))}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-
-          {/* === Fees === */}
-          {fees.length > 0 ? (
-            <div style={{ marginBottom: "12pt" }}>
-              <div className="section-title">Fees &amp; Add-ons</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th style={{ width: "75%" }}>Description</th>
-                    <th className="right" style={{ width: "25%" }}>Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fees.map((l, i) => (
-                    <tr key={`fee-${i}`}>
-                      <td>
-                        {l.description}{" "}
-                        <em style={{ color: "#666" }}>
-                          ({l.fixed ? "fixed fee" : "custom fee"})
-                        </em>
-                      </td>
-                      <td className="right">{fmt(l.amount || 0)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </>
+        (() => {
+          // Package groups render first as titled sections; loose lines
+          // follow under the standard Parts / Labor / Fees headings.
+          const groupOrder: string[] = [];
+          const groupMap = new Map<string, Line[]>();
+          const loose: Line[] = [];
+          for (const l of lines) {
+            if (l.groupId) {
+              if (!groupMap.has(l.groupId)) {
+                groupMap.set(l.groupId, []);
+                groupOrder.push(l.groupId);
+              }
+              groupMap.get(l.groupId)!.push(l);
+            } else {
+              loose.push(l);
+            }
+          }
+          return (
+            <>
+              {groupOrder.map((gid) => {
+                const gl = groupMap.get(gid)!;
+                const title = gl[0]?.groupTitle ?? "Package";
+                return (
+                  <div key={gid} style={{ marginBottom: "12pt" }}>
+                    <div
+                      className="section-title"
+                      style={{ background: "#e5e7eb", fontWeight: "bold" }}
+                    >
+                      {title}
+                    </div>
+                    <PrintKindSections lines={gl} showTitles={false} />
+                  </div>
+                );
+              })}
+              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} /> : null}
+            </>
+          );
+        })()
       )}
 
       <table className="totals" style={{ marginTop: "12pt" }}>
