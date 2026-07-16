@@ -3,10 +3,12 @@ import React from "react";
 import { sharedStyles } from "../styles";
 import { BRANDING } from "../branding";
 
+type LineGroup = { groupId?: string; groupTitle?: string };
+
 export type QuoteLine =
-  | { kind: "item"; description: string; quantity: number; unitPrice: number; discount: number; discountKind: "pct" | "amt"; partId?: string }
-  | { kind: "fee"; description: string; amount: number; fixed: boolean }
-  | { kind: "labor"; description: string; hours: number; rate: number };
+  | ({ kind: "item"; description: string; quantity: number; unitPrice: number; discount: number; discountKind: "pct" | "amt"; partId?: string } & LineGroup)
+  | ({ kind: "fee"; description: string; amount: number; fixed: boolean } & LineGroup)
+  | ({ kind: "labor"; description: string; hours: number; rate: number } & LineGroup);
 
 export type QuoteData = {
   quoteNumber: string | null;
@@ -27,6 +29,100 @@ export type QuoteData = {
 
 function money(n: number): string {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+}
+
+// Renders the Parts / Labor / Fees sub-tables for a set of lines. Used
+// both for a package group's lines (showTitles=false — the package
+// title is the header) and for loose lines (showTitles=true).
+function KindTables({ lines, showTitles }: { lines: QuoteLine[]; showTitles: boolean }) {
+  const styles = sharedStyles;
+  const items = lines.filter((l) => l.kind === "item");
+  const labor = lines.filter((l) => l.kind === "labor");
+  const fees = lines.filter((l) => l.kind === "fee");
+  return (
+    <View>
+      {items.length > 0 && (
+        <View style={{ marginTop: showTitles ? 12 : 4 }}>
+          {showTitles && <Text style={styles.sectionTitle}>Parts &amp; Items</Text>}
+          <View style={styles.table}>
+            <View style={[styles.tableRow, styles.tableHeader]}>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Unit price</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Disc</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Total</Text>
+            </View>
+            {items.map((l, idx) => {
+              if (l.kind !== "item") return null;
+              const last = idx === items.length - 1;
+              const gross = (l.quantity || 0) * (l.unitPrice || 0);
+              const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+              return (
+                <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
+                    {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
+      {labor.length > 0 && (
+        <View style={{ marginTop: showTitles ? 12 : 4 }}>
+          {showTitles && <Text style={styles.sectionTitle}>Labor</Text>}
+          <View style={styles.table}>
+            <View style={[styles.tableRow, styles.tableHeader]}>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Hours</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Rate / hr</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Total</Text>
+            </View>
+            {labor.map((l, idx) => {
+              if (l.kind !== "labor") return null;
+              const last = idx === labor.length - 1;
+              const total = (l.hours || 0) * (l.rate || 0);
+              return (
+                <View key={`labor-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{l.hours || 0}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.rate || 0)}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(total)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
+      {fees.length > 0 && (
+        <View style={{ marginTop: showTitles ? 12 : 4 }}>
+          {showTitles && <Text style={styles.sectionTitle}>Fees &amp; Add-ons</Text>}
+          <View style={styles.table}>
+            <View style={[styles.tableRow, styles.tableHeader]}>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>Description</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>Amount</Text>
+            </View>
+            {fees.map((l, idx) => {
+              if (l.kind !== "fee") return null;
+              const last = idx === fees.length - 1;
+              return (
+                <View key={`fee-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>
+                    {l.description} {l.fixed ? "(fixed fee)" : "(custom fee)"}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>{money(l.amount || 0)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
+    </View>
+  );
 }
 
 export function QuoteDocument({ data }: { data: QuoteData }) {
@@ -92,25 +188,16 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
           </View>
         </View>
 
-        {/* Lines grouped into three sections so Parts, Labor, and Fees
-            stay visually distinct on the customer-facing document. The
-            underlying lineItems jsonb array is flat; we partition at
-            render time. */}
+        {/* Package groups render first as titled sections (matching the
+            saved package's name), then any loose/ungrouped lines fall
+            into the standard Parts / Labor / Fees sections. */}
         {(() => {
-          const items = data.lineItems.filter((l) => l.kind === "item");
-          const labor = data.lineItems.filter((l) => l.kind === "labor");
-          const fees = data.lineItems.filter((l) => l.kind === "fee");
-
           if (data.lineItems.length === 0) {
             return (
               <View style={[styles.table, { marginTop: 12 }]}>
                 <View style={styles.tableRowLast}>
                   <Text
-                    style={[
-                      styles.tableCell,
-                      styles.cellLeft,
-                      { width: "100%", color: "#888" },
-                    ]}
+                    style={[styles.tableCell, styles.cellLeft, { width: "100%", color: "#888" }]}
                   >
                     No line items.
                   </Text>
@@ -119,98 +206,44 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             );
           }
 
+          const groupOrder: string[] = [];
+          const groupMap = new Map<string, QuoteLine[]>();
+          const loose: QuoteLine[] = [];
+          for (const l of data.lineItems) {
+            if (l.groupId) {
+              if (!groupMap.has(l.groupId)) {
+                groupMap.set(l.groupId, []);
+                groupOrder.push(l.groupId);
+              }
+              groupMap.get(l.groupId)!.push(l);
+            } else {
+              loose.push(l);
+            }
+          }
+
           return (
             <View>
-              {/* === Parts === */}
-              {items.length > 0 && (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={styles.sectionTitle}>Parts &amp; Items</Text>
-                  <View style={styles.table}>
-                    <View style={[styles.tableRow, styles.tableHeader]}>
-                      <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Unit price</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Disc</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Total</Text>
+              {groupOrder.map((gid) => {
+                const gl = groupMap.get(gid)!;
+                const title = gl[0]?.groupTitle ?? "Package";
+                return (
+                  <View key={gid} style={{ marginTop: 14 }}>
+                    <View
+                      style={{
+                        backgroundColor: "#f3f4f6",
+                        borderWidth: 1,
+                        borderColor: "#000000",
+                        paddingVertical: 4,
+                        paddingHorizontal: 8,
+                      }}
+                    >
+                      <Text style={{ fontSize: 11, fontWeight: 700 }}>{title}</Text>
                     </View>
-                    {items.map((l, idx) => {
-                      if (l.kind !== "item") return null;
-                      const last = idx === items.length - 1;
-                      const gross = (l.quantity || 0) * (l.unitPrice || 0);
-                      const disc =
-                        l.discountKind === "pct"
-                          ? gross * ((l.discount || 0) / 100)
-                          : l.discount || 0;
-                      return (
-                        <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                          <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
-                            {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
-                          </Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
-                        </View>
-                      );
-                    })}
+                    <KindTables lines={gl} showTitles={false} />
                   </View>
-                </View>
-              )}
-
-              {/* === Labor === */}
-              {labor.length > 0 && (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={styles.sectionTitle}>Labor</Text>
-                  <View style={styles.table}>
-                    <View style={[styles.tableRow, styles.tableHeader]}>
-                      <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Hours</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Rate / hr</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Total</Text>
-                    </View>
-                    {labor.map((l, idx) => {
-                      if (l.kind !== "labor") return null;
-                      const last = idx === labor.length - 1;
-                      const total = (l.hours || 0) * (l.rate || 0);
-                      return (
-                        <View key={`labor-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                          <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{l.hours || 0}</Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.rate || 0)}</Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(total)}</Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-
-              {/* === Fees === */}
-              {fees.length > 0 && (
-                <View style={{ marginTop: 12 }}>
-                  <Text style={styles.sectionTitle}>Fees &amp; Add-ons</Text>
-                  <View style={styles.table}>
-                    <View style={[styles.tableRow, styles.tableHeader]}>
-                      <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>Description</Text>
-                      <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>Amount</Text>
-                    </View>
-                    {fees.map((l, idx) => {
-                      if (l.kind !== "fee") return null;
-                      const last = idx === fees.length - 1;
-                      return (
-                        <View key={`fee-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                          <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>
-                            {l.description} {l.fixed ? "(fixed fee)" : "(custom fee)"}
-                          </Text>
-                          <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>
-                            {money(l.amount || 0)}
-                          </Text>
-                        </View>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
+                );
+              })}
+              {loose.length > 0 && <KindTables lines={loose} showTitles={true} />}
             </View>
           );
         })()}
