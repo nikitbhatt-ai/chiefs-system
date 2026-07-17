@@ -57,6 +57,7 @@ export default async function AccountingHomePage() {
     { href: "/accounting/inventory", title: "Inventory", desc: "FIFO subledger reconciled to the ledger", stat: recon.ties ? `${fmtCents(recon.subledgerCents)} · reconciled` : `off by ${fmtCents(Math.abs(recon.differenceCents))}` },
     { href: "/accounting/job-costing", title: "Job costing", desc: "Materials + labor per work order", stat: `${jobs.length} jobs · ${fmtCents(openWip)} in WIP` },
     { href: "/accounting/reports", title: "Reports", desc: "P&L, balance sheet, AR/AP aging", stat: "Financial statements" },
+    { href: "/accounting/agents", title: "AR / AP agents", desc: "Claude drafts reminders & payment plans", stat: "Draft · you approve" },
   ];
 
   return (
@@ -94,9 +95,9 @@ export default async function AccountingHomePage() {
       </div>
 
       <p className="text-[11px] text-zinc-500 font-body">
-        Phases 1–6 live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
-        accounting, Job costing, and Financial reports (P&amp;L, balance sheet, AR/AP aging). The AR/AP
-        agents, tax tracking, and QuickBooks sync come in later phases.
+        Phases 1–7 live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
+        accounting, Job costing, Financial reports, and the AR/AP agents (Claude drafts reminders and
+        payment plans for you to approve). Tax tracking and QuickBooks sync come in later phases.
       </p>
     </AppShell>
   );

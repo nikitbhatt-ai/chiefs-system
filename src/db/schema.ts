@@ -926,6 +926,43 @@ export const laborRates = pgTable("labor_rates", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [uniqueIndex("labor_rates_user_uidx").on(t.userId)]);
 
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 7: AR/AP agents (draft-only)
+//
+// Server-side Claude calls DRAFT content — an AR overdue-reminder email, or an
+// AP payment-schedule / anomaly analysis — and never act externally. Every
+// draft lands here as `pending` and a human Approves, Edits, or Rejects it,
+// with the decision + reviewer logged. Nothing is ever sent or paid by the
+// agent; approval is an internal sign-off, not an external action.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const agentKind = pgEnum("agent_kind", ["ar_reminder", "ap_schedule"]);
+export const agentDraftStatus = pgEnum("agent_draft_status", ["pending", "approved", "rejected"]);
+
+export const agentDrafts = pgTable("agent_drafts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  kind: agentKind("kind").notNull(),
+  status: agentDraftStatus("status").notNull().default("pending"),
+  title: text("title").notNull(),
+  // The model's draft, and (once a human edits it) the edited version they signed off on.
+  content: text("content").notNull(),
+  editedContent: text("edited_content"),
+  // What the draft was generated from (invoice id, bill snapshot, etc.) for audit.
+  context: jsonb("context"),
+  // Optional link to the AR invoice a reminder is about.
+  invoiceId: uuid("invoice_id").references(() => arInvoices.id),
+  model: text("model"),
+  createdBy: uuid("created_by").references(() => users.id),
+  reviewedBy: uuid("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("agent_drafts_kind_idx").on(t.kind),
+  index("agent_drafts_status_idx").on(t.status),
+]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));

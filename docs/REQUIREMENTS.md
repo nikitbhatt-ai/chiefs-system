@@ -2097,11 +2097,36 @@ Integrates with the existing `work_orders` + `time_entries` rather than adding
 - [ ] Later: PDF export of the statements (react-pdf infra already in the repo);
       dashboard tiles/charts on the accounting overview.
 
-### Phase 7 — AR and AP agents (pending)
+### Phase 7 — AR and AP agents ✅ (PR: accounting-phase-7)
 
-Server-side Anthropic calls. AR agent drafts overdue-invoice reminder emails;
-AP agent flags bills due / anomalies and proposes a payment schedule. Both
-DRAFT only — Approve/Edit/Reject with logging; never act externally on their own.
+SQL to run in Neon: `docs/sql/accounting_phase7.sql` (adds the `agent_drafts`
+table). **Also set `ANTHROPIC_API_KEY` in the Vercel project env** — without it
+the screens load and show a "not configured" hint instead of erroring. Uses
+`@anthropic-ai/sdk` (added as a dependency) with `claude-opus-4-8`.
+
+- [x] **Server-side Claude calls only** (`src/lib/agents.ts`) — the key is read
+      from `process.env.ANTHROPIC_API_KEY` on the server; the browser never sees
+      it. `agentsConfigured()` gates the UI.
+- [x] **AR agent** `draftArReminder(invoiceId)` — drafts an overdue-invoice
+      reminder **email** from the invoice's real facts (customer, balance, days
+      past due). Prompt forbids inventing links, fees, or legal threats. Fast
+      path (no thinking).
+- [x] **AP agent** `draftApSchedule()` — reads all open bills (via the Phase 6
+      aging query), flags anomalies (past due, outliers, possible duplicates,
+      clusters) and proposes a prioritized payment schedule. Adaptive thinking.
+- [x] **DRAFT only, never acts externally**: every result is an `agent_drafts`
+      row with status `pending`. Approving records an **internal sign-off** — it
+      does not send the email or schedule the payment; those stay manual.
+- [x] **Approve / Edit / Reject with logging**: the review page lets an admin
+      edit the draft text, then Approve or Reject with an optional note;
+      `reviewed_by` / `reviewed_at` / `review_note` / `edited_content` are all
+      persisted.
+- [x] **Screens**: `/accounting/agents` (overdue invoices with "Draft reminder",
+      an "Analyze payables" button, and the draft log), `/accounting/agents/[id]`
+      (review + approve/edit/reject). Overview page gained an AR/AP agents card.
+      All admin-only.
+- [ ] Later: actually send approved reminder emails via an email provider (kept
+      manual on purpose for now); scheduled/batch drafting of reminders.
 
 ### Phase 8 — Tax / government tracking (pending)
 
