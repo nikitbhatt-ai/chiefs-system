@@ -985,6 +985,53 @@ export const taxRates = pgTable("tax_rates", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("tax_rates_active_idx").on(t.isActive)]);
 
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 9: QuickBooks Online integration (LAST)
+//
+// Connect to Intuit via OAuth 2.0, map our chart of accounts to QBO accounts,
+// pull payroll labor totals for P&L reconciliation, and one-direction sync into
+// a QBO SANDBOX first — production requires an explicit, separate confirmation.
+// Every attempt writes a `qbo_sync_log` row. Intuit credentials come from env
+// (QBO_CLIENT_ID / QBO_CLIENT_SECRET / QBO_REDIRECT_URI); until they're set the
+// screens are inert and say so.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const qboEnvironment = pgEnum("qbo_environment", ["sandbox", "production"]);
+
+// Single-row connection/config record (id is a fixed sentinel in app code).
+export const qboSettings = pgTable("qbo_settings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  environment: qboEnvironment("environment").notNull().default("sandbox"),
+  realmId: text("realm_id"),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  connectedAt: timestamp("connected_at"),
+  // Random string tying an in-flight OAuth authorize request to its callback.
+  authState: text("auth_state"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Maps one of our gl_accounts to a QBO account (by QBO id + name).
+export const qboAccountMap = pgTable("qbo_account_map", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  glAccountId: uuid("gl_account_id").notNull().unique().references(() => glAccounts.id, { onDelete: "cascade" }),
+  qboAccountId: text("qbo_account_id"),
+  qboAccountName: text("qbo_account_name"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("qbo_account_map_gl_idx").on(t.glAccountId)]);
+
+export const qboSyncLog = pgTable("qbo_sync_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  action: text("action").notNull(), // e.g. "connect", "payroll_import", "coa_map"
+  direction: text("direction"), // "auth" | "from_qbo" | "to_qbo" | null
+  status: text("status").notNull(), // "ok" | "error" | "info"
+  message: text("message"),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("qbo_sync_log_created_idx").on(t.createdAt)]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));

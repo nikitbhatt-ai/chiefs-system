@@ -2152,15 +2152,37 @@ liability itself lives in the ledger (Sales Tax Payable, 2100, seeded Phase 1).
 - [ ] Later: per-jurisdiction liability breakdown (needs a jurisdiction tag on
       journal lines); auto-applying configured rates on the quote side.
 
-Track tax liabilities as ledger accounts; period summaries for filings;
-visible "confirm with a qualified accountant" disclaimer; **no hardcoded tax
-rates** — ask the user for jurisdiction, keep rates configurable.
+### Phase 9 — QuickBooks Online integration ✅ (PR: accounting-phase-9)
 
-### Phase 9 — QuickBooks Online integration (LAST — do not start early)
+SQL to run in Neon: `docs/sql/accounting_phase9.sql` (adds `qbo_settings`,
+`qbo_account_map`, `qbo_sync_log`). **To actually connect**, set
+`QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI` in the Vercel env and
+register the redirect URI in your Intuit developer app. Without them the screens
+load and say "not configured" (`qboConfigured()` gates the UI).
 
-Intuit OAuth 2.0; chart-of-accounts mapping screen; pull payroll labor totals
-for P&L reconciliation; one-direction sync into a QBO **sandbox** first, with
-explicit user confirmation before any production company; sync log.
+- [x] **Intuit OAuth 2.0** (`src/lib/qbo.ts`): `beginAuth()` builds the Intuit
+      authorize URL with a CSRF `state`; the callback route
+      `/api/accounting/quickbooks/callback` verifies state and exchanges the
+      code for tokens (Basic-auth to Intuit's token endpoint), storing
+      access/refresh tokens + `realmId`. Admin-only. Standard flow; must be
+      exercised against a real Intuit app + sandbox to confirm end-to-end.
+- [x] **Chart-of-accounts mapping** (`/accounting/quickbooks/mapping`): every
+      active `gl_account` → a QBO account name/id, stored in `qbo_account_map`.
+- [x] **Payroll labor import for P&L reconciliation**: enter labor totals per
+      department (from the payroll report) → posts Dr Wages (5000) per
+      department / Cr Cash (1000), landing labor in the P&L labor section. Auto-
+      pull from QBO is the future step once a live connection is proven.
+- [x] **Sandbox-first + explicit production confirmation**: environment defaults
+      to `sandbox`; switching to `production` requires ticking a confirm box and
+      disconnects the current session. Sync is one-direction into QBO.
+- [x] **Sync log** (`qbo_sync_log`, `/accounting/quickbooks/sync-log`): every
+      connect/disconnect/mapping/import/environment change is recorded.
+- [x] **Screens**: `/accounting/quickbooks` (status, connect/disconnect,
+      environment, payroll import), `/mapping`, `/sync-log`. Overview page gained
+      a QuickBooks card. All admin-only.
+- [ ] Later (needs live Intuit credentials to build+verify safely): token
+      auto-refresh, fetching the QBO account list into the mapping dropdown,
+      pushing journal entries to QBO, and pulling payroll totals automatically.
 
 ### Searchable part picker (shipped)
 
