@@ -62,6 +62,17 @@ async function saveQuote(formData: FormData) {
   const taxTotal = taxableBase * (taxRate / 100);
   const grandTotal = taxableBase + taxTotal;
 
+  // Vehicle (from the in-editor VIN decoder). Blank fields clear.
+  const vin = String(formData.get("vin") ?? "").trim().toUpperCase() || null;
+  const vehicleYearRaw = String(formData.get("vehicleYear") ?? "").trim();
+  const vehicleYear = vehicleYearRaw && !Number.isNaN(Number(vehicleYearRaw))
+    ? Number(vehicleYearRaw)
+    : null;
+  const vehicleMake = String(formData.get("vehicleMake") ?? "").trim() || null;
+  const vehicleModel = String(formData.get("vehicleModel") ?? "").trim() || null;
+  const vehicleTrim = String(formData.get("vehicleTrim") ?? "").trim() || null;
+  const unitNumber = String(formData.get("unitNumber") ?? "").trim() || null;
+
   await db
     .update(quotes)
     .set({
@@ -72,6 +83,12 @@ async function saveQuote(formData: FormData) {
       subtotal: subtotal.toFixed(2),
       taxTotal: taxTotal.toFixed(2),
       grandTotal: grandTotal.toFixed(2),
+      vin,
+      vehicleYear,
+      vehicleMake,
+      vehicleModel,
+      vehicleTrim,
+      unitNumber,
       updatedAt: new Date(),
     })
     .where(eq(quotes.id, id));
@@ -169,6 +186,12 @@ export default async function QuotePage({
         notes={q.notes ?? ""}
         initialLines={initial}
         customers={customerRows}
+        initialVin={q.vin ?? ""}
+        initialVehicleYear={q.vehicleYear != null ? String(q.vehicleYear) : ""}
+        initialVehicleMake={q.vehicleMake ?? ""}
+        initialVehicleModel={q.vehicleModel ?? ""}
+        initialVehicleTrim={q.vehicleTrim ?? ""}
+        initialUnitNumber={q.unitNumber ?? ""}
         action={saveQuote}
       />
     </AppShell>

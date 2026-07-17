@@ -877,6 +877,27 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
       status is `approved` or `converted`. The strip shows the rejection
       inline instead of quietly doing nothing.
 - [x] Customer dropdown.
+- [x] **Vehicle (VIN decoder) per quote.** The quote editor has a
+      Vehicle card: VIN input + "Decode VIN" (NHTSA vPIC via
+      `/api/vin/decode/[vin]`) auto-fills year / make / model / trim
+      (each editable). Plus a free-text **Unit #** field
+      (customer/agency-assigned, unique to them, no validation). Stored
+      on the quote (`vin`, `vehicle_year`, `vehicle_make`,
+      `vehicle_model`, `vehicle_trim`, `unit_number`), so the exact car
+      ties to the quote and — on conversion — the invoice (same row).
+      `resolveVehicleLabel()` now prefers the quote's own vehicle over
+      the deal's, so the upfit spec + quote/invoice PDF + print view all
+      show it (VIN + Unit # included).
+
+      Schema (run in Neon):
+      ```sql
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS vin text;
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS vehicle_year integer;
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS vehicle_make text;
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS vehicle_model text;
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS vehicle_trim text;
+      ALTER TABLE quotes ADD COLUMN IF NOT EXISTS unit_number text;
+      ```
 - [x] Tax rate input per quote.
 - [x] Add parts from inventory to a quote via "+ Add from inventory…"
       dropdown. Adds line with sku/name/price/partId; stock NOT deducted
