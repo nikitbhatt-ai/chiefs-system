@@ -1990,13 +1990,38 @@ first). Uses the existing `vendors` (and optional `purchase_orders`) tables.
 - [ ] Later: split one payment across multiple bills; auto-populate bill lines
       from a linked purchase order's received items.
 
-### Phase 4 — Inventory & cost accounting (pending)
+### Phase 4 — Inventory & cost accounting ✅ (PR: accounting-phase-4)
 
-`items`/`inventory_transactions`/`cost_layers`; average (default) + FIFO
-costing; receiving posts Dr Inventory / Cr AP-or-Cash; issuing posts Cr
-Inventory / Dr WIP-or-COGS. Subledger must reconcile to the Inventory account.
-(Note: this project already has `parts`/`part_receipts`/`part_cost_history`
-with FIFO+average — Phase 4 should integrate with those rather than duplicate.)
+**No schema change** — integrates with the existing `parts` / `part_receipts`
+(the FIFO layer table) / `part_cost_history` rather than adding
+`items`/`inventory_transactions`/`cost_layers`. The existing FIFO layers ARE
+the subledger. Only Phase 1's chart of accounts is required.
+
+- [x] **Ledger hooks** (`src/lib/inventoryLedger.ts`) fire inside the existing
+      transactional inventory movements (`src/lib/inventory.ts`):
+      - **Receiving a PO** → Dr Inventory (1200) / Cr Accounts Payable (2000),
+        valued at PO unit cost.
+      - **Issuing parts to a build** (`consumeWorkOrderParts`) → Dr Work in
+        Progress (1300) / Cr Inventory (1200) at the exact FIFO cost drained,
+        tagged with `work_order_id` for job costing. (Phase 5 moves WIP → COGS
+        on job close.)
+      - **Restoring a build** (`restoreWorkOrderParts`) → the reverse, at the
+        same FIFO cost refilled.
+- [x] **Non-fatal by design**: hooks resolve all needed accounts first and skip
+      posting entirely if any is missing (chart of accounts not seeded), so core
+      inventory keeps working with or without the accounting module. Never posts
+      a one-sided entry.
+- [x] **Reconciliation** (rule #6): `/accounting/inventory` shows the FIFO
+      subledger value (Σ `quantity_remaining × unit_cost`) vs the posted
+      Inventory (1200) ledger balance, per-part valuation, and a tie/diff badge.
+- [x] **Opening balance / adjustment**: one-click action books the current
+      subledger↔ledger difference to Owner's Equity (3000) so the ledger catches
+      up to stock that existed before accounting went live. No-ops once they tie.
+- [x] **Costing method**: FIFO (the existing layer engine); `average` is also
+      already tracked in `part_cost_history`. Values are integer cents.
+- [ ] Later: choose Cr Cash instead of AP for cash purchases; GR/IR clearing +
+      PO→bill three-way match so a Phase-3 inventory bill nets against the
+      receipt accrual instead of double-booking AP.
 
 ### Phase 5 — Work orders & job costing (pending)
 
