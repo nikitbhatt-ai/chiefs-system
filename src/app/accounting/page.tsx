@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { glAccounts, journalEntries, journalLines, arInvoices, receipts } from "@/db/schema";
+import { glAccounts, journalEntries, journalLines, arInvoices, receipts, bills, payments } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtCents } from "@/lib/accounting";
 
 export const dynamic = "force-dynamic";
 
 export default async function AccountingHomePage() {
-  const [[acct], [entryCounts], [bal], [ar], [receiptAgg]] = await Promise.all([
+  const [[acct], [entryCounts], [bal], [ar], [receiptAgg], [ap], [paymentAgg]] = await Promise.all([
     db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(glAccounts),
     db
       .select({
@@ -32,6 +32,13 @@ export default async function AccountingHomePage() {
       })
       .from(arInvoices),
     db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(receipts),
+    db
+      .select({
+        openCount: sql<number>`count(*) filter (where ${bills.status} = 'open')`.mapWith(Number),
+        openTotal: sql<number>`COALESCE(SUM(${bills.totalCents}) filter (where ${bills.status} = 'open'), 0)`.mapWith(Number),
+      })
+      .from(bills),
+    db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(payments),
   ]);
 
   const ties = bal.debit === bal.credit;
@@ -41,6 +48,8 @@ export default async function AccountingHomePage() {
     { href: "/accounting/journal", title: "Journal", desc: "Create and review journal entries", stat: `${entryCounts.posted} posted · ${entryCounts.draft} draft` },
     { href: "/accounting/invoices", title: "Invoices (AR)", desc: "Bill quotes; posts to Accounts Receivable", stat: `${ar.openCount} open · ${fmtCents(ar.openTotal)} billed` },
     { href: "/accounting/receipts", title: "Receipts", desc: "Record cash received against AR", stat: `${receiptAgg.n} recorded` },
+    { href: "/accounting/bills", title: "Bills (AP)", desc: "Vendor bills; posts to Accounts Payable", stat: `${ap.openCount} open · ${fmtCents(ap.openTotal)} owed` },
+    { href: "/accounting/payments", title: "Payments", desc: "Record cash paid against AP", stat: `${paymentAgg.n} recorded` },
   ];
 
   return (
@@ -78,9 +87,9 @@ export default async function AccountingHomePage() {
       </div>
 
       <p className="text-[11px] text-zinc-500 font-body">
-        Phases 1–2 live: the core ledger plus Accounts Receivable (invoice a quote, record receipts).
-        AP, inventory costing, job costing, P&amp;L reporting, the AR/AP agents, tax tracking, and
-        QuickBooks sync come in later phases.
+        Phases 1–3 live: the core ledger, Accounts Receivable (invoice a quote, record receipts),
+        and Accounts Payable (enter vendor bills, record payments). Inventory costing, job costing,
+        P&amp;L reporting, the AR/AP agents, tax tracking, and QuickBooks sync come in later phases.
       </p>
     </AppShell>
   );

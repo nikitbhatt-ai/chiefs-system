@@ -1956,10 +1956,39 @@ stack decision above — no parallel invoices table.
 - [ ] Later: split one receipt across multiple invoices (currently one invoice
       or on-account); customer statements.
 
-### Phase 3 — Accounts payable (pending)
+### Phase 3 — Accounts payable ✅ (PR: accounting-phase-3)
 
-`bills`, `bill_lines`, `payments` (vendors already exist). Posting a bill or
-payment auto-creates the journal entry.
+SQL to run in Neon: `docs/sql/accounting_phase3.sql` (idempotent; needs Phase 1
+first). Uses the existing `vendors` (and optional `purchase_orders`) tables.
+
+- [x] **`bills`** — a vendor invoice we owe. Carries `bill_number`, `vendor_id`,
+      optional `vendor_invoice_number` + `purchase_order_id`, `bill_date`,
+      `due_date`, `terms`, `total_cents` (snapshot = sum of lines), `status`
+      (open/paid/void), `journal_entry_id`, audit columns.
+- [x] **`bill_lines`** — each line posts to a chosen `account_id`
+      (expense/asset), with optional `department_id` + `work_order_id` cost
+      dimensions and a `description`.
+- [x] **`payments`** — cash out. Optional `bill_id` applies it to one bill,
+      else on-account. Carries `payment_number`, `method`
+      (check/ach/card/cash/other), `reference`, `amount_cents`,
+      `journal_entry_id`, audit columns.
+- [x] **Create bill** auto-posts a balanced entry: Dr each line's account /
+      Cr Accounts Payable (2000) for the total. Ledger post + bill + lines all
+      commit in one DB transaction (`postJournalEntryTx`).
+- [x] **Record payment** auto-posts Dr Accounts Payable (2000) / Cr Cash (1000).
+- [x] **Per-bill open balance** = total − payments applied; status flips
+      open⇄paid automatically. Overdue = open + past `due_date`.
+- [x] **Void** reverses the bill's journal entry (history kept) and marks it
+      void; blocked once any payment is applied.
+- [x] **API** `GET/POST /api/accounting/bills`,
+      `GET/DELETE /api/accounting/bills/[id]` (DELETE = void),
+      `GET/POST /api/accounting/payments` — all admin-only via `requireRole`.
+- [x] **Screens**: `/accounting/bills` (list + multi-line create form, shows
+      outstanding AP + overdue flags), `/accounting/bills/[id]` (detail, lines,
+      payments applied, balance, record-payment + void), `/accounting/payments`
+      (list + record form). Overview page gained Bills + Payments cards.
+- [ ] Later: split one payment across multiple bills; auto-populate bill lines
+      from a linked purchase order's received items.
 
 ### Phase 4 — Inventory & cost accounting (pending)
 
