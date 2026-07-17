@@ -2128,7 +2128,29 @@ the screens load and show a "not configured" hint instead of erroring. Uses
 - [ ] Later: actually send approved reminder emails via an email provider (kept
       manual on purpose for now); scheduled/batch drafting of reminders.
 
-### Phase 8 — Tax / government tracking (pending)
+### Phase 8 — Tax / government tracking ✅ (PR: accounting-phase-8)
+
+SQL to run in Neon: `docs/sql/accounting_phase8.sql` (adds `tax_rates`). Tax
+liability itself lives in the ledger (Sales Tax Payable, 2100, seeded Phase 1).
+
+- [x] **Tax liability tracked as a ledger account** — invoicing a taxed quote
+      credits Sales Tax Payable (2100, Phase 2); remitting debits it. No new
+      liability table; the ledger is the source of truth.
+- [x] **Configurable rates, nothing hardcoded** — `tax_rates` (jurisdiction,
+      `rate_pct`, active flag, notes) managed at `/accounting/tax/rates`. The
+      team enters jurisdictions and rates; the code hardcodes none.
+- [x] **Period filing summary** (`src/lib/tax.ts` → `taxSummary`) computed from
+      the 2100 ledger: opening liability, collected this period (credits),
+      remitted this period (debits), closing liability — for any date range.
+- [x] **Record a remittance** posts Dr Sales Tax Payable / Cr Cash, so paying
+      the authority draws the liability down in the ledger.
+- [x] **Accountant disclaimer** shown on every tax screen ("bookkeeping summary,
+      not tax advice — confirm with a qualified accountant").
+- [x] **Screens**: `/accounting/tax` (summary + remittance form) and
+      `/accounting/tax/rates` (manage rates). Overview page gained a Tax card.
+      All admin-only.
+- [ ] Later: per-jurisdiction liability breakdown (needs a jurisdiction tag on
+      journal lines); auto-applying configured rates on the quote side.
 
 Track tax liabilities as ledger accounts; period summaries for filings;
 visible "confirm with a qualified accountant" disclaimer; **no hardcoded tax
