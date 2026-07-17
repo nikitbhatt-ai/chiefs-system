@@ -12,6 +12,7 @@ import {
   getColorScheme,
   getPinSize,
   getTemplate,
+  getViews,
 } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
@@ -64,7 +65,19 @@ export function UpfitBuilder({
   const [isPending, startTransition] = useTransition();
 
   const template = useMemo(() => getTemplate(bodyStyle), [bodyStyle]);
+  const views = useMemo(() => getViews(template), [template]);
   const colorGroups = useMemo(() => colorSchemesByGroup(), []);
+
+  // Active view (one side of the vehicle). Reset to the first view
+  // whenever the template changes so we never point at a stale key.
+  const [activeView, setActiveView] = useState<string>(views[0]?.key ?? "main");
+  const activeViewKey = views.some((v) => v.key === activeView) ? activeView : views[0]?.key ?? "main";
+  const activeViewDef = views.find((v) => v.key === activeViewKey) ?? views[0];
+  const firstViewKey = views[0]?.key ?? "main";
+  // A pin belongs to a view via its `view` field; legacy pins with no
+  // view fall onto the first view so nothing is orphaned.
+  const pinViewKey = (p: UpfitPin) => p.view ?? firstViewKey;
+  const visiblePins = pins.filter((p) => pinViewKey(p) === activeViewKey);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ pinId: string; startX: number; startY: number; moved: boolean } | null>(
@@ -115,6 +128,7 @@ export function UpfitBuilder({
       {
         id,
         number: cur.length + 1,
+        view: activeViewKey,
         x: f.x,
         y: f.y,
         label: pendingSelection.label,
@@ -457,6 +471,37 @@ export function UpfitBuilder({
               {template.label}
             </div>
           </div>
+
+          {/* View switcher — one tab per side of the vehicle. Hidden for
+              single-view templates. Each tab shows how many pins it holds. */}
+          {views.length > 1 ? (
+            <div className="flex flex-wrap gap-1 mb-2">
+              {views.map((v) => {
+                const count = pins.filter((p) => pinViewKey(p) === v.key).length;
+                const active = v.key === activeViewKey;
+                return (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => setActiveView(v.key)}
+                    className={`text-[11px] font-body px-2.5 py-1 rounded border transition-colors ${
+                      active
+                        ? "bg-amber-500 text-black border-amber-400 font-semibold"
+                        : "bg-black/30 text-zinc-300 border-white/10 hover:border-amber-500/50"
+                    }`}
+                  >
+                    {v.label}
+                    {count > 0 ? (
+                      <span className={`ml-1 ${active ? "text-black/70" : "text-amber-400"}`}>
+                        ({count})
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
           <div
             ref={boxRef}
             onClick={handleBoxClick}
@@ -465,12 +510,13 @@ export function UpfitBuilder({
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={template.imageUrl}
-              alt={template.label}
+              key={activeViewKey}
+              src={activeViewDef?.imageUrl ?? template.imageUrl}
+              alt={`${template.label} — ${activeViewDef?.label ?? ""}`}
               className="w-full h-auto block pointer-events-none"
               draggable={false}
             />
-            {pins.map((pin) => (
+            {visiblePins.map((pin) => (
               <PlacedPin
                 key={pin.id}
                 pin={pin}
@@ -523,6 +569,24 @@ export function UpfitBuilder({
                         remove
                       </button>
                     </div>
+
+                    {views.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveView(pinViewKey(pin));
+                          setActivePinId(pin.id);
+                        }}
+                        className={`mt-1 text-[10px] font-body ${
+                          pinViewKey(pin) === activeViewKey
+                            ? "text-amber-400"
+                            : "text-zinc-500 hover:text-amber-300 underline"
+                        }`}
+                      >
+                        {views.find((v) => v.key === pinViewKey(pin))?.label ?? "View"}
+                        {pinViewKey(pin) !== activeViewKey ? " → show" : ""}
+                      </button>
+                    ) : null}
 
                     <div className="mt-2 grid grid-cols-2 gap-1.5">
                       <select
