@@ -276,6 +276,23 @@ export default async function PrintQuotePage({
         {customer?.phone ? <div>{customer.phone}</div> : null}
       </div>
 
+      {(() => {
+        const vehLabel = [q.vehicleYear, q.vehicleMake, q.vehicleModel, q.vehicleTrim]
+          .filter(Boolean)
+          .join(" ");
+        if (!vehLabel && !q.vin && !q.unitNumber) return null;
+        return (
+          <div style={{ marginBottom: "16pt" }}>
+            <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
+              Vehicle
+            </div>
+            {vehLabel ? <div style={{ fontWeight: "bold", marginTop: "2pt" }}>{vehLabel}</div> : null}
+            {q.vin ? <div>VIN: {q.vin}</div> : null}
+            {q.unitNumber ? <div>Unit #: {q.unitNumber}</div> : null}
+          </div>
+        );
+      })()}
+
       {lines.length === 0 ? (
         <div style={{ textAlign: "center", color: "#666", padding: "16pt 0" }}>
           (no line items)

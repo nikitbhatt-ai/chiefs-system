@@ -226,6 +226,17 @@ export const quotes = pgTable("quotes", {
   lineItems: jsonb("line_items").$type<QuoteLineItem[]>().default([]),
   workflowStage: text("workflow_stage").notNull().default("estimate"),
   notes: text("notes"),
+  // Vehicle this quote/invoice is for. Decoded from a VIN in the quote
+  // editor (NHTSA vPIC) so the exact car being worked on ties to the
+  // quote — and, on conversion, the invoice (same row).
+  vin: text("vin"),
+  vehicleYear: integer("vehicle_year"),
+  vehicleMake: text("vehicle_make"),
+  vehicleModel: text("vehicle_model"),
+  vehicleTrim: text("vehicle_trim"),
+  // Customer/agency-assigned unit number for this vehicle. Free text
+  // (formats vary by agency), unique to them, not validated.
+  unitNumber: text("unit_number"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

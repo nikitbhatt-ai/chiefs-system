@@ -17,6 +17,9 @@ export type QuoteData = {
   customerName: string | null;
   customerEmail: string | null;
   customerAddress: string | null;
+  vehicleSummary: string | null;
+  vin: string | null;
+  unitNumber: string | null;
   lineItems: QuoteLine[];
   taxTotal: number;
   grandTotal: number;
@@ -185,6 +188,18 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
           <View style={{ width: "48%" }}>
             <Text style={styles.sectionTitle}>Status</Text>
             <Text style={styles.blockValue}>{data.status.replace(/_/g, " ")}</Text>
+            {data.vehicleSummary || data.vin || data.unitNumber ? (
+              <>
+                <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Vehicle</Text>
+                {data.vehicleSummary ? (
+                  <Text style={styles.blockValue}>{data.vehicleSummary}</Text>
+                ) : null}
+                {data.vin ? <Text style={styles.blockLabel}>VIN: {data.vin}</Text> : null}
+                {data.unitNumber ? (
+                  <Text style={styles.blockLabel}>Unit #: {data.unitNumber}</Text>
+                ) : null}
+              </>
+            ) : null}
           </View>
         </View>
 

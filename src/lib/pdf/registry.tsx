@@ -32,6 +32,7 @@ async function resolveQuote(recordId: string, variant: "quote" | "invoice"): Pro
   const customer = q.customerId
     ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0] ?? null
     : null;
+  const vehicleSummary = await resolveVehicleLabel(q);
   return {
     quoteId: q.id,
     quoteNumber: q.quoteNumber,
@@ -39,6 +40,9 @@ async function resolveQuote(recordId: string, variant: "quote" | "invoice"): Pro
     customerName: customer?.name ?? null,
     customerEmail: customer?.email ?? null,
     customerAddress: customer?.address ?? null,
+    vehicleSummary: vehicleSummary || null,
+    vin: q.vin ?? null,
+    unitNumber: q.unitNumber ?? null,
     lineItems: ((q.lineItems as unknown as QuoteLine[]) ?? []),
     taxTotal: Number(q.taxTotal ?? 0),
     grandTotal: Number(q.grandTotal ?? 0),

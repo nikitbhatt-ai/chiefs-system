@@ -51,6 +51,12 @@ export function QuoteEditor({
   notes,
   initialLines,
   customers,
+  initialVin = "",
+  initialVehicleYear = "",
+  initialVehicleMake = "",
+  initialVehicleModel = "",
+  initialVehicleTrim = "",
+  initialUnitNumber = "",
   action,
 }: {
   id: string;
@@ -59,10 +65,47 @@ export function QuoteEditor({
   notes: string;
   initialLines: QuoteLine[];
   customers: { id: string; name: string }[];
+  initialVin?: string;
+  initialVehicleYear?: string;
+  initialVehicleMake?: string;
+  initialVehicleModel?: string;
+  initialVehicleTrim?: string;
+  initialUnitNumber?: string;
   action: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
   const [taxRate, setTaxRate] = useState("0");
+  // Vehicle (VIN decoder). Ties the exact car to this quote/invoice.
+  const [vin, setVin] = useState(initialVin);
+  const [vehYear, setVehYear] = useState(initialVehicleYear);
+  const [vehMake, setVehMake] = useState(initialVehicleMake);
+  const [vehModel, setVehModel] = useState(initialVehicleModel);
+  const [vehTrim, setVehTrim] = useState(initialVehicleTrim);
+  const [unitNumber, setUnitNumber] = useState(initialUnitNumber);
+  const [decoding, setDecoding] = useState(false);
+  const [decodeError, setDecodeError] = useState<string | null>(null);
+
+  async function decodeVin() {
+    if (!vin.trim()) return;
+    setDecoding(true);
+    setDecodeError(null);
+    try {
+      const res = await fetch(`/api/vin/decode/${encodeURIComponent(vin.trim())}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDecodeError(data?.error ?? "Decode failed");
+        return;
+      }
+      setVehYear(data.year ? String(data.year) : "");
+      setVehMake(data.make ?? "");
+      setVehModel(data.model ?? "");
+      setVehTrim(data.trim ?? "");
+    } catch {
+      setDecodeError("Network error");
+    } finally {
+      setDecoding(false);
+    }
+  }
   // Drag-reorder state for line items. `draggingIndex` styles the row
   // being dragged (faded out); `dragOverIndex` highlights the drop slot.
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
@@ -673,6 +716,92 @@ export function QuoteEditor({
           placeholder="Tax rate %"
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         />
+      </div>
+
+      {/* Vehicle — VIN decoder. The exact car this quote (and, once
+          converted, this invoice) is for. Decoded fields post with the
+          form and persist on the quote. */}
+      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
+            Vehicle
+          </h3>
+          {decodeError ? (
+            <span className="text-[11px] text-red-400 font-body">{decodeError}</span>
+          ) : null}
+        </div>
+        <div className="flex gap-2 items-center">
+          <input
+            name="vin"
+            value={vin}
+            onChange={(e) => setVin(e.target.value.toUpperCase())}
+            placeholder="VIN (17 chars)"
+            className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
+          />
+          <button
+            type="button"
+            onClick={decodeVin}
+            disabled={decoding || !vin.trim()}
+            className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 disabled:opacity-40 text-white border border-white/10 rounded-md px-4 py-2 transition-colors whitespace-nowrap"
+          >
+            {decoding ? "Decoding…" : "Decode VIN"}
+          </button>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Year
+            <input
+              name="vehicleYear"
+              value={vehYear}
+              onChange={(e) => setVehYear(e.target.value)}
+              placeholder="Year"
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm text-white font-body"
+            />
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Make
+            <input
+              name="vehicleMake"
+              value={vehMake}
+              onChange={(e) => setVehMake(e.target.value)}
+              placeholder="Make"
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm text-white font-body"
+            />
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Model
+            <input
+              name="vehicleModel"
+              value={vehModel}
+              onChange={(e) => setVehModel(e.target.value)}
+              placeholder="Model"
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm text-white font-body"
+            />
+          </label>
+          <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Trim
+            <input
+              name="vehicleTrim"
+              value={vehTrim}
+              onChange={(e) => setVehTrim(e.target.value)}
+              placeholder="Trim"
+              className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm text-white font-body"
+            />
+          </label>
+        </div>
+        <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-body md:w-1/2">
+          Unit # (customer/agency-assigned)
+          <input
+            name="unitNumber"
+            value={unitNumber}
+            onChange={(e) => setUnitNumber(e.target.value)}
+            placeholder="e.g. Unit 4471 / K-9-2 / Patrol 12"
+            className="mt-1 w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-sm text-white font-body"
+          />
+        </label>
+        <p className="text-[10px] text-zinc-500 font-body">
+          Decode auto-fills year / make / model / trim; edit any field by hand. Saved with the quote (Save button below).
+        </p>
       </div>
 
       <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
