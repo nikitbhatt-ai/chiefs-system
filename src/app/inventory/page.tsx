@@ -1,11 +1,14 @@
 import { revalidatePath } from "next/cache";
-import { desc, eq, and, sql, count, arrayContains } from "drizzle-orm";
+import { eq, and, or, ilike, sql, count, arrayContains, getTableColumns } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { parts, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
 import { ListRowControls } from "@/components/ListRowControls";
+import { SortHeader } from "@/components/SortHeader";
 import { parsePagination } from "@/lib/pagination";
+import { normalizeInventorySort, inventoryOrderBy } from "@/lib/inventorySort";
 import { PartAddForm } from "./PartAddForm";
 
 async function createPart(formData: FormData) {
@@ -73,15 +76,31 @@ function pct(cost: string | null, price: string | null) {
 export default async function InventoryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ category?: string; vendor?: string; archived?: string; page?: string; tag?: string }>;
+  searchParams: Promise<{
+    category?: string;
+    vendor?: string;
+    archived?: string;
+    page?: string;
+    tag?: string;
+    sort?: string;
+    dir?: string;
+    q?: string;
+  }>;
 }) {
   const sp = await searchParams;
   const tag = (sp.tag ?? "").trim();
+  const q = (sp.q ?? "").trim();
+  const { sort, dir } = normalizeInventorySort(sp.sort, sp.dir);
   const { page, perPage, offset } = parsePagination(sp.page);
   const filters = [];
   if (sp.category) filters.push(eq(parts.category, sp.category));
   if (sp.vendor) filters.push(eq(parts.vendorId, sp.vendor));
   if (tag) filters.push(arrayContains(parts.tags, [tag]));
+  // Free-text search by SKU or part name (case-insensitive substring).
+  if (q) {
+    const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    filters.push(or(ilike(parts.sku, like), ilike(parts.name, like))!);
+  }
   if (sp.archived === "1") filters.push(eq(parts.archived, true));
   else filters.push(eq(parts.archived, false));
   const where = filters.length ? and(...filters) : undefined;
@@ -90,11 +109,32 @@ export default async function InventoryPage({
     .select({ id: vendors.id, name: vendors.name })
     .from(vendors)
     .orderBy(vendors.name);
-  const vendorMap = new Map(vendorRows.map((v) => [v.id, v.name]));
+
+  // Aliased joins so we can sort by (and display) the supplier / manufacturer
+  // vendor names rather than their foreign-key ids.
+  const supplier = alias(vendors, "supplier_v");
+  const manufacturer = alias(vendors, "manufacturer_v");
 
   const [totalRows, rows] = await Promise.all([
     db.select({ n: count() }).from(parts).where(where),
-    db.select().from(parts).where(where).orderBy(desc(parts.createdAt)).limit(perPage).offset(offset),
+    db
+      .select({
+        ...getTableColumns(parts),
+        supplierName: supplier.name,
+        manufacturerName: manufacturer.name,
+      })
+      .from(parts)
+      .leftJoin(supplier, eq(parts.vendorId, supplier.id))
+      .leftJoin(manufacturer, eq(parts.manufacturerId, manufacturer.id))
+      .where(where)
+      .orderBy(
+        ...inventoryOrderBy(sort, dir, {
+          supplierName: supplier.name,
+          manufacturerName: manufacturer.name,
+        }),
+      )
+      .limit(perPage)
+      .offset(offset),
   ]);
   const total = Number(totalRows[0]?.n ?? 0);
 
@@ -104,22 +144,44 @@ export default async function InventoryPage({
     .where(sql`${parts.category} is not null`);
   const categories = categoriesRaw.map((r) => r.category!).filter(Boolean);
 
+  // Filters preserved across sort-header links, paging, and the print/export
+  // view — so a sorted, filtered list exports in exactly the order shown.
+  const sortParams: Record<string, string> = {};
+  if (sp.category) sortParams.category = sp.category;
+  if (sp.vendor) sortParams.vendor = sp.vendor;
+  if (sp.archived === "1") sortParams.archived = "1";
+  if (tag) sortParams.tag = tag;
+  if (q) sortParams.q = q;
+
   const printQs = (() => {
-    const qs = new URLSearchParams();
-    if (sp.category) qs.set("category", sp.category);
-    if (sp.vendor) qs.set("vendor", sp.vendor);
-    if (sp.archived === "1") qs.set("archived", "1");
-    if (tag) qs.set("tag", tag);
-    const s = qs.toString();
-    return s ? `?${s}` : "";
+    const qs = new URLSearchParams(sortParams);
+    qs.set("sort", sort);
+    qs.set("dir", dir);
+    return `?${qs.toString()}`;
   })();
-  const pagerBaseQuery = printQs.replace(/^\?/, "");
+  const pagerBaseQuery = (() => {
+    const qs = new URLSearchParams(sortParams);
+    qs.set("sort", sort);
+    qs.set("dir", dir);
+    return qs.toString();
+  })();
 
   return (
     <AppShell title="Inventory" subtitle="Parts and supplies">
       <PartAddForm action={createPart} vendors={vendorRows} />
 
       <form className="bg-[#161624] border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
+        {/* Preserve the active sort (and tag filter) when applying search/filters. */}
+        <input type="hidden" name="sort" value={sort} />
+        <input type="hidden" name="dir" value={dir} />
+        {tag ? <input type="hidden" name="tag" value={tag} /> : null}
+        <input
+          type="search"
+          name="q"
+          defaultValue={q}
+          placeholder="Search SKU or part name…"
+          className="bg-black/40 border border-white/10 rounded px-2 py-1 text-white placeholder:text-zinc-500 min-w-[220px]"
+        />
         <span className="text-zinc-500 uppercase tracking-wider text-[10px]">Filter:</span>
         <select
           name="category"
@@ -182,16 +244,30 @@ export default async function InventoryPage({
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
-              <th className="px-3 py-2.5">SKU</th>
-              <th className="px-3 py-2.5">Name</th>
-              <th className="px-3 py-2.5">Category</th>
-              <th className="px-3 py-2.5">Manufacturer</th>
-              <th className="px-3 py-2.5">Supplier</th>
-              <th className="px-3 py-2.5 text-right">On hand</th>
-              <th className="px-3 py-2.5 text-right">On order</th>
-              <th className="px-3 py-2.5 text-right">Internal cost</th>
-              <th className="px-3 py-2.5 text-right">Price</th>
-              <th className="px-3 py-2.5 text-right">Margin</th>
+              {(
+                [
+                  { key: "sku", label: "SKU", align: "left" },
+                  { key: "name", label: "Name", align: "left" },
+                  { key: "category", label: "Category", align: "left" },
+                  { key: "manufacturer", label: "Manufacturer", align: "left" },
+                  { key: "supplier", label: "Supplier", align: "left" },
+                  { key: "onhand", label: "On hand", align: "right" },
+                  { key: "onorder", label: "On order", align: "right" },
+                  { key: "cost", label: "Internal cost", align: "right" },
+                  { key: "price", label: "Price", align: "right" },
+                  { key: "margin", label: "Margin", align: "right" },
+                ] as const
+              ).map((col) => (
+                <SortHeader
+                  key={col.key}
+                  label={col.label}
+                  sortKey={col.key}
+                  currentSort={sort}
+                  currentDir={dir}
+                  params={sortParams}
+                  align={col.align}
+                />
+              ))}
               <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
@@ -199,7 +275,9 @@ export default async function InventoryPage({
             {rows.length === 0 ? (
               <tr>
                 <td colSpan={11} className="px-4 py-8 text-center text-xs text-zinc-500">
-                  No parts {sp.archived === "1" ? "archived" : "in inventory"} yet.
+                  {q
+                    ? `No parts match "${q}".`
+                    : `No parts ${sp.archived === "1" ? "archived" : "in inventory"} yet.`}
                 </td>
               </tr>
             ) : (
@@ -217,12 +295,8 @@ export default async function InventoryPage({
                       ) : null}
                     </td>
                     <td className="px-3 py-2 text-xs">{p.category ?? "—"}</td>
-                    <td className="px-3 py-2 text-xs">
-                      {p.manufacturerId ? vendorMap.get(p.manufacturerId) ?? "—" : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-xs">
-                      {p.vendorId ? vendorMap.get(p.vendorId) ?? "—" : "—"}
-                    </td>
+                    <td className="px-3 py-2 text-xs">{p.manufacturerName ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">{p.supplierName ?? "—"}</td>
                     <td className="px-3 py-2 text-xs text-right">{p.quantityOnHand}</td>
                     <td className="px-3 py-2 text-xs text-right">{p.quantityOnOrder}</td>
                     <td className="px-3 py-2 text-xs text-right">{fmtMoney(p.cost)}</td>

@@ -62,6 +62,11 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     label: "Ford F-350",
     imageUrl: "/upfit-templates/f350.jpg",
   },
+  transit_custom: {
+    slug: "transit_custom",
+    label: "Ford Transit Custom L2H1",
+    imageUrl: "/upfit-templates/transit_custom.jpg",
+  },
 };
 
 export const BODY_STYLES = Object.values(VEHICLE_TEMPLATES).map((t) => ({
@@ -103,6 +108,22 @@ export const PIN_PALETTE = [
 export function nextPinColor(existing: number): string {
   return PIN_PALETTE[existing % PIN_PALETTE.length];
 }
+
+// --- Push bumper (grille guard) glyph -------------------------------------
+//
+// A Pro-gard-style push bumper: two rounded uprights + three horizontal
+// cross bars, drawn as filled rounded rects on this viewBox. Both the
+// editor (<svg>/<rect>) and the PDF (React-PDF <Svg>/<Rect>) render from
+// this single geometry with preserveAspectRatio="none" so it stretches
+// to whatever size the pin is resized to.
+export const PUSHBAR_VIEWBOX = { w: 120, h: 104 };
+export const PUSHBAR_RECTS: { x: number; y: number; w: number; h: number; r: number }[] = [
+  { x: 6, y: 4, w: 18, h: 96, r: 9 }, // left upright
+  { x: 96, y: 4, w: 18, h: 96, r: 9 }, // right upright
+  { x: 16, y: 6, w: 88, h: 15, r: 7 }, // top rail
+  { x: 12, y: 46, w: 96, h: 14, r: 7 }, // middle rail
+  { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
+];
 
 // --- Pin shapes -----------------------------------------------------------
 //
@@ -235,22 +256,27 @@ export const COLOR_SCHEMES: Record<string, ColorScheme> = {
   red_white: { key: "red_white", label: "Red / White", group: "split", segments: [RED, WHITE] },
   blue_white: { key: "blue_white", label: "Blue / White", group: "split", segments: [BLUE, WHITE] },
   amber_white: { key: "amber_white", label: "Amber / White", group: "split", segments: [AMBER, WHITE] },
-  red_blue: { key: "red_blue", label: "Red / Blue", group: "split", segments: [RED, BLUE] },
+  // Blue-driver / red-passenger convention: blue leads (left), red
+  // trails (right). Key stays `red_blue` so pins saved before the flip
+  // keep resolving; only the render order + label change.
+  red_blue: { key: "red_blue", label: "Blue / Red", group: "split", segments: [BLUE, RED] },
   green_white: { key: "green_white", label: "Green / White", group: "split", segments: [GREEN, WHITE] },
   red_amber: { key: "red_amber", label: "Red / Amber", group: "split", segments: [RED, AMBER] },
   blue_amber: { key: "blue_amber", label: "Blue / Amber", group: "split", segments: [BLUE, AMBER] },
   // --- Trios (3-color combos) ---
-  rwb: { key: "rwb", label: "Red / White / Blue", group: "trio", segments: [RED, WHITE, BLUE] },
+  // rwb key retained; now renders blue → white → red per the lightbar
+  // convention above.
+  rwb: { key: "rwb", label: "Blue / White / Red", group: "trio", segments: [BLUE, WHITE, RED] },
   rwa: { key: "rwa", label: "Red / White / Amber", group: "trio", segments: [RED, WHITE, AMBER] },
   bwa: { key: "bwa", label: "Blue / White / Amber", group: "trio", segments: [BLUE, WHITE, AMBER] },
   rab: { key: "rab", label: "Red / Amber / Blue", group: "trio", segments: [RED, AMBER, BLUE] },
   // --- Multi-segment counts ---
   ...makeCountSchemes("rwrw", "Red / White", [RED, WHITE], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("bwbw", "Blue / White", [BLUE, WHITE], TWO_COLOR_COUNTS, "count"),
-  ...makeCountSchemes("rbrb", "Red / Blue", [RED, BLUE], TWO_COLOR_COUNTS, "count"),
+  ...makeCountSchemes("rbrb", "Blue / Red", [BLUE, RED], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("rara", "Red / Amber", [RED, AMBER], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("baba", "Blue / Amber", [BLUE, AMBER], TWO_COLOR_COUNTS, "count"),
-  ...makeCountSchemes("rwb", "Red / White / Blue", [RED, WHITE, BLUE], TRIO_COUNTS, "count"),
+  ...makeCountSchemes("rwb", "Blue / White / Red", [BLUE, WHITE, RED], TRIO_COUNTS, "count"),
   ...makeCountSchemes("rab", "Red / Amber / Blue", [RED, AMBER, BLUE], TRIO_COUNTS, "count"),
 };
 

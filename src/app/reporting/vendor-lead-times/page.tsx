@@ -104,7 +104,7 @@ export default async function VendorLeadTimesPage({
         ))}
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <div className="px-3 py-2 border-b border-white/5">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">By vendor</h3>
           <p className="text-[10px] text-zinc-500 font-body mt-0.5">

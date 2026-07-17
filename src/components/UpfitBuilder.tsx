@@ -6,6 +6,8 @@ import {
   COLOR_SCHEMES,
   PIN_SIZES,
   PIN_SIZE_ORDER,
+  PUSHBAR_RECTS,
+  PUSHBAR_VIEWBOX,
   colorSchemesByGroup,
   getColorScheme,
   getPinSize,
@@ -21,6 +23,8 @@ export type UpfitBuilderProps = {
   initialNotes: string;
   parts: { id: string; sku: string; name: string }[];
   action: (formData: FormData) => Promise<void>;
+  // Builds/refreshes the linked quote's parts from the placed equipment.
+  generateQuoteAction: (formData: FormData) => Promise<void>;
 };
 
 type Selection = { partId: string | null; label: string; partSku: string | null };
@@ -42,6 +46,7 @@ export function UpfitBuilder({
   initialNotes,
   parts,
   action,
+  generateQuoteAction,
 }: UpfitBuilderProps) {
   const [bodyStyle, setBodyStyle] = useState(initialBodyStyle);
   const [vehicleLabel, setVehicleLabel] = useState(initialVehicleLabel);
@@ -198,20 +203,40 @@ export function UpfitBuilder({
     );
   };
 
-  const handleSave = () => {
-    setSaveMsg(null);
+  const buildFormData = () => {
     const fd = new FormData();
     fd.set("quoteId", quoteId);
     fd.set("bodyStyle", bodyStyle);
     fd.set("vehicleLabel", vehicleLabel);
     fd.set("pins", JSON.stringify(pins));
     fd.set("notes", notes);
+    return fd;
+  };
+
+  const handleSave = () => {
+    setSaveMsg(null);
+    const fd = buildFormData();
     startTransition(async () => {
       try {
         await action(fd);
         setSaveMsg("Saved.");
       } catch {
         setSaveMsg("Save failed — try again.");
+      }
+    });
+  };
+
+  // Save the current diagram AND (re)build the linked quote's parts from
+  // the placed equipment. The server action redirects to the quote, so
+  // there's no success message to show here.
+  const handleGenerateQuote = () => {
+    setSaveMsg(null);
+    const fd = buildFormData();
+    startTransition(async () => {
+      try {
+        await generateQuoteAction(fd);
+      } catch {
+        setSaveMsg("Couldn't generate the quote — try again.");
       }
     });
   };
@@ -294,14 +319,25 @@ export function UpfitBuilder({
             />
           </label>
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isPending}
-            className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-1.5 font-semibold disabled:opacity-60"
-          >
-            {isPending ? "Saving…" : "Save upfit"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isPending}
+              className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-1.5 font-semibold disabled:opacity-60"
+            >
+              {isPending ? "Saving…" : "Save upfit"}
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateQuote}
+              disabled={isPending}
+              title="Save the diagram and rebuild the quote's parts from the placed equipment"
+              className="text-[11px] font-body bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/15 rounded-md px-4 py-1.5 disabled:opacity-60"
+            >
+              Generate quote from equipment
+            </button>
+          </div>
         </div>
 
         {/* Shape controls — what the next placed pin will look like. */}
@@ -315,6 +351,7 @@ export function UpfitBuilder({
             >
               <option value="rect">Rectangle</option>
               <option value="circle">Circle</option>
+              <option value="pushbar">Push bumper</option>
             </select>
           </label>
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
@@ -497,6 +534,7 @@ export function UpfitBuilder({
                       >
                         <option value="rect">Rectangle</option>
                         <option value="circle">Circle</option>
+                        <option value="pushbar">Push bumper</option>
                       </select>
                       <select
                         value={pin.colorScheme ?? "red_white"}
@@ -621,6 +659,13 @@ function PinPreview({
     strip: { long: 56, short: 10 },
   };
   const { long, short } = sidebarDims[sz.key] ?? sidebarDims.medium;
+  if (shape === "pushbar") {
+    return (
+      <span className="inline-block shrink-0" style={{ width: 26, height: 14 }}>
+        <PushbarGlyph />
+      </span>
+    );
+  }
   // Circles ignore orientation and use the long dimension as diameter.
   const w = shape === "circle" ? long : orientation === "horizontal" ? long : short;
   const h = shape === "circle" ? long : orientation === "horizontal" ? short : long;
@@ -675,16 +720,23 @@ function PlacedPin({
   const scheme = getColorScheme(pin.colorScheme);
   const sz = getPinSize(pin.size);
   const isCircle = pin.shape === "circle";
-  // Effective width/height: per-pin override wins; falls back to the
-  // preset. Circles use the same value for both axes.
-  const effW = pin.widthFracOverride ?? sz.widthFrac;
-  const effH = pin.heightFracOverride ?? sz.heightFrac;
+  const isPushbar = pin.shape === "pushbar";
+  // A drag-resize override is stored as LITERAL width/height fractions of
+  // the diagram box (screen-x → width, screen-y → height). Used directly
+  // so vertical pins resize the same way horizontal ones do. Without an
+  // override we fall back to the preset, swapping long/short for vertical.
+  const hasOverride =
+    pin.widthFracOverride != null && pin.heightFracOverride != null;
   const widthPct = isCircle
-    ? effW * 100
-    : (pin.orientation === "vertical" ? effH : effW) * 100;
+    ? (pin.widthFracOverride ?? sz.widthFrac) * 100
+    : hasOverride
+      ? (pin.widthFracOverride as number) * 100
+      : (pin.orientation === "vertical" ? sz.heightFrac : sz.widthFrac) * 100;
   const heightPct = isCircle
-    ? effW * 100
-    : (pin.orientation === "vertical" ? effW : effH) * 100;
+    ? (pin.widthFracOverride ?? sz.widthFrac) * 100
+    : hasOverride
+      ? (pin.heightFracOverride as number) * 100
+      : (pin.orientation === "vertical" ? sz.widthFrac : sz.heightFrac) * 100;
 
   const resizingRef = useRef(false);
 
@@ -725,25 +777,29 @@ function PlacedPin({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onClick={(e) => e.stopPropagation()}
-        className="absolute inset-0 border border-black overflow-hidden"
+        className={`absolute inset-0 overflow-hidden ${isPushbar ? "" : "border border-black"}`}
         style={{
           cursor: "grab",
           touchAction: "none",
-          borderRadius: isCircle ? "50%" : `${Math.min(widthPct, heightPct) * 0.25}%`,
+          borderRadius: isCircle ? "50%" : isPushbar ? undefined : `${Math.min(widthPct, heightPct) * 0.25}%`,
           boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
         }}
       >
-        <div
-          className="flex w-full h-full"
-          style={{
-            flexDirection:
-              isCircle || pin.orientation !== "vertical" ? "row" : "column",
-          }}
-        >
-          {scheme.segments.map((c, i) => (
-            <div key={i} style={{ flex: 1, backgroundColor: c }} />
-          ))}
-        </div>
+        {isPushbar ? (
+          <PushbarGlyph />
+        ) : (
+          <div
+            className="flex w-full h-full"
+            style={{
+              flexDirection:
+                isCircle || pin.orientation !== "vertical" ? "row" : "column",
+            }}
+          >
+            {scheme.segments.map((c, i) => (
+              <div key={i} style={{ flex: 1, backgroundColor: c }} />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Resize handle — only visible when this pin is selected. Sits
@@ -783,5 +839,27 @@ function PlacedPin({
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Push-bumper / grille-guard glyph. Neutral steel look (push bumpers are
+// black powder-coated), rendered as an outer frame with vertical slats so
+// it reads as a front-mount bumper regardless of size. Fills its parent.
+// Push-bumper (grille guard) outline modeled on the Pro-gard style: two
+// rounded uprights with three horizontal cross bars. Drawn as filled
+// rounded rects on a shared viewBox with preserveAspectRatio="none" so
+// it stretches to whatever size the pin is resized to. Geometry is
+// shared with the PDF renderer via templates.ts.
+function PushbarGlyph() {
+  return (
+    <svg
+      viewBox={`0 0 ${PUSHBAR_VIEWBOX.w} ${PUSHBAR_VIEWBOX.h}`}
+      preserveAspectRatio="none"
+      className="w-full h-full"
+    >
+      {PUSHBAR_RECTS.map((r, i) => (
+        <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+      ))}
+    </svg>
   );
 }

@@ -107,7 +107,8 @@ Every item links to the underlying entity page.
       versioning snapshots, admin template editor) is deferred.
 - [ ] **Send-to-customer** is separate from Print — takes an email input
       and emails the PDF for approval.
-- [ ] **CSV/Excel mass import** where useful (parts inventory at minimum).
+- [x] **CSV/Excel mass import** where useful — parts inventory
+      (`/inventory/import`) and packages (`/packages/import`) both shipped.
 
 ## Universal PDF export (PR 21, Phase 1)
 
@@ -865,13 +866,24 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Custom + fixed fees; both can be removed per quote.
 - [x] Live totals: subtotal, discount, fees, tax, grand total.
 - [x] Internal notes per quote.
-- [x] Status workflow: draft → sent → approved → converted.
+- [x] Status workflow: draft → sent → approved → converted. Saving a
+      quote never silently reverts the status: `saveQuote` only accepts a
+      recognized status and otherwise keeps the quote's existing value
+      (the old `?? "draft"` default clobbered the record back to draft
+      whenever the field didn't round-trip — the "reverts to draft" bug).
+- [x] **A build can't start until the quote is approved.** The workflow
+      strip can move the quote up to "next in line" in any status, but
+      moving it to "In Progress" (or beyond) is rejected unless the
+      status is `approved` or `converted`. The strip shows the rejection
+      inline instead of quietly doing nothing.
 - [x] Customer dropdown.
 - [x] Tax rate input per quote.
 - [x] Add parts from inventory to a quote via "+ Add from inventory…"
       dropdown. Adds line with sku/name/price/partId; stock NOT deducted
-      at quote time (deducted when the linked work order moves to
-      "In Progress" on the Workflow board).
+      at quote time. Stock is deducted **only** when the linked work
+      order crosses into "In Progress" on the workflow (gated on the
+      quote being approved), and restored if the build is walked back
+      before "In Progress."
 - [x] Column titles on the line-items table.
 - [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
@@ -896,14 +908,131 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Pricing labels: **Internal Cost** + **Price** (single price column).
 - [x] Per-part margin AND markup % live calculation in form.
 - [x] Quick "set price by N% margin/markup" buttons.
+- [x] Every field on the add + edit part forms carries a visible caption
+      label (shared `FormField` in `@/components/FormField`), so pre-filled
+      values on the edit form are self-explanatory instead of bare numbers.
 - [x] Manufacturer + Supplier dropdowns sourced from Vendors.
 - [x] Filters on category, vendor, archived.
+- [x] **Search by SKU or part name** — `?q=` free-text box on the list
+      (case-insensitive substring, `%`/`_` escaped) filtering the whole list
+      server-side. Combines with the other filters/sort, resets to page 1, and
+      is carried into the Print / Save-as-PDF export (shown in its filter line).
+- [x] **Sortable columns** on the list — every column header (SKU, Name,
+      Category, Manufacturer, Supplier, On hand, On order, Internal cost,
+      Price, Margin) has up/down arrows. Sorting is server-side via
+      `?sort=&dir=` (so it orders the whole filtered list, not just the
+      current page), keeps filters, and resets to page 1. Vendor sorts use
+      aliased joins on `vendors`; margin sorts on `(price - cost) / price`;
+      NULLs always sort last. Default view is Name A→Z. Shared logic in
+      `@/lib/inventorySort`; headers via `@/components/SortHeader`. The
+      Print / Save-as-PDF export honors the active sort (and shows a
+      "Sorted by" line), so the exported view matches the screen.
 - [x] Edit pencil opens correct row (uses `/inventory/[id]/edit` pattern).
-- [ ] Mass import via CSV/Excel.
+- [x] **Mass import via CSV/Excel** — `/inventory/import` UI +
+      `POST /api/parts/import`. Dry-run preview → confirm; upserts by SKU
+      (existing update, new create); auto-creates missing manufacturer /
+      supplier vendors. This is the "load the inventory count first" step
+      that Packages (below) build on top of.
+  - Header matching is alias-based (`HEADER_ALIASES` in `src/lib/csv.ts`):
+    the SKU column may be labeled `sku`, `manufacturer_sku` (as vendor/Whelen
+    exports do), `mfg_sku`, `mfr_sku`, `part_number`, `part_no`, `partno`, or
+    `item_number`; the name column may be `name`, `product_name`, `item_name`,
+    or `part_name`. Unrecognized/extra columns (e.g. `Count`, `Current Count`)
+    and blank headers are ignored. A missing required column returns a fatal
+    error that lists which column is missing and the raw headers detected.
+  - In-file **duplicate SKUs** are handled per row: the first occurrence wins
+    and later rows with the same SKU are flagged (`duplicate sku in file …`)
+    so they show in the dry-run preview and are skipped, rather than silently
+    colliding on commit.
 - [ ] Per-part PO history button — currently shown as the FIFO layers
       table on /inventory/[id]; consider a dedicated button if needed.
 - [ ] Inline "Add new vendor" inside the dropdown (currently links
       out to /vendors).
+
+## Inventory Packages / Kits (Shop Monkey "canned services")
+
+Reusable bundles of parts + labor + fees the sales team drops onto a quote
+in one click — modeled on Shop Monkey's **Canned Services** (a.k.a. canned
+jobs / kits). The seamless-upload flow the user asked for is two-step and
+dependency-ordered: **(1) load the inventory count** via `/inventory/import`
+so every SKU exists, then **(2) load packages** whose part lines reference
+those SKUs.
+
+**Decisions (session 2026-07-02):**
+- **Itemized roll-up pricing.** A package expands into individual, editable
+  quote lines (each part / labor / fee shown with its own price), NOT a single
+  fixed bundle price — matches the existing line-item quote model and gives
+  government buyers a transparent breakdown.
+- **Bundles parts + labor + fees** (full canned-service model; the quote
+  editor already supports all three line kinds).
+- **CSV format designed here** (no external export to match).
+
+- [x] **`packages` table** — `name`, `category`, `description`, `components`
+      (jsonb array), `tags`, `archived`. Components share the quote editor's
+      line shape so expansion onto a quote is a direct map. Part components
+      carry `partId` + `sku` but also snapshot `description` + `unitPrice`, so
+      a package keeps working if the underlying part is later archived/renamed.
+- [x] **Packages section** — `/packages` (list + create → redirect into the
+      builder), `/packages/[id]/edit` (builder), JSON API
+      `GET/POST /api/packages`, `GET/PATCH/DELETE /api/packages/[id]`
+      (delete manager+), and `GET /api/packages/search` type-ahead (returns
+      components so the quote editor expands with no second round-trip).
+      Tags/archive via the shared `ListRowControls` + `/api/list-meta`
+      (`packages` registered there). Nav entry under **Operations**.
+- [x] **Package builder** (`PackageBuilder.tsx`) — a focused mini quote
+      editor: parts via the shared `PartSearchCombobox`, labor (hours × rate),
+      and fee rows, with a live undiscounted "package value" reference figure.
+- [x] **Quote integration** — a "+ Add package" `PackageSearchCombobox` sits
+      next to "+ Search inventory to add…" in the quote editor. Picking a
+      package appends its components as editable lines (add-then-tweak, like
+      Shop Monkey). Stock still deducts only when the work order hits
+      "In Progress," unchanged.
+- [x] **"Save as package"** button in the quote editor — turns the current
+      quote's lines into a reusable package (per-line discounts dropped;
+      discounting stays on the quote). POSTs to `/api/packages`.
+- [x] **Package bulk upload** — `/packages/import` UI +
+      `POST /api/packages/import` (dry-run preview → confirm). One row per
+      component grouped by `package_name`; `part` rows resolve by SKU against
+      the live catalog (unknown SKU = error, since inventory loads first).
+      Upserts by name; a package with any errored row is skipped whole (no
+      partial bundles). Sample template + column docs in the import UI.
+
+### CSV columns (package import)
+
+`package_name` (req), `component_type` (req: `part`/`labor`/`fee`),
+`package_category`, `package_description`, `sku` (req for `part`), `label`
+(line description; part rows default to `SKU — name`), `quantity`,
+`unit_price` (blank part price defaults to the part's inventory price),
+`hours`, `rate`, `amount`.
+
+### Schema additions (Packages) — run in Neon's SQL Editor
+
+```sql
+CREATE TABLE IF NOT EXISTS packages (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  archived boolean NOT NULL DEFAULT false,
+  tags text[],
+  name text NOT NULL,
+  category text,
+  description text,
+  components jsonb NOT NULL DEFAULT '[]'::jsonb,
+  created_at timestamp NOT NULL DEFAULT now(),
+  updated_at timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS packages_name_idx ON packages (name);
+CREATE INDEX IF NOT EXISTS packages_tags_gin ON packages USING gin (tags);
+```
+
+### Deferred (post Packages v1)
+
+- **Fixed-price bundle option** (single-line package price) as an alternative
+  to the itemized roll-up, chosen per package.
+- **Package on the PDF/print view** as a labeled group header rather than a
+  flat list of lines.
+- **Package profitability report** (Shop Monkey surfaces most-used / highest-
+  margin canned services) once packages have quote history.
+- **Reorder components** in the builder (parts/labor/fees currently append in
+  add order; the quote editor's per-section drag-reorder could be reused).
 
 ## Vendors
 
@@ -1025,7 +1154,8 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
       - Full FIFO layers table, oldest first, depleted layers dimmed.
 - [x] **Consumption depletes FIFO layers** when a work order linked to
       a quote with stock parts moves to "In Progress" on the Workflow
-      board. Idempotent via `work_orders.parts_consumed`.
+      board — which is only allowed once the quote is approved.
+      Idempotent via `work_orders.parts_consumed`.
 - [ ] Restock action (manual reverse if a build is canceled).
 - [ ] Optional moving-weighted-average cache on `parts` for fast lookup.
 
@@ -1065,16 +1195,16 @@ customer sees and the techs build to. One upfit per quote.
       the image and stored as fraction 0..1 of the image box, so the
       same coordinate is identical on screen and in print regardless of
       the image's aspect ratio. Templates are per-vehicle (Tahoe,
-      Suburban, Blazer, Silverado, Durango, Ford PIU, F-150, F-350)
-      rather than per body style, so the diagram on the spec actually
-      matches the truck. The `upfit_configs.body_style` column name is
+      Suburban, Blazer, Silverado, Durango, Ford PIU, F-150, F-350,
+      Ford Transit Custom) rather than per body style, so the diagram
+      on the spec actually matches the truck. The `upfit_configs.body_style` column name is
       preserved for backward-compat; the value now holds the per-vehicle
       slug. (The earlier five-separate-views model was dropped —
       `UpfitPin.view` is retained optional for backward-compat only.)
 - [x] **Template image contract** — drop ONE JPG (or PNG) per vehicle at
       `public/upfit-templates/<slug>.jpg`. Slugs currently shipped:
       `tahoe`, `suburban`, `blazer`, `silverado`, `durango`, `piu`,
-      `f150`, `f350`. Any aspect ratio works (pins track the image by
+      `f150`, `f350`, `transit_custom`. Any aspect ratio works (pins track the image by
       percentage); a missing file degrades to a labeled empty box, no
       crash. No rebuild required — files are read on each render. To add
       a new vehicle: drop the JPG and append an entry to
@@ -1142,7 +1272,9 @@ customer sees and the techs build to. One upfit per quote.
       Called on every save; purged when the quote has no customer.
 - [ ] **Standalone tool** outside the quote context (deferred).
 - [ ] **CAD upload** attachable to the upfit config (deferred).
-- [ ] **Build packages** uploadable to inventory parts list (deferred).
+- [x] **Build packages** — shipped as the Inventory Packages / Kits module
+      (see that section). Reusable part+labor+fee bundles, buildable in the
+      UI or bulk-uploaded by CSV, added to a quote in one click.
 - [ ] **Per-vehicle photos** as an alternative to the templates
       (deferred — pin coords are template-relative today).
 
@@ -1364,9 +1496,29 @@ guarded function.
     nothing.
 - [x] **FIFO consumption keyed to stage, both directions.** Advancing a
   quote/WO to or past `in_progress` consumes once; moving it back before
-  `in_progress` restores. Wired into both `/quotes/[id]` `moveStage`
-  and `POST /api/quotes/[id]/workflow-stage` (the two paths now call the
-  same module).
+  `in_progress` restores. Both quote-side stage moves now flow through
+  the **single** `POST /api/quotes/[id]/workflow-stage` endpoint: the
+  `/workflow` Kanban (`WorkflowBoard`) and the `/quotes/[id]` workflow
+  strip (`QuoteWorkflowStrip`) both call it. The old `/quotes/[id]`
+  `moveStage` server action was removed — it duplicated the logic, ran
+  no CRM sync, and failed silently (which read to users as the move
+  "reverting"). The endpoint returns typed 400s the UI surfaces.
+- [x] **Approval gate before a build can start.** The
+  `POST /api/quotes/[id]/workflow-stage` endpoint rejects any move to
+  `in_progress` (or a later stage) unless `quotes.status` is `approved`
+  or `converted`, returning `400 { needsApproval: true }`. This is the
+  single gate that also protects inventory — because deduction is keyed
+  to the same `in_progress` crossing, stock can never leave the system
+  for an unapproved quote. Both the workflow strip and the Kanban board
+  show the rejection message.
+- [ ] **CRM-side entry into `in_progress` (deferred).** `syncDealToWorkflow`
+  can set a work order's status to `in_progress` when a deal's CRM stage
+  moves to `in_production`. That path updates the WO status but does not
+  run `consumeWorkOrderParts` and does not apply the approval gate, so
+  the "deduct at in_progress / only when approved" guarantee holds only
+  for the quote/workflow-board paths today. Consolidating all three
+  entry points behind one guarded "advance work order" helper (calling
+  the idempotent `consumeWorkOrderParts`) is the clean follow-up.
 - [x] **`src/lib/dealStage.ts :: applyDealStageChange`** — the single
   guarded deal-stage transition. Runs `canAdvanceTo` (credential hard
   gate included), captures override/backwards reasons into

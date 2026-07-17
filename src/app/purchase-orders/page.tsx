@@ -140,7 +140,7 @@ export default async function PurchaseOrdersPage({
         </form>
         <ListFilters basePath="/purchase-orders" view={view} tag={tag} carry={{ status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

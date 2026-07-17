@@ -274,6 +274,39 @@ export const partCostHistory = pgTable("part_cost_history", {
   source: text("source"),
 });
 
+// Inventory packages (a.k.a. kits / canned services). A reusable bundle of
+// parts + labor + fees the sales team can drop onto a quote in one click.
+// Components are stored as a jsonb array — the same shape used by the quote
+// editor's line items — so expanding a package onto a quote is a direct map.
+// Pricing is itemized: each component becomes its own editable quote line, so
+// the customer sees the full breakdown (chosen over a single fixed bundle
+// price). Parts are linked by partId when known, but each component also
+// snapshots a description + unit price so the package keeps working even if
+// the underlying part is later archived or renamed.
+export type PackageComponent =
+  | {
+      kind: "item";
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      partId?: string | null;
+      sku?: string | null;
+    }
+  | { kind: "labor"; description: string; hours: number; rate: number }
+  | { kind: "fee"; description: string; amount: number; fixed: boolean };
+
+export const packages = pgTable("packages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  archived: boolean("archived").notNull().default(false),
+  tags: text("tags").array(),
+  name: text("name").notNull(),
+  category: text("category"),
+  description: text("description"),
+  components: jsonb("components").$type<PackageComponent[]>().notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("packages_name_idx").on(t.name)]);
+
 export const purchaseOrders = pgTable("purchase_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
   archived: boolean("archived").notNull().default(false),
@@ -602,8 +635,9 @@ export type UpfitPin = {
   // internal placement note that prints in the equipment table only.
   caption?: string;
   // Visual config. All optional with defaults handled by the renderer
-  // so existing pins (circles) keep working.
-  shape?: "rect" | "circle";
+  // so existing pins (circles) keep working. `pushbar` renders a
+  // push-bumper drawing rather than a colored equipment marker.
+  shape?: "rect" | "circle" | "pushbar";
   size?:
     | "small"
     | "medium"

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { FormField } from "@/components/FormField";
 
 export function PartAddForm({
   action,
@@ -35,52 +36,64 @@ export function PartAddForm({
         Add part
       </h3>
       <form action={action} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <input
-          name="sku"
-          required
-          placeholder="SKU *"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
-        />
-        <input
-          name="name"
-          required
-          placeholder="Name *"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2"
-        />
-        <input
-          name="mfgPartNumber"
-          placeholder="Mfg part # (shown on work orders)"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
-        />
-        <input
-          name="category"
-          placeholder="Category"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-        />
-        <select
-          name="manufacturerId"
-          defaultValue=""
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-        >
-          <option value="">— Manufacturer —</option>
-          {vendors.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name}
-            </option>
-          ))}
-        </select>
-        <select
-          name="vendorId"
-          defaultValue=""
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-        >
-          <option value="">— Supplier —</option>
-          {vendors.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name}
-            </option>
-          ))}
-        </select>
+        <FormField label="SKU" required>
+          <input
+            name="sku"
+            required
+            placeholder="SKU"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
+          />
+        </FormField>
+        <FormField label="Name" required className="md:col-span-2">
+          <input
+            name="name"
+            required
+            placeholder="Name"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <FormField label="Mfg part #" hint="shown on work orders">
+          <input
+            name="mfgPartNumber"
+            placeholder="Mfg part #"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
+          />
+        </FormField>
+        <FormField label="Category">
+          <input
+            name="category"
+            placeholder="Category"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <FormField label="Manufacturer">
+          <select
+            name="manufacturerId"
+            defaultValue=""
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+          >
+            <option value="">— Manufacturer —</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
+        <FormField label="Supplier">
+          <select
+            name="vendorId"
+            defaultValue=""
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+          >
+            <option value="">— Supplier —</option>
+            {vendors.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+              </option>
+            ))}
+          </select>
+        </FormField>
         <p className="md:col-span-3 text-[11px] text-zinc-500 -mt-1">
           Need a new vendor?{" "}
           <a
@@ -92,48 +105,58 @@ export function PartAddForm({
           </a>{" "}
           and it'll appear in these dropdowns.
         </p>
-        <input
-          name="quantityOnHand"
-          type="number"
-          min="0"
-          placeholder="On hand"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-        />
-        <input
-          name="quantityOnOrder"
-          type="number"
-          min="0"
-          placeholder="On order"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-        />
-        <input
-          name="reorderPoint"
-          type="number"
-          min="0"
-          placeholder="Reorder point"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-        />
-        <input
-          name="cost"
-          type="number"
-          min="0"
-          step="0.01"
-          value={cost}
-          onChange={(e) => setCost(e.target.value)}
-          placeholder="Internal cost"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-        />
-        <input
-          name="price"
-          type="number"
-          min="0"
-          step="0.01"
-          value={price}
-          onChange={(e) => setPrice(e.target.value)}
-          placeholder="Price"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
-        />
-        <div className="text-[11px] text-zinc-400 font-body flex items-center gap-2">
+        <FormField label="Qty on hand">
+          <input
+            name="quantityOnHand"
+            type="number"
+            min="0"
+            placeholder="0"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <FormField label="Qty on order">
+          <input
+            name="quantityOnOrder"
+            type="number"
+            min="0"
+            placeholder="0"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <FormField label="Reorder point">
+          <input
+            name="reorderPoint"
+            type="number"
+            min="0"
+            placeholder="0"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <FormField label="Internal cost" hint="$">
+          <input
+            name="cost"
+            type="number"
+            min="0"
+            step="0.01"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+            placeholder="0.00"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <FormField label="Sell price" hint="$">
+          <input
+            name="price"
+            type="number"
+            min="0"
+            step="0.01"
+            value={price}
+            onChange={(e) => setPrice(e.target.value)}
+            placeholder="0.00"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
+        <div className="text-[11px] text-zinc-400 font-body flex items-center gap-2 self-end pb-2">
           <span>
             Margin:{" "}
             <span className="text-white font-semibold">
@@ -175,12 +198,14 @@ export function PartAddForm({
             </button>
           ))}
         </div>
-        <textarea
-          name="description"
-          placeholder="Description"
-          rows={2}
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3"
-        />
+        <FormField label="Description" className="md:col-span-3">
+          <textarea
+            name="description"
+            placeholder="Description"
+            rows={2}
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
+          />
+        </FormField>
         <div className="md:col-span-3 flex justify-end">
           <button
             type="submit"

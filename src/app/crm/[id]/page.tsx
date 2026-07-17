@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq, desc, and, gte, lte, ilike, inArray } from "drizzle-orm";
 import { put } from "@vercel/blob";
@@ -12,6 +12,7 @@ import {
   categoryVisibleTo,
   visibleCategoriesFor,
 } from "@/lib/customerDocuments";
+import { upsertQuoteLink } from "@/lib/customerDocLinks";
 import { headers } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -177,6 +178,37 @@ export default async function CustomerEntityPage({
     revalidatePath(`/crm/${id}`);
   }
 
+  // Generate a fresh draft quote pre-linked to this customer, then jump
+  // straight into the editor. Mirrors createQuote on /quotes but skips
+  // the customer-picker step since we already know the folder we're in.
+  async function generateQuote() {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const quoteNumber = `Q-${Date.now().toString().slice(-7)}`;
+    const [row] = await db
+      .insert(quotes)
+      .values({
+        quoteNumber,
+        customerId: id,
+        status: "draft",
+        lineItems: [],
+        subtotal: "0",
+        taxTotal: "0",
+        grandTotal: "0",
+      })
+      .returning();
+    // Best-effort folder auto-link (PR 9 pattern) — non-fatal.
+    try {
+      await upsertQuoteLink(row.id);
+    } catch (err) {
+      console.error("upsertQuoteLink failed:", err);
+    }
+    revalidatePath(`/crm/${id}`);
+    revalidatePath("/quotes");
+    redirect(`/quotes/${row.id}`);
+  }
+
   async function uploadCustomerDoc(formData: FormData) {
     "use server";
     const s = await auth();
@@ -269,6 +301,17 @@ export default async function CustomerEntityPage({
 
   return (
     <AppShell title={c.name} subtitle={`${c.type} customer`}>
+      <div className="flex flex-wrap gap-2">
+        <form action={generateQuote}>
+          <button
+            type="submit"
+            className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
+          >
+            + Generate quote
+          </button>
+        </form>
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Email:</span>{c.email ?? "—"}</div>
@@ -567,10 +610,21 @@ function ExpirationGroup({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  action,
+  children,
+}: {
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
     <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-2">
-      <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">{title}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">{title}</h3>
+        {action}
+      </div>
       {children}
     </div>
   );
