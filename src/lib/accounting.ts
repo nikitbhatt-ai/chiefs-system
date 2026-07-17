@@ -1,9 +1,20 @@
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { journalEntries, journalLines } from "@/db/schema";
+import { glAccounts, journalEntries, journalLines } from "@/db/schema";
 
 /** The transaction handle drizzle hands to db.transaction((tx) => …). */
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Look up a GL account id by its chart-of-accounts code, inside a transaction.
+ * Returns null when the account doesn't exist (e.g. the Phase 1 seed hasn't been
+ * run yet) so callers that post *opportunistically* — like the inventory hooks —
+ * can skip posting instead of blowing up a core operation.
+ */
+export async function resolveAccountId(tx: Tx, code: string): Promise<string | null> {
+  const [row] = await tx.select({ id: glAccounts.id }).from(glAccounts).where(eq(glAccounts.code, code)).limit(1);
+  return row?.id ?? null;
+}
 
 // ── Money: always integer cents internally, dollars only at the edges ─────────
 

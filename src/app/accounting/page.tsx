@@ -4,6 +4,8 @@ import { db } from "@/db";
 import { glAccounts, journalEntries, journalLines, arInvoices, receipts, bills, payments } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtCents } from "@/lib/accounting";
+import { inventoryReconciliation } from "@/lib/inventoryValuation";
+import { listJobCosts } from "@/lib/jobCosting";
 
 export const dynamic = "force-dynamic";
 
@@ -41,6 +43,8 @@ export default async function AccountingHomePage() {
     db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(payments),
   ]);
 
+  const [recon, jobs] = await Promise.all([inventoryReconciliation(), listJobCosts()]);
+  const openWip = jobs.reduce((s, j) => s + j.wipBalanceCents, 0);
   const ties = bal.debit === bal.credit;
 
   const cards = [
@@ -50,6 +54,8 @@ export default async function AccountingHomePage() {
     { href: "/accounting/receipts", title: "Receipts", desc: "Record cash received against AR", stat: `${receiptAgg.n} recorded` },
     { href: "/accounting/bills", title: "Bills (AP)", desc: "Vendor bills; posts to Accounts Payable", stat: `${ap.openCount} open · ${fmtCents(ap.openTotal)} owed` },
     { href: "/accounting/payments", title: "Payments", desc: "Record cash paid against AP", stat: `${paymentAgg.n} recorded` },
+    { href: "/accounting/inventory", title: "Inventory", desc: "FIFO subledger reconciled to the ledger", stat: recon.ties ? `${fmtCents(recon.subledgerCents)} · reconciled` : `off by ${fmtCents(Math.abs(recon.differenceCents))}` },
+    { href: "/accounting/job-costing", title: "Job costing", desc: "Materials + labor per work order", stat: `${jobs.length} jobs · ${fmtCents(openWip)} in WIP` },
   ];
 
   return (
@@ -87,9 +93,10 @@ export default async function AccountingHomePage() {
       </div>
 
       <p className="text-[11px] text-zinc-500 font-body">
-        Phases 1–3 live: the core ledger, Accounts Receivable (invoice a quote, record receipts),
-        and Accounts Payable (enter vendor bills, record payments). Inventory costing, job costing,
-        P&amp;L reporting, the AR/AP agents, tax tracking, and QuickBooks sync come in later phases.
+        Phases 1–5 live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
+        accounting, and Job costing (materials from WIP + labor from the time clock; settle WIP → COGS
+        on close). P&amp;L reporting, the AR/AP agents, tax tracking, and QuickBooks sync come in later
+        phases.
       </p>
     </AppShell>
   );

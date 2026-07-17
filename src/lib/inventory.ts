@@ -27,6 +27,8 @@ import {
   purchaseOrders,
   type POLineItem,
 } from "@/db/schema";
+import { dollarsToCents } from "@/lib/accounting";
+import { postInventoryReceipt, postInventoryIssue, postInventoryRestore } from "@/lib/inventoryLedger";
 
 type StockLine = { kind?: string; partId?: string; quantity?: number };
 
@@ -77,6 +79,9 @@ export async function consumeWorkOrderParts(workOrderId: string): Promise<Consum
     }
 
     const shortages: { partId: string; shortBy: number }[] = [];
+    // Accumulate the real FIFO cost drained so the ledger issue matches exactly
+    // what left the subledger (uncovered/short qty carries no layer cost).
+    let drainedCents = 0;
     for (const [partId, qty] of byPart) {
       const layers = await tx
         .select()
@@ -93,6 +98,7 @@ export async function consumeWorkOrderParts(workOrderId: string): Promise<Consum
           .update(partReceipts)
           .set({ quantityRemaining: layer.quantityRemaining - take })
           .where(eq(partReceipts.id, layer.id));
+        drainedCents += take * dollarsToCents(layer.unitCost);
         need -= take;
       }
       if (need > 0) shortages.push({ partId, shortBy: need });
@@ -106,6 +112,9 @@ export async function consumeWorkOrderParts(workOrderId: string): Promise<Consum
         })
         .where(eq(parts.id, partId));
     }
+
+    // Ledger: Dr Work in Progress / Cr Inventory at FIFO cost drained.
+    await postInventoryIssue(tx, { totalCents: drainedCents, workOrderId: wo.id, woNumber: wo.woNumber });
 
     await tx
       .update(workOrders)
@@ -138,6 +147,7 @@ export async function restoreWorkOrderParts(workOrderId: string): Promise<{ rest
       byPart = rollupPartQuantities(q?.lineItems);
     }
 
+    let restoredCents = 0;
     for (const [partId, qty] of byPart) {
       const layers = await tx
         .select()
@@ -155,6 +165,7 @@ export async function restoreWorkOrderParts(workOrderId: string): Promise<{ rest
           .update(partReceipts)
           .set({ quantityRemaining: layer.quantityRemaining + add })
           .where(eq(partReceipts.id, layer.id));
+        restoredCents += add * dollarsToCents(layer.unitCost);
         give -= add;
       }
       await tx
@@ -165,6 +176,9 @@ export async function restoreWorkOrderParts(workOrderId: string): Promise<{ rest
         })
         .where(eq(parts.id, partId));
     }
+
+    // Ledger: Dr Inventory / Cr Work in Progress — undo the issue at the same cost.
+    await postInventoryRestore(tx, { totalCents: restoredCents, workOrderId: wo.id, woNumber: wo.woNumber });
 
     await tx
       .update(workOrders)
@@ -196,6 +210,8 @@ export async function receivePurchaseOrder(
     const updatedLines: POLineItem[] = [];
     let allFullyReceived = true;
     let anyReceivedThisRound = false;
+    // Value of goods received this round, for the ledger receipt entry.
+    let receivedCents = 0;
 
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
@@ -204,6 +220,7 @@ export async function receivePurchaseOrder(
       const qty = Math.max(0, Math.min(receiveNow, remaining));
       if (qty > 0 && l.partId) {
         anyReceivedThisRound = true;
+        receivedCents += qty * dollarsToCents(l.unitCost);
         await tx.insert(partReceipts).values({
           partId: l.partId,
           purchaseOrderId: po.id,
@@ -235,6 +252,9 @@ export async function receivePurchaseOrder(
       : anyReceivedThisRound
         ? ("partially_received" as const)
         : po.status;
+
+    // Ledger: Dr Inventory / Cr Accounts Payable for the value received.
+    await postInventoryReceipt(tx, { totalCents: receivedCents, poNumber: po.poNumber });
 
     await tx
       .update(purchaseOrders)

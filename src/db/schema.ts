@@ -11,6 +11,7 @@ import {
   pgEnum,
   primaryKey,
   index,
+  uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
@@ -355,6 +356,10 @@ export const workOrders = pgTable("work_orders", {
   partsConsumed: boolean("parts_consumed").notNull().default(false),
   targetBuildStartDate: timestamp("target_build_start_date"),
   safetyBufferDays: integer("safety_buffer_days").notNull().default(7),
+  // Accounting Phase 5: when a job's WIP has been settled to COGS, this points
+  // at the settling journal entry. Null = still open in WIP. Latches the
+  // settlement so it can't be double-posted.
+  cogsJournalEntryId: uuid("cogs_journal_entry_id").references((): AnyPgColumn => journalEntries.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -901,6 +906,25 @@ export const payments = pgTable("payments", {
   index("payments_bill_idx").on(t.billId),
   index("payments_date_idx").on(t.paymentDate),
 ]);
+
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 5: Job costing
+//
+// Materials already flow to Work in Progress tagged with work_order_id
+// (Phase 4). Labor is derived from the existing `time_entries` (hours) valued
+// at an hourly cost rate. `labor_rates` holds those rates: one row per user,
+// plus an optional shop-wide default (user_id NULL). Closing a job settles its
+// accumulated WIP to COGS (Dr COGS / Cr WIP) — see src/lib/jobCosting.ts.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const laborRates = pgTable("labor_rates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // NULL = the shop-wide default rate; otherwise the per-user override.
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+  rateCents: bigint("rate_cents", { mode: "number" }).notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("labor_rates_user_uidx").on(t.userId)]);
 
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
