@@ -757,6 +757,67 @@ export const journalLines = pgTable("journal_lines", {
   index("journal_lines_work_order_idx").on(t.workOrderId),
 ]);
 
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 2: Accounts Receivable
+//
+// An "invoice" is an existing quote we've decided to bill (stack decision:
+// reuse quotes/customers rather than build a parallel invoices table). Issuing
+// an invoice snapshots the quote's totals into `ar_invoices` and auto-posts a
+// journal entry: Dr Accounts Receivable / Cr Sales Revenue / Cr Sales Tax
+// Payable. A `receipts` row records cash in and auto-posts Dr Cash / Cr AR.
+// Per-invoice open balance = invoice total − receipts applied to it.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const arInvoiceStatus = pgEnum("ar_invoice_status", ["open", "paid", "void"]);
+export const receiptMethod = pgEnum("receipt_method", ["cash", "check", "card", "ach", "other"]);
+
+export const arInvoices = pgTable("ar_invoices", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  invoiceNumber: text("invoice_number").notNull().unique(),
+  // One invoice per quote. Line items / detail stay on the quote; this row is
+  // the AR posting record with the totals snapshotted at issue time so later
+  // quote edits never change a posted invoice.
+  quoteId: uuid("quote_id").notNull().unique().references(() => quotes.id),
+  customerId: uuid("customer_id").references(() => customers.id),
+  invoiceDate: timestamp("invoice_date").notNull().defaultNow(),
+  dueDate: timestamp("due_date").notNull(),
+  terms: text("terms").notNull().default("net_30"),
+  subtotalCents: bigint("subtotal_cents", { mode: "number" }).notNull().default(0),
+  taxCents: bigint("tax_cents", { mode: "number" }).notNull().default(0),
+  totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
+  status: arInvoiceStatus("status").notNull().default("open"),
+  journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id),
+  memo: text("memo"),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("ar_invoices_status_idx").on(t.status),
+  index("ar_invoices_customer_idx").on(t.customerId),
+  index("ar_invoices_due_idx").on(t.dueDate),
+]);
+
+export const receipts = pgTable("receipts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  receiptNumber: text("receipt_number").notNull().unique(),
+  customerId: uuid("customer_id").references(() => customers.id),
+  // Optional: a receipt can pay one invoice or sit on-account (invoice_id null).
+  invoiceId: uuid("invoice_id").references(() => arInvoices.id),
+  receiptDate: timestamp("receipt_date").notNull().defaultNow(),
+  method: receiptMethod("method").notNull().default("check"),
+  reference: text("reference"),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull().default(0),
+  memo: text("memo"),
+  journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("receipts_customer_idx").on(t.customerId),
+  index("receipts_invoice_idx").on(t.invoiceId),
+  index("receipts_date_idx").on(t.receiptDate),
+]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
