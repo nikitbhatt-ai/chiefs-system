@@ -8,6 +8,7 @@ import {
   getColorScheme,
   getPinSize,
   getTemplate,
+  getViews,
   localImagePath,
   PUSHBAR_RECTS,
   PUSHBAR_VIEWBOX,
@@ -206,10 +207,20 @@ function PinShape({ pin }: { pin: UpfitPin }) {
 export function UpfitDocument({ data }: { data: UpfitPdfData }) {
   const styles = sharedStyles;
   const template = getTemplate(data.bodyStyle);
+  const views = getViews(template);
+  const firstViewKey = views[0]?.key ?? "main";
   const docNumber = data.quoteNumber ?? `Q-${data.quoteId.slice(0, 8)}`;
   const vehicleLabel = data.vehicleSummary ?? template.label;
-  const imageBuffer = loadTemplateImage(template.imageUrl);
   const generated = new Date();
+
+  const footer = (
+    <View style={styles.footer} fixed>
+      <Text>
+        {BRANDING.companyName} · Upfit spec {docNumber} · Generated {generated.toLocaleString("en-US")}
+      </Text>
+      <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
+    </View>
+  );
 
   return (
     <Document
@@ -218,73 +229,79 @@ export function UpfitDocument({ data }: { data: UpfitPdfData }) {
       creator={BRANDING.companyName}
       producer={BRANDING.companyName}
     >
-      <Page size="LETTER" style={styles.page}>
-        <View style={styles.header}>
-          <View style={styles.brandBlock}>
-            <Text style={styles.brandName}>{BRANDING.companyName}</Text>
-            {BRANDING.tagline ? <Text style={styles.brandLine}>{BRANDING.tagline}</Text> : null}
-            {BRANDING.address ? <Text style={styles.brandLine}>{BRANDING.address}</Text> : null}
-            {BRANDING.phone ? <Text style={styles.brandLine}>{BRANDING.phone}</Text> : null}
-          </View>
-          <View>
-            <Text style={styles.docTitle}>UPFIT SPEC</Text>
-            <Text style={styles.docMeta}>Quote #{docNumber}</Text>
-            <Text style={styles.docMeta}>Date: {data.createdAt.toLocaleDateString("en-US")}</Text>
-          </View>
-        </View>
-
-        <View style={styles.twoCol}>
-          <View style={{ width: "48%" }}>
-            <Text style={styles.sectionTitle}>Customer</Text>
-            <Text style={styles.blockValue}>{data.customerName ?? "—"}</Text>
-          </View>
-          <View style={{ width: "48%" }}>
-            <Text style={styles.sectionTitle}>Vehicle</Text>
-            <Text style={styles.blockValue}>{vehicleLabel}</Text>
-          </View>
-        </View>
-
-        <Text style={styles.sectionTitle}>Placement diagram</Text>
-        <View style={{ position: "relative", width: PANEL_W, marginTop: 4 }}>
-          {imageBuffer ? (
-            <PdfImage src={imageBuffer} style={{ width: PANEL_W }} />
-          ) : (
-            <View
-              style={{
-                width: PANEL_W,
-                height: 240,
-                borderWidth: 1,
-                borderColor: "#cccccc",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ fontSize: 9, color: "#999999" }}>
-                Diagram image not uploaded ({template.imageUrl})
-              </Text>
+      {/* One page per side of the vehicle. */}
+      {views.map((view, vi) => {
+        const buf = loadTemplateImage(view.imageUrl);
+        const viewPins = data.pins.filter((p) => (p.view ?? firstViewKey) === view.key);
+        const isLast = vi === views.length - 1;
+        return (
+          <Page key={view.key} size="LETTER" style={styles.page}>
+            <View style={styles.header}>
+              <View style={styles.brandBlock}>
+                <Text style={styles.brandName}>{BRANDING.companyName}</Text>
+                {BRANDING.tagline ? <Text style={styles.brandLine}>{BRANDING.tagline}</Text> : null}
+                {BRANDING.address ? <Text style={styles.brandLine}>{BRANDING.address}</Text> : null}
+                {BRANDING.phone ? <Text style={styles.brandLine}>{BRANDING.phone}</Text> : null}
+              </View>
+              <View>
+                <Text style={styles.docTitle}>UPFIT SPEC</Text>
+                <Text style={styles.docMeta}>Quote #{docNumber}</Text>
+                <Text style={styles.docMeta}>Date: {data.createdAt.toLocaleDateString("en-US")}</Text>
+              </View>
             </View>
-          )}
-          {data.pins.map((pin) => (
-            <PinShape key={pin.id} pin={pin} />
-          ))}
-        </View>
 
-        {data.notes ? (
-          <View>
-            <Text style={styles.sectionTitle}>Build notes</Text>
-            <Text style={styles.blockLabel}>{data.notes}</Text>
-          </View>
-        ) : null}
+            <View style={styles.twoCol}>
+              <View style={{ width: "48%" }}>
+                <Text style={styles.sectionTitle}>Customer</Text>
+                <Text style={styles.blockValue}>{data.customerName ?? "—"}</Text>
+              </View>
+              <View style={{ width: "48%" }}>
+                <Text style={styles.sectionTitle}>Vehicle</Text>
+                <Text style={styles.blockValue}>{vehicleLabel}</Text>
+              </View>
+            </View>
 
-        <View style={styles.footer} fixed>
-          <Text>
-            {BRANDING.companyName} · Upfit spec {docNumber} · Generated {generated.toLocaleString("en-US")}
-          </Text>
-          <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
-        </View>
-      </Page>
+            <Text style={styles.sectionTitle}>
+              Placement diagram{views.length > 1 ? ` — ${view.label}` : ""}
+            </Text>
+            <View style={{ position: "relative", width: PANEL_W, marginTop: 4 }}>
+              {buf ? (
+                <PdfImage src={buf} style={{ width: PANEL_W }} />
+              ) : (
+                <View
+                  style={{
+                    width: PANEL_W,
+                    height: 240,
+                    borderWidth: 1,
+                    borderColor: "#cccccc",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  <Text style={{ fontSize: 9, color: "#999999" }}>
+                    Diagram image not uploaded ({view.imageUrl})
+                  </Text>
+                </View>
+              )}
+              {viewPins.map((pin) => (
+                <PinShape key={pin.id} pin={pin} />
+              ))}
+            </View>
 
-      {/* Page 2: the actual quote for this build. */}
+            {/* Build notes print once, on the last diagram page. */}
+            {isLast && data.notes ? (
+              <View>
+                <Text style={styles.sectionTitle}>Build notes</Text>
+                <Text style={styles.blockLabel}>{data.notes}</Text>
+              </View>
+            ) : null}
+
+            {footer}
+          </Page>
+        );
+      })}
+
+      {/* Final page: the actual quote for this build. */}
       <Page size="LETTER" style={styles.page}>
         <View style={styles.header}>
           <View style={styles.brandBlock}>

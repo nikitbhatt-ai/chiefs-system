@@ -10,16 +10,32 @@
 // matches the truck. Adding a new vehicle: drop the JPG at
 // `public/upfit-templates/<slug>.jpg` and append an entry below.
 
+// A single view of a vehicle (one side/angle = one editor tab + one PDF
+// page). Pins are tagged with the view `key` they were placed on.
+export type TemplateView = {
+  key: string;
+  label: string;
+  imageUrl: string;
+};
+
 export type VehicleTemplate = {
   slug: string;
   label: string;
-  // Composite blueprint image. Lives at
-  // `public/upfit-templates/<slug>.{jpg|png}`. The editor renders it as
-  // an <img>; the PDF reads the file as a Buffer and embeds it. A
-  // missing file degrades gracefully to a labeled empty box — nothing
-  // crashes.
+  // Primary image — the first view's URL. Kept for any single-image
+  // consumer and as the fallback when `views` is absent.
   imageUrl: string;
+  // Optional multi-view set (one page per side). When present the editor
+  // shows a view switcher and the PDF renders one page per view. When
+  // absent the template is treated as a single view ("Vehicle").
+  views?: TemplateView[];
 };
+
+// Normalized view list for a template: its `views` if multi-view, else a
+// single synthetic view wrapping `imageUrl`.
+export function getViews(t: VehicleTemplate): TemplateView[] {
+  if (t.views && t.views.length > 0) return t.views;
+  return [{ key: "main", label: "Vehicle", imageUrl: t.imageUrl }];
+}
 
 export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   tahoe: {
@@ -66,6 +82,19 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     slug: "transit_custom",
     label: "Ford Transit Custom L2H1",
     imageUrl: "/upfit-templates/transit_custom.jpg",
+  },
+  explorer: {
+    slug: "explorer",
+    label: "Ford Explorer (2025+)",
+    imageUrl: "/upfit-templates/explorer/driver.jpg",
+    // One page per side — the test round for the multi-view layout.
+    views: [
+      { key: "driver", label: "Driver Side", imageUrl: "/upfit-templates/explorer/driver.jpg" },
+      { key: "passenger", label: "Passenger Side", imageUrl: "/upfit-templates/explorer/passenger.jpg" },
+      { key: "front", label: "Front", imageUrl: "/upfit-templates/explorer/front.jpg" },
+      { key: "rear", label: "Rear", imageUrl: "/upfit-templates/explorer/rear.jpg" },
+      { key: "top", label: "Top", imageUrl: "/upfit-templates/explorer/top.jpg" },
+    ],
   },
 };
 
