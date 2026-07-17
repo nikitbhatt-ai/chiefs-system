@@ -37,11 +37,38 @@ export function getViews(t: VehicleTemplate): TemplateView[] {
   return [{ key: "main", label: "Vehicle", imageUrl: t.imageUrl }];
 }
 
+// Build the standard 5-view (per-side) set for a folder-based template
+// at public/upfit-templates/<slug>/{driver,passenger,front,rear,top}.jpg.
+function sideViews(slug: string): TemplateView[] {
+  const base = `/upfit-templates/${slug}`;
+  return [
+    { key: "driver", label: "Driver Side", imageUrl: `${base}/driver.jpg` },
+    { key: "passenger", label: "Passenger Side", imageUrl: `${base}/passenger.jpg` },
+    { key: "front", label: "Front", imageUrl: `${base}/front.jpg` },
+    { key: "rear", label: "Rear", imageUrl: `${base}/rear.jpg` },
+    { key: "top", label: "Top", imageUrl: `${base}/top.jpg` },
+  ];
+}
+
 export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
+  // Current-logo, per-side (one page per side) templates.
   tahoe: {
     slug: "tahoe",
-    label: "Chevrolet Tahoe",
-    imageUrl: "/upfit-templates/tahoe.jpg",
+    label: "Chevrolet Tahoe (2021–25)",
+    imageUrl: "/upfit-templates/tahoe/driver.jpg",
+    views: sideViews("tahoe"),
+  },
+  tahoe_2026: {
+    slug: "tahoe_2026",
+    label: "Chevrolet Tahoe (2026+)",
+    imageUrl: "/upfit-templates/tahoe_2026/driver.jpg",
+    views: sideViews("tahoe_2026"),
+  },
+  tahoe_1520: {
+    slug: "tahoe_1520",
+    label: "Chevrolet Tahoe (2015–20)",
+    imageUrl: "/upfit-templates/tahoe_1520/driver.jpg",
+    views: sideViews("tahoe_1520"),
   },
   suburban: {
     slug: "suburban",
@@ -55,8 +82,9 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   },
   silverado: {
     slug: "silverado",
-    label: "Chevrolet Silverado",
-    imageUrl: "/upfit-templates/silverado.jpg",
+    label: "Chevrolet Silverado (2020–26)",
+    imageUrl: "/upfit-templates/silverado/driver.jpg",
+    views: sideViews("silverado"),
   },
   durango: {
     slug: "durango",
@@ -87,14 +115,7 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     slug: "explorer",
     label: "Ford Explorer (2025+)",
     imageUrl: "/upfit-templates/explorer/driver.jpg",
-    // One page per side — the test round for the multi-view layout.
-    views: [
-      { key: "driver", label: "Driver Side", imageUrl: "/upfit-templates/explorer/driver.jpg" },
-      { key: "passenger", label: "Passenger Side", imageUrl: "/upfit-templates/explorer/passenger.jpg" },
-      { key: "front", label: "Front", imageUrl: "/upfit-templates/explorer/front.jpg" },
-      { key: "rear", label: "Rear", imageUrl: "/upfit-templates/explorer/rear.jpg" },
-      { key: "top", label: "Top", imageUrl: "/upfit-templates/explorer/top.jpg" },
-    ],
+    views: sideViews("explorer"),
   },
 };
 
