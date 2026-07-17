@@ -109,6 +109,22 @@ export function nextPinColor(existing: number): string {
   return PIN_PALETTE[existing % PIN_PALETTE.length];
 }
 
+// --- Push bumper (grille guard) glyph -------------------------------------
+//
+// A Pro-gard-style push bumper: two rounded uprights + three horizontal
+// cross bars, drawn as filled rounded rects on this viewBox. Both the
+// editor (<svg>/<rect>) and the PDF (React-PDF <Svg>/<Rect>) render from
+// this single geometry with preserveAspectRatio="none" so it stretches
+// to whatever size the pin is resized to.
+export const PUSHBAR_VIEWBOX = { w: 120, h: 104 };
+export const PUSHBAR_RECTS: { x: number; y: number; w: number; h: number; r: number }[] = [
+  { x: 6, y: 4, w: 18, h: 96, r: 9 }, // left upright
+  { x: 96, y: 4, w: 18, h: 96, r: 9 }, // right upright
+  { x: 16, y: 6, w: 88, h: 15, r: 7 }, // top rail
+  { x: 12, y: 46, w: 96, h: 14, r: 7 }, // middle rail
+  { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
+];
+
 // --- Pin shapes -----------------------------------------------------------
 //
 // Equipment pins are drawn as colored rectangles sized to match the kind of

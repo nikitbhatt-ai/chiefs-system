@@ -6,6 +6,8 @@ import {
   COLOR_SCHEMES,
   PIN_SIZES,
   PIN_SIZE_ORDER,
+  PUSHBAR_RECTS,
+  PUSHBAR_VIEWBOX,
   colorSchemesByGroup,
   getColorScheme,
   getPinSize,
@@ -843,13 +845,21 @@ function PlacedPin({
 // Push-bumper / grille-guard glyph. Neutral steel look (push bumpers are
 // black powder-coated), rendered as an outer frame with vertical slats so
 // it reads as a front-mount bumper regardless of size. Fills its parent.
+// Push-bumper (grille guard) outline modeled on the Pro-gard style: two
+// rounded uprights with three horizontal cross bars. Drawn as filled
+// rounded rects on a shared viewBox with preserveAspectRatio="none" so
+// it stretches to whatever size the pin is resized to. Geometry is
+// shared with the PDF renderer via templates.ts.
 function PushbarGlyph() {
   return (
-    <div className="w-full h-full flex items-stretch justify-between bg-white/90 border-2 border-zinc-800 rounded-sm px-[2px] py-[1px]">
-      <div className="w-[2px] bg-zinc-800" />
-      <div className="w-[2px] bg-zinc-800" />
-      <div className="w-[2px] bg-zinc-800" />
-      <div className="w-[2px] bg-zinc-800" />
-    </div>
+    <svg
+      viewBox={`0 0 ${PUSHBAR_VIEWBOX.w} ${PUSHBAR_VIEWBOX.h}`}
+      preserveAspectRatio="none"
+      className="w-full h-full"
+    >
+      {PUSHBAR_RECTS.map((r, i) => (
+        <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+      ))}
+    </svg>
   );
 }
