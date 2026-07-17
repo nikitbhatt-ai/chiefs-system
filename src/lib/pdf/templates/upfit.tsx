@@ -1,4 +1,4 @@
-import { Document, Page, Text, View, Image as PdfImage } from "@react-pdf/renderer";
+import { Document, Page, Text, View, Image as PdfImage, Svg, Rect } from "@react-pdf/renderer";
 import React from "react";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
@@ -9,6 +9,8 @@ import {
   getPinSize,
   getTemplate,
   localImagePath,
+  PUSHBAR_RECTS,
+  PUSHBAR_VIEWBOX,
 } from "@/lib/upfit/templates";
 import type { QuoteLine } from "./quote";
 import type { UpfitPin } from "@/db/schema";
@@ -111,10 +113,66 @@ function pinDims(pin: UpfitPin) {
   };
 }
 
+function CaptionPill({ caption, height }: { caption: string; height: number }) {
+  return (
+    <View
+      style={{
+        position: "absolute",
+        top: height + 1,
+        left: 0,
+        alignItems: "center",
+        width: "100%",
+      }}
+    >
+      <View
+        style={{
+          backgroundColor: "#ffffff",
+          borderWidth: 0.4,
+          borderColor: "#000000",
+          paddingHorizontal: 2,
+          paddingVertical: 0.5,
+        }}
+      >
+        <Text style={{ fontSize: 5.5, fontWeight: 700, color: "#000000" }}>{caption}</Text>
+      </View>
+    </View>
+  );
+}
+
 function PinShape({ pin }: { pin: UpfitPin }) {
   const scheme = getColorScheme(pin.colorScheme);
   const { width, height, horizontal, isCircle } = pinDims(pin);
-  const isPushbar = pin.shape === "pushbar";
+
+  // Push bumper: draw the shared grille-guard outline as filled rounded
+  // rects, stretched to the pin's box (preserveAspectRatio none).
+  if (pin.shape === "pushbar") {
+    return (
+      <View
+        style={{
+          position: "absolute",
+          left: `${pin.x * 100}%`,
+          top: `${pin.y * 100}%`,
+          width,
+          height,
+          marginLeft: -width / 2,
+          marginTop: -height / 2,
+        }}
+      >
+        <Svg
+          width={width}
+          height={height}
+          viewBox={`0 0 ${PUSHBAR_VIEWBOX.w} ${PUSHBAR_VIEWBOX.h}`}
+          preserveAspectRatio="none"
+        >
+          {PUSHBAR_RECTS.map((r, i) => (
+            <Rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+          ))}
+        </Svg>
+        {pin.caption ? <CaptionPill caption={pin.caption} height={height} /> : null}
+      </View>
+    );
+  }
+
   // Circle segments flow side-by-side (clipped to a disc by the
   // border-radius); rectangle segments follow the pin's orientation.
   const segmentDir: "row" | "column" = isCircle ? "row" : horizontal ? "row" : "column";
@@ -128,53 +186,19 @@ function PinShape({ pin }: { pin: UpfitPin }) {
         height,
         marginLeft: -width / 2,
         marginTop: -height / 2,
-        borderWidth: isPushbar ? 1.4 : 0.6,
-        borderColor: isPushbar ? "#27272a" : "#000000",
-        backgroundColor: isPushbar ? "#ffffff" : undefined,
+        borderWidth: 0.6,
+        borderColor: "#000000",
         // Circles are fully round; rectangles get a subtle pill curve
         // proportional to the short axis so long strips don't pinch.
         borderRadius: isCircle ? width / 2 : Math.min(width, height) * 0.2,
         overflow: "hidden",
-        flexDirection: isPushbar ? "row" : segmentDir,
-        alignItems: "stretch",
-        justifyContent: isPushbar ? "space-between" : "flex-start",
-        paddingHorizontal: isPushbar ? 1.5 : 0,
-        paddingVertical: isPushbar ? 1 : 0,
+        flexDirection: segmentDir,
       }}
     >
-      {isPushbar
-        ? [0, 1, 2, 3].map((i) => (
-            <View key={i} style={{ width: 1.4, backgroundColor: "#27272a" }} />
-          ))
-        : scheme.segments.map((c, i) => (
-            <View key={i} style={{ flex: 1, backgroundColor: c }} />
-          ))}
-      {/* Caption pill rendered below the shape. */}
-      {pin.caption ? (
-        <View
-          style={{
-            position: "absolute",
-            top: height + 1,
-            left: 0,
-            alignItems: "center",
-            width: "100%",
-          }}
-        >
-          <View
-            style={{
-              backgroundColor: "#ffffff",
-              borderWidth: 0.4,
-              borderColor: "#000000",
-              paddingHorizontal: 2,
-              paddingVertical: 0.5,
-            }}
-          >
-            <Text style={{ fontSize: 5.5, fontWeight: 700, color: "#000000" }}>
-              {pin.caption}
-            </Text>
-          </View>
-        </View>
-      ) : null}
+      {scheme.segments.map((c, i) => (
+        <View key={i} style={{ flex: 1, backgroundColor: c }} />
+      ))}
+      {pin.caption ? <CaptionPill caption={pin.caption} height={height} /> : null}
     </View>
   );
 }
