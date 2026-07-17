@@ -58,6 +58,7 @@ export default async function AccountingHomePage() {
     { href: "/accounting/job-costing", title: "Job costing", desc: "Materials + labor per work order", stat: `${jobs.length} jobs · ${fmtCents(openWip)} in WIP` },
     { href: "/accounting/reports", title: "Reports", desc: "P&L, balance sheet, AR/AP aging", stat: "Financial statements" },
     { href: "/accounting/agents", title: "AR / AP agents", desc: "Claude drafts reminders & payment plans", stat: "Draft · you approve" },
+    { href: "/accounting/tax", title: "Tax", desc: "Sales-tax liability & filing summary", stat: "Configurable rates" },
   ];
 
   return (
@@ -95,9 +96,9 @@ export default async function AccountingHomePage() {
       </div>
 
       <p className="text-[11px] text-zinc-500 font-body">
-        Phases 1–7 live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
-        accounting, Job costing, Financial reports, and the AR/AP agents (Claude drafts reminders and
-        payment plans for you to approve). Tax tracking and QuickBooks sync come in later phases.
+        Phases 1–8 live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
+        accounting, Job costing, Financial reports, the AR/AP agents, and Tax tracking (sales-tax
+        liability, filing summaries, configurable rates). QuickBooks sync is the final phase.
       </p>
     </AppShell>
   );

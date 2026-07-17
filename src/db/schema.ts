@@ -963,6 +963,28 @@ export const agentDrafts = pgTable("agent_drafts", {
   index("agent_drafts_status_idx").on(t.status),
 ]);
 
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 8: Tax / government tracking
+//
+// Tax liability lives in the ledger (Sales Tax Payable, account 2100): quotes
+// that carry tax credit it when invoiced (Phase 2), and remitting tax to the
+// government debits it. This phase adds a **configurable** rate table (no
+// hardcoded rates — the team enters jurisdictions + rates) and period filing
+// summaries computed from the 2100 ledger activity. Not tax advice — the UI
+// carries a "confirm with a qualified accountant" disclaimer.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const taxRates = pgTable("tax_rates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  jurisdiction: text("jurisdiction").notNull(),
+  // Percent, e.g. 8.25 — stored as entered; never hardcoded in code.
+  ratePct: numeric("rate_pct", { precision: 6, scale: 3 }).notNull().default("0"),
+  isActive: boolean("is_active").notNull().default(true),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("tax_rates_active_idx").on(t.isActive)]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
