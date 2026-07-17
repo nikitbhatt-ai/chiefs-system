@@ -818,6 +818,79 @@ export const receipts = pgTable("receipts", {
   index("receipts_date_idx").on(t.receiptDate),
 ]);
 
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 3: Accounts Payable
+//
+// A `bill` is a vendor invoice we owe, made of one or more `bill_lines` (each
+// posts to a chosen expense/asset account, optionally tagged with a department
+// or work order for cost accounting). Posting a bill auto-creates a journal
+// entry: Dr each line's account / Cr Accounts Payable. A `payment` pays a bill
+// (or sits on-account) and posts Dr Accounts Payable / Cr Cash. Per-bill open
+// balance = bill total − payments applied to it.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const billStatus = pgEnum("bill_status", ["open", "paid", "void"]);
+export const paymentMethod = pgEnum("payment_method", ["check", "ach", "card", "cash", "other"]);
+
+export const bills = pgTable("bills", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  billNumber: text("bill_number").notNull().unique(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id),
+  // The vendor's own invoice number, for matching against their paperwork.
+  vendorInvoiceNumber: text("vendor_invoice_number"),
+  // Optional link to a purchase order this bill settles.
+  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id),
+  billDate: timestamp("bill_date").notNull().defaultNow(),
+  dueDate: timestamp("due_date").notNull(),
+  terms: text("terms").notNull().default("net_30"),
+  totalCents: bigint("total_cents", { mode: "number" }).notNull().default(0),
+  status: billStatus("status").notNull().default("open"),
+  journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id),
+  memo: text("memo"),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("bills_status_idx").on(t.status),
+  index("bills_vendor_idx").on(t.vendorId),
+  index("bills_due_idx").on(t.dueDate),
+]);
+
+export const billLines = pgTable("bill_lines", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  billId: uuid("bill_id").notNull().references(() => bills.id, { onDelete: "cascade" }),
+  accountId: uuid("account_id").notNull().references(() => glAccounts.id),
+  description: text("description"),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull().default(0),
+  departmentId: uuid("department_id").references(() => departments.id),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("bill_lines_bill_idx").on(t.billId),
+  index("bill_lines_account_idx").on(t.accountId),
+]);
+
+export const payments = pgTable("payments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  paymentNumber: text("payment_number").notNull().unique(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id),
+  // Optional: a payment can settle one bill or sit on-account (bill_id null).
+  billId: uuid("bill_id").references(() => bills.id),
+  paymentDate: timestamp("payment_date").notNull().defaultNow(),
+  method: paymentMethod("method").notNull().default("check"),
+  reference: text("reference"),
+  amountCents: bigint("amount_cents", { mode: "number" }).notNull().default(0),
+  memo: text("memo"),
+  journalEntryId: uuid("journal_entry_id").references(() => journalEntries.id),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("payments_vendor_idx").on(t.vendorId),
+  index("payments_bill_idx").on(t.billId),
+  index("payments_date_idx").on(t.paymentDate),
+]);
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
