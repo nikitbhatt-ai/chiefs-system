@@ -2074,11 +2074,28 @@ Integrates with the existing `work_orders` + `time_entries` rather than adding
       (currently a manual admin action); absorb labor into WIP via a
       labor-applied clearing account for full job absorption costing.
 
-### Phase 6 — Reporting: P&L, job costing, dashboards, aging (pending)
+### Phase 6 — Reporting: P&L, job costing, dashboards, aging ✅ (PR: accounting-phase-6)
 
-P&L by date range grouped Revenue → Labor (by department) → Other Expenses →
-Net, with comparison columns, drill-down, CSV/PDF export; AR/AP aging buckets
-(not yet due, 1–30, 31–60, 61–90, 90+); balance sheet from the ledger.
+**No schema change** — all read-only, computed from posted journal lines
+(`src/lib/reports.ts`).
+
+- [x] **Profit & Loss** (`/accounting/reports/pnl`) by date range, grouped
+      Revenue → Labor (by department) → Other Expenses → Net. **Comparison
+      column** = the immediately-preceding period of equal length.
+      **Drill-down**: each revenue/expense account links to its ledger detail
+      (`/accounting/reports/ledger/[code]`) showing the transactions.
+      **CSV export** via `/api/accounting/reports/pnl/csv`.
+- [x] **Balance sheet** (`/accounting/reports/balance-sheet`) as of any date:
+      Assets / Liabilities / Equity from account balances, with current-period
+      net income folded into equity and an Assets = Liabilities + Equity check.
+- [x] **A/R aging** (`/accounting/reports/ar-aging`) and **A/P aging**
+      (`/accounting/reports/ap-aging`): open invoices/bills bucketed
+      not-yet-due / 1–30 / 31–60 / 61–90 / 90+ by days past due, with bucket
+      totals and a grand total.
+- [x] Reports index at `/accounting/reports`; overview page gained a Reports
+      card. Job-costing rollup already shipped in Phase 5.
+- [ ] Later: PDF export of the statements (react-pdf infra already in the repo);
+      dashboard tiles/charts on the accounting overview.
 
 ### Phase 7 — AR and AP agents (pending)
 
