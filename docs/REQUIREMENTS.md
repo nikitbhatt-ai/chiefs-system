@@ -2023,11 +2023,35 @@ the subledger. Only Phase 1's chart of accounts is required.
       PO→bill three-way match so a Phase-3 inventory bill nets against the
       receipt accrual instead of double-booking AP.
 
-### Phase 5 — Work orders & job costing (pending)
+### Phase 5 — Work orders & job costing ✅ (PR: accounting-phase-5)
 
-`team_members`, `time_clock_entries`, `work_order_labor`,
-`work_order_materials`, job-cost rollup, WIP→COGS on close. (Existing
-`work_orders` + `time_entries` integrate here.)
+SQL to run in Neon: `docs/sql/accounting_phase5.sql` (adds
+`work_orders.cogs_journal_entry_id` + a `labor_rates` table; needs Phase 1).
+Integrates with the existing `work_orders` + `time_entries` rather than adding
+`team_members`/`time_clock_entries`/`work_order_labor`/`work_order_materials`.
+
+- [x] **Materials** need no new plumbing — parts issued to a build already post
+      to Work in Progress (1300) tagged with `work_order_id` (Phase 4). Job
+      costing reads the per-WO WIP balance straight off the ledger.
+- [x] **Labor** derived from the existing time clock (`time_entries` hours on
+      closed punches) valued at an hourly **cost rate**. `labor_rates` holds a
+      per-user rate plus a shop-wide default (`user_id` NULL). Labor is
+      informational for the rollup and expensed via payroll — **not** posted to
+      the ledger again (no double-count of wages).
+- [x] **Job-cost rollup** (`src/lib/jobCosting.ts`): per work order — materials
+      (WIP + already-settled COGS, tagged to the WO), labor hours × rate, total
+      cost, and remaining WIP. `listJobCosts()` is set-based (no N+1).
+- [x] **WIP → COGS settlement**: `settleJobToCogs` posts Dr COGS (5100) /
+      Cr WIP (1300) for the job's current WIP balance, latched by
+      `work_orders.cogs_journal_entry_id` so it can't double-post; `reopenJob`
+      reverses it.
+- [x] **Screens**: `/accounting/job-costing` (list with materials/labor/total/
+      WIP/settled), `/accounting/job-costing/[id]` (rollup + labor-by-tech +
+      settle/reopen), `/accounting/labor-rates` (set default + per-tech rates).
+      Overview page gained a Job costing card.
+- [ ] Later: auto-settle WIP → COGS when a work order is marked complete
+      (currently a manual admin action); absorb labor into WIP via a
+      labor-applied clearing account for full job absorption costing.
 
 ### Phase 6 — Reporting: P&L, job costing, dashboards, aging (pending)
 
