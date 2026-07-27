@@ -12,9 +12,10 @@ import {
   primaryKey,
   index,
   uniqueIndex,
+  check,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const userRole = pgEnum("user_role", ["admin","manager","sales","warehouse","tech","accountant"]);
 export const customerType = pgEnum("customer_type", ["government","commercial","retail","walk_in_credentialed"]);
@@ -693,6 +694,72 @@ export const upfitConfigs = pgTable("upfit_configs", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("upfit_configs_quote_idx").on(t.quoteId)]);
+
+// ───────────────────────────────────────────────────────────────────────────
+// COMMS MODULE — Phase 1: Shared Team Calendar
+//
+// One calendar the whole crew can see: service appointments, upfit
+// drop-offs/pick-ups, offsite installs, customer visits, and general shop
+// announcements ("shop closed Friday at noon"). Some items are team-wide;
+// some are visible only to the people involved (visibility = 'selected').
+//
+// Timestamps follow the app's existing convention: plain `timestamp` (no time
+// zone). Per the build brief these are SHOP-LOCAL wall-clock times
+// (America/Chicago) — the API stores the picked wall clock in the UTC fields of
+// the value and the UI reads them back in UTC so a time round-trips to the same
+// clock face for every viewer regardless of their browser's zone. See
+// src/lib/calendar.ts (parseWallClock / fmtWallClock).
+// ───────────────────────────────────────────────────────────────────────────
+
+export const calendarEventType = pgEnum("calendar_event_type", [
+  "service",
+  "upfit",
+  "offsite",
+  "delivery",
+  "customer_meeting",
+  "announcement",
+  "other",
+]);
+
+export const calendarEvents = pgTable("calendar_events", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  title: text("title").notNull(),
+  description: text("description"),
+  eventType: calendarEventType("event_type").notNull(),
+  startsAt: timestamp("starts_at").notNull(),
+  endsAt: timestamp("ends_at").notNull(),
+  allDay: boolean("all_day").notNull().default(false),
+  // Free text — "Hempstead shop — Bay 2" or a customer address.
+  location: text("location"),
+  customerId: uuid("customer_id").references(() => customers.id),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  // 'team' = everyone can read; 'selected' = invitees + creator + admin/manager only.
+  visibility: text("visibility").notNull().default("team"),
+  createdBy: uuid("created_by").notNull().references(() => users.id),
+  // Cancel, never delete — cancelled events render struck-through, not hidden.
+  cancelledAt: timestamp("cancelled_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("calendar_events_starts_at_idx").on(t.startsAt),
+  index("calendar_events_created_by_idx").on(t.createdBy),
+  index("calendar_events_work_order_idx").on(t.workOrderId),
+  // An event cannot end before it starts (also created in docs/sql/comms_phase1.sql).
+  check("calendar_events_end_after_start", sql`${t.endsAt} >= ${t.startsAt}`),
+]);
+
+export const calendarEventAttendees = pgTable("calendar_event_attendees", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  eventId: uuid("event_id").notNull().references(() => calendarEvents.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // 'invited' | 'accepted' | 'declined' — an attendee may change only their own.
+  response: text("response").notNull().default("invited"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("calendar_event_attendees_event_user_uidx").on(t.eventId, t.userId),
+  index("calendar_event_attendees_user_idx").on(t.userId),
+]);
 
 // ───────────────────────────────────────────────────────────────────────────
 // ACCOUNTING MODULE — Phase 1: core double-entry ledger
