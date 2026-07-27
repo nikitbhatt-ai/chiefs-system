@@ -2210,6 +2210,81 @@ won't scale once the catalog is large.
 
 No schema change.
 
+## Comms Module — from the Team Calendar / Build Planner / Comments Build Brief
+
+Internal-communication + labor-costing features. Phases delivered one at a
+time, each stopping for owner review. Financially load-bearing phases are 2,
+4, 5, 6 (fixed-price upfit bids — an under-estimate is unrecoverable margin).
+
+### Phase 1 — Shared Team Calendar ✅ (branch: claude/document-expansion-5imwqt)
+
+One calendar the whole crew sees: service appointments, upfit drop-off/pick-up,
+offsite installs, deliveries, customer meetings, and shop announcements. Some
+items are team-wide; some are visible only to the people involved.
+
+- [x] **Schema** (`docs/sql/comms_phase1.sql`, `src/db/schema.ts`):
+  - `calendar_event_type` pgEnum: `service`, `upfit`, `offsite`, `delivery`,
+    `customer_meeting`, `announcement`, `other`.
+  - `calendar_events`: title, description, event_type, starts_at, ends_at
+    (DB CHECK `ends_at >= starts_at`), all_day, location, customer_id,
+    deal_id (on delete set null), work_order_id (on delete set null),
+    visibility (`team` | `selected`), created_by, cancelled_at (cancel,
+    never delete), timestamps. Indexes on starts_at, created_by, work_order_id.
+  - `calendar_event_attendees`: event_id (cascade), user_id (cascade),
+    response (`invited` | `accepted` | `declined`, default `invited`),
+    unique (event_id, user_id), index on user_id.
+- [x] **Timestamps** are plain `timestamp` (matching the schema convention),
+  treated as SHOP-LOCAL wall clock (America/Chicago). Stored in the UTC fields
+  of the value and read back in UTC so a time shows the same clock face for
+  every viewer regardless of browser zone. Helpers in `src/lib/calendar.ts`
+  (`parseWallClock` / `fmtWallClock` / `fmtEventRange`). UI labels times "CT".
+- [x] **Permissions** (server-side only — no Postgres RLS; `src/lib/calendar.ts`,
+  enforced in every route):
+  - Read: visibility `team` OR creator OR an attendee OR admin/manager.
+  - Create: any authenticated user (deliberate — anyone can flag the team).
+  - Edit / cancel: creator, admin, or manager only.
+  - Respond: an attendee changes only their OWN response.
+- [x] **API** (`/api/calendar` GET list + POST create; `/api/calendar/[id]`
+  GET + PATCH edit/cancel; `/api/calendar/[id]/respond` POST). DELETE returns
+  405 — events are cancelled, never deleted. List reads via
+  `src/lib/calendarQuery.ts` with the visibility rule applied in SQL.
+- [x] **UI** (`src/app/calendar/page.tsx` + `src/components/calendar/*`):
+  month (default) / week / agenda toggle, hand-built grid (no calendar lib);
+  colour + icon + text label per type with a legend; filters by type, by
+  attendee, and "only mine"; click → detail panel with attendee responses,
+  accept/decline, and edit/cancel when permitted; new/edit event form with
+  attendee picker and optional customer/deal/work-order links; cancelled
+  events show struck-through, not hidden; react-query polling every 30s +
+  `router.refresh()` after mutations; mobile-first (agenda fallback ≤640px).
+  Optional record-link dropdowns are capped at the 100 most-recent of each
+  (swap to a search box if they ever need to be exhaustive).
+- [x] **`src/components/UpcomingEvents.tsx`** — reusable next-7-days compact
+  list, wired onto the work-order and deal detail pages (a record shows its
+  own upcoming events). NOT wired into the dashboard yet (per brief).
+- [x] **Nav**: `Calendar` added to the CRM group in `TopNav.tsx`; breadcrumb
+  section map updated in `Breadcrumbs.tsx`.
+
+**Notifications (added at owner's request, beyond the original brief):**
+- [x] In-app notifications fire on invite / edit / cancel, reusing the existing
+  `notifications` table + bell (`kind: "calendar_event"`). Single dispatcher at
+  `src/lib/calendarNotify.ts` so Email/SMS channels can drop in later.
+- [ ] Email + SMS channels + timed reminders — DESIGNED, not built. Deferred
+  pending owner decision: SMS needs a paid provider (e.g. Twilio) + a `phone`
+  column on `users` (does not exist today); email needs `EMAIL_SERVER_*`
+  configured (same env NextAuth uses) + an explicit opt-in; timed reminders
+  need a Vercel cron endpoint + a reminder-offset field + a send-log table.
+- Out of scope (per brief): Google/Outlook sync, recurring events,
+  customer-facing visibility.
+
+**Known repo condition found during Phase 1:** the repo has NO ESLint config —
+`npm run lint` (`next lint`) drops into interactive setup, and enabling the
+standard Next config surfaces ~20 pre-existing violations across other modules
+(inventory, quotes, purchase-orders, vehicles, work-orders list, etc.). All
+Phase 1 files were verified lint-clean via a scoped run; a repo-wide config was
+deliberately NOT committed because it would break `next build`/deploys on the
+pre-existing debt. Proper lint setup + debt cleanup to be handled with the
+Phase 3 CI work (owner approved a CI workflow).
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

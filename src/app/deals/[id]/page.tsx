@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments, dealTasks, customerMessages, workOrders } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { UpcomingEvents } from "@/components/UpcomingEvents";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
 import {
   CREDENTIAL_TYPES,
@@ -360,6 +361,9 @@ export default async function DealEntityPage({
 
   return (
     <AppShell title={`Deal ${d.id.slice(0, 8)}`} subtitle={`${pipeline.label} pipeline`}>
+      <div className="mb-4">
+        <UpcomingEvents scope={{ dealId: d.id }} heading="Upcoming calendar events for this deal" />
+      </div>
       <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Parallel tracks</h3>

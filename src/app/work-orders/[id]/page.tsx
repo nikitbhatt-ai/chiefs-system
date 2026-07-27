@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { workOrders, customers, vehicles, quotes, users, qcChecklists, type QCItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { UpcomingEvents } from "@/components/UpcomingEvents";
 import { fmtDateTime } from "@/lib/datetime";
 import { getOrCreateChecklist, setChecklistItems, qcComplete } from "@/lib/qc";
 import { resolveWorkOrderParts } from "@/lib/workOrderParts";
@@ -246,6 +247,10 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
           <button type="submit" className="text-[11px] bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold">Save QC</button>
         </div>
       </form>
+
+      <div className="mt-6 max-w-3xl">
+        <UpcomingEvents scope={{ workOrderId: wo.id }} heading="Upcoming calendar events for this build" />
+      </div>
     </AppShell>
   );
 }
