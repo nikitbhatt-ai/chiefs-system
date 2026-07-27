@@ -2029,9 +2029,16 @@ the subledger. Only Phase 1's chart of accounts is required.
       - **Restoring a build** (`restoreWorkOrderParts`) → the reverse, at the
         same FIFO cost refilled.
 - [x] **Non-fatal by design**: hooks resolve all needed accounts first and skip
-      posting entirely if any is missing (chart of accounts not seeded), so core
-      inventory keeps working with or without the accounting module. Never posts
-      a one-sided entry.
+      posting entirely if any is missing, so core inventory keeps working with or
+      without the accounting module. Never posts a one-sided entry. "Missing"
+      covers BOTH the chart of accounts being unseeded AND the accounting schema
+      never having been installed at all — `resolveAccountId` probes with
+      `to_regclass('gl_accounts')` (returns NULL, never raises, for an absent
+      relation) before selecting, because a bare SELECT against a missing
+      `gl_accounts` would raise and abort the shared inventory transaction. That
+      abort is what surfaced as an "Application error: a server-side exception"
+      when clicking **Receive** on a PO in an environment where
+      `accounting_phase1.sql` had not been run.
 - [x] **Reconciliation** (rule #6): `/accounting/inventory` shows the FIFO
       subledger value (Σ `quantity_remaining × unit_cost`) vs the posted
       Inventory (1200) ledger balance, per-part valuation, and a tie/diff badge.
