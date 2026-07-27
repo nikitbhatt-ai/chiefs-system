@@ -6,7 +6,8 @@ export type NotificationKind =
   | "comment_reply"
   | "task_assigned"
   | "stage_change"
-  | "doc_reminder";
+  | "doc_reminder"
+  | "calendar_event";
 
 export async function notify(
   userId: string,
