@@ -2210,6 +2210,77 @@ won't scale once the catalog is large.
 
 No schema change.
 
+## Promo packages, cost layers, reservations & backfill (brief 2026-08-03)
+
+Whelen (and vendors like them) sell most of our lighting as discounted
+**packages** — one price for a fixed basket of parts — while we also buy
+those same part numbers individually at full price. This build makes both
+work under one SKU. Full brief, phase plan, and the Phase 0 audit map live
+in **`docs/PROMO_PACKAGES.md`**; read that before touching any of it.
+
+Four governing ideas:
+
+1. **One SKU, one bin.** A part is never split into a "promo" SKU and an
+   "individual" SKU. One `parts` row, one on-hand count.
+2. **Cost lives in layers.** Every receipt creates a cost layer with its own
+   unit cost; on-hand is the sum of the layers; consumption is FIFO. The
+   existing `part_receipts` table already is this — extend it, don't
+   duplicate it.
+3. **A package price is allocated across its parts**, in proportion to each
+   line's à la carte cost, so every part carries a fair share of the
+   discount. **Package purchases only** — allocation must be unreachable
+   from an individual PO line.
+4. **Claims, not separate bins.** A sold build reserves the parts it needs;
+   everyone else pulls against available (= on-hand − reserved).
+
+Ground rules for every phase:
+
+- Money is `numeric(12,2)`, never `real`/`float`/`double`. (Audit found no
+  float money columns; the exposure is money stored inside `jsonb` line
+  items — see `docs/PROMO_PACKAGES.md` §0.2.)
+- Multi-step money writes go in one Drizzle transaction.
+- **Snapshot, don't reference-live.** Promo lines snapshot the à la carte
+  cost at definition; PO lines snapshot the allocated cost at PO time. Later
+  price-list edits never retroactively change a placed PO or a used promo.
+- Allocation lives in exactly one code path, callable only with a
+  `vendor_promo`.
+- Receiving is idempotent — a receipt key or unique constraint, not just a
+  row lock.
+- Never edit a posted journal entry; corrections are reversing entries.
+
+Phases (one at a time, approval between each):
+
+- [x] **Phase 0 — Guardrails and inventory audit.** Written map of the real
+      tables, money-column types, on-hand storage, and current PO/receiving
+      behaviour. No code changes. Result: `docs/PROMO_PACKAGES.md` §0.
+- [ ] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
+      Date-ranged rows per (vendor, sku); a price change adds a row rather
+      than overwriting, so historical POs stay explainable.
+- [ ] **Phase 2 — Cost layers + FIFO consumption.** Extend `part_receipts`
+      with `source_kind`/`promo_id`, add `inventory_issue` rows, a general
+      `issue(sku, qty, workOrderId?)`, and opening-balance layers for stock
+      that predates the layer table.
+- [ ] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
+      engine.** Pure, deterministic, unit-tested; rounding plug ties the
+      allocation to the package price exactly; refuses any promo whose
+      allocated unit cost exceeds its à la carte snapshot.
+- [ ] **Phase 4 — POs apply the package; receiving writes layers.**
+      Allocation runs once at PO creation (Whelen ships partial, so a
+      partial receipt needs a cost already on the line). Individual POs
+      never call it.
+- [ ] **Phase 5 — `inventory_reservation` + available-to-pull.** Every
+      picking screen reads available, never raw on-hand.
+- [ ] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
+      Pulling reserved stock requires an override that logs who/why and
+      raises its own replacement requisition.
+- [ ] **Phase 7 — Promo vs backfill savings report.** Did the package
+      discount survive the backfill spend?
+
+Open decisions (see `docs/PROMO_PACKAGES.md` decision log): FIFO vs
+weighted-average; what triggers a reservation; whether Whelen rebates
+reduce part cost; and — raised by the audit — whether PO lines stay `jsonb`
+or get promoted to a `purchase_order_line` table.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW
