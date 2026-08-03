@@ -364,3 +364,42 @@ every path that moves a WO into `confirmed` — `maybePromoteWonDeal`, plus
 against double-firing via `already_past_confirmed`, but the board path needs
 its own latch), and reservations release as parts are issued or when a build
 is walked back out of `confirmed`.
+
+---
+
+## Phase 1 — DELIVERED 2026-08-03
+
+- **Schema:** `vendor_part_price (id, vendor_id→vendors, sku, alacarte_unit_cost
+  numeric(12,2), effective_from date, effective_to date null, source_note,
+  created_at, updated_at)` in `src/db/schema.ts`. Indexes on `(vendor_id, sku)`
+  and `(sku)`, plus a **partial unique index** on `(vendor_id, sku) WHERE
+  effective_to IS NULL` — the DB guarantee that a SKU resolves to exactly one
+  current price. Keyed by `(vendor_id, sku)` not a parts FK, so a price file
+  loads before the part exists and the same SKU can carry different net pricing
+  per distributor.
+- **SQL:** `docs/sql/promo_phase1.sql` — table + indexes (idempotent) and a
+  seed that inserts only the two à la carte costs the brief states verbatim
+  (XI3JC 112.00, TCRWX6 1282.80), joined to a vendor named `Whelen`. The
+  remaining ~15 lines are **not invented** — a fabricated basis would make
+  Phase 3's $6,840 reconciliation wrong; load them via the screen.
+- **Resolver:** `src/lib/vendorPricing.ts` — `currentAlacarteCost(vendorId,
+  sku)`, `currentPriceRow`, `priceHistory`, and a transactional
+  `setCurrentPrice` that no-ops on an unchanged cost, else closes the current
+  row (`effective_to = CURRENT_DATE`) under a `FOR UPDATE` lock and appends the
+  new one. `normalizeCost` keeps raw floats out of the numeric column.
+- **API:** `/api/vendor-part-prices` (GET with `vendorId`/`sku`/`current=1`
+  filters; POST = set current price via the resolver) and `/[id]` (GET; PATCH
+  for in-place corrections of cost/source note only, deliberately not a way to
+  change the live price; DELETE gated on `canDelete`). Both re-check `auth()`.
+- **UI:** `/vendor-pricing` — set-price form (vendor, SKU, cost, source note)
+  with a "never overwrites" note, plus Current-prices / Full-history tabs
+  (closed rows dimmed, current marked). Wired into the Operations nav group and
+  breadcrumbs.
+- **Verification:** `tsc --noEmit` clean across the project; `next build`
+  compiles and type-checks successfully. (The build's static-prerender step
+  can't complete in this container because it has no database — it fails on the
+  pre-existing `/vendors` page, not on any Phase 1 code; `/vendor-pricing` is
+  dynamic via `auth()` and isn't prerendered.)
+
+**To activate:** run `docs/sql/promo_phase1.sql` in Neon, then load the Whelen
+F-150 sheet through `/vendor-pricing` (or extend the seed VALUES and re-run).

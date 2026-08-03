@@ -3,6 +3,7 @@ import {
   text,
   uuid,
   timestamp,
+  date,
   boolean,
   integer,
   bigint,
@@ -14,7 +15,7 @@ import {
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const userRole = pgEnum("user_role", ["admin","manager","sales","warehouse","tech","accountant"]);
 export const customerType = pgEnum("customer_type", ["government","commercial","retail","walk_in_credentialed"]);
@@ -285,6 +286,43 @@ export const partCostHistory = pgTable("part_cost_history", {
   recordedAt: timestamp("recorded_at").notNull().defaultNow(),
   source: text("source"),
 });
+
+// Promo packages — Phase 1: vendor à la carte price list.
+//
+// One trustworthy source for what each part costs when bought individually
+// from a given vendor. This à la carte cost is the allocation basis for
+// package purchases (Phase 3) AND the pre-fill for individual PO lines
+// (Phase 4) — deliberately NOT parts.cost, which under average costing drifts
+// below à la carte once discounted package stock is received.
+//
+// Prices are date-ranged, never overwritten: changing a price closes the
+// current row (stamps effective_to) and inserts a new one, so a historical PO
+// stays explainable against the price that was live when it was placed. The
+// "current" price for a SKU+vendor is the row whose [effective_from,
+// effective_to) window covers today (effective_to null = still current).
+//
+// Keyed by (vendor_id, sku) rather than a parts FK: a price file can be loaded
+// before the part exists in inventory, and the same manufacturer SKU can carry
+// different net pricing from different distributors.
+export const vendorPartPrice = pgTable("vendor_part_price", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id, { onDelete: "cascade" }),
+  sku: text("sku").notNull(),
+  alacarteUnitCost: numeric("alacarte_unit_cost", { precision: 12, scale: 2 }).notNull(),
+  effectiveFrom: date("effective_from").notNull().default(sql`CURRENT_DATE`),
+  effectiveTo: date("effective_to"),
+  sourceNote: text("source_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("vendor_part_price_vendor_sku_idx").on(t.vendorId, t.sku),
+  index("vendor_part_price_sku_idx").on(t.sku),
+  // At most one current (effective_to IS NULL) price per vendor+sku. Enforced
+  // as a partial unique index so history rows (effective_to set) don't collide.
+  uniqueIndex("vendor_part_price_current_uq")
+    .on(t.vendorId, t.sku)
+    .where(sql`${t.effectiveTo} IS NULL`),
+]);
 
 // Inventory packages (a.k.a. kits / canned services). A reusable bundle of
 // parts + labor + fees the sales team can drop onto a quote in one click.

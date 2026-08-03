@@ -2255,11 +2255,20 @@ Phases (one at a time, approval between each):
 - [x] **Phase 0 — Guardrails and inventory audit.** Written map of the real
       tables, money-column types, on-hand storage, and current PO/receiving
       behaviour. No code changes. Result: `docs/PROMO_PACKAGES.md` §0.
-- [ ] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
+- [x] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
       Date-ranged rows per (vendor, sku); a price change adds a row rather
       than overwriting, so historical POs stay explainable. This list — not
       `parts.cost` — is what individual PO lines pre-fill from, so a
       discounted package receipt can't leak into the next full-price order.
+      Delivered: `vendorPartPrice` table (schema + `docs/sql/promo_phase1.sql`,
+      partial unique index enforcing one current price per vendor+sku);
+      `src/lib/vendorPricing.ts` resolver (`currentAlacarteCost`,
+      `priceHistory`, transactional `setCurrentPrice` that closes-and-appends);
+      `/api/vendor-part-prices` route pair; `/vendor-pricing` admin screen
+      (set-price form + current/history views) wired into Operations nav.
+      SQL seeds the two à la carte costs the brief states (XI3JC 112.00,
+      TCRWX6 1282.80); the rest of the Whelen sheet is loaded via the screen —
+      not fabricated, so Phase 3's reconciliation stays honest.
 - [ ] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
       `part_receipts` with `source_kind`/`promo_id`, add `inventory_issue`
       rows, a general `issue(sku, qty, workOrderId?)`, and opening-balance
