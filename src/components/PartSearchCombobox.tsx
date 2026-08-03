@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AnchoredPopover } from "@/components/AnchoredPopover";
 
 export type PartHit = {
   id: string;
@@ -42,6 +43,9 @@ export function PartSearchCombobox({
   const [loading, setLoading] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
   const seq = useRef(0);
+  // The results panel is portalled to <body> (see AnchoredPopover) so the
+  // enclosing card's `overflow-hidden` can't clip it; this anchors it.
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   // Keep inline boxes in sync when the parent updates the description.
   useEffect(() => {
@@ -82,7 +86,7 @@ export function PartSearchCombobox({
   }
 
   return (
-    <div className={`relative ${className ?? ""}`}>
+    <div ref={anchorRef} className={`relative ${className ?? ""}`}>
       <input
         value={text}
         onChange={(e) => {
@@ -115,8 +119,12 @@ export function PartSearchCombobox({
         placeholder={placeholder ?? "Search parts by SKU, name, or part #…"}
         className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-sm placeholder:text-zinc-500"
       />
-      {open && (results.length > 0 || loading) ? (
-        <ul className="absolute left-0 right-0 top-full z-30 mt-1 bg-[#161624] border border-white/10 rounded-md shadow-lg max-h-60 overflow-y-auto">
+      <AnchoredPopover
+        anchorRef={anchorRef}
+        open={open && (results.length > 0 || loading)}
+        className="bg-[#161624] border border-white/10 rounded-md shadow-lg"
+      >
+        <ul>
           {loading && results.length === 0 ? (
             <li className="px-3 py-2 text-xs text-zinc-500 font-body">Searching…</li>
           ) : (
@@ -146,7 +154,7 @@ export function PartSearchCombobox({
             ))
           )}
         </ul>
-      ) : null}
+      </AnchoredPopover>
     </div>
   );
 }
