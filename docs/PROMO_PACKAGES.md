@@ -186,11 +186,14 @@ Answered by Nikit 2026-08-03:
    vendor ever does, it reopens as a new decision.
 4. **Customer POs vs vendor POs** — already separate, see §0.5. No work.
 
-6. **`parts.cost` vs average cost — stay distinct.** `parts.cost` becomes an
-   auto-updated **last cost**; `avg_cost` is the separate weighted average.
-   Both update **at receipt, not PO entry**. Average cost shows on an
+6. **`parts.cost` vs average cost — distinct fields, same number.**
+   `parts.cost` auto-updates *from* `avg_cost` on receipt (=
+   `ROUND(avg_cost, 2)`); `avg_cost` `numeric(12,4)` is the authoritative
+   average, `parts.cost` `numeric(12,2)` its operational reflection. Both
+   update **at receipt, not PO entry**. Average cost shows on an
    **internal-only** margin view, never on the customer PDF. Full mechanics
-   and the last-cost/PO-pre-fill trap in §0.10.
+   and the PO-pre-fill trap in §0.10. (Supersedes the earlier "last cost"
+   reading.)
 
 Still open:
 
@@ -273,43 +276,58 @@ switch to `avg_cost` is a real question, but out of scope here.
 
 ## 0.10 Three cost fields, and what maintains each
 
-Confirmed 2026-08-03: `parts.cost` and average cost stay **distinct fields**.
-The result is the standard ERP triple:
+Confirmed 2026-08-03 (revised): `parts.cost` and average cost stay **distinct
+fields with distinct roles**, but they carry the **same number at different
+precision**. `parts.cost` is auto-updated *from* `avg_cost` on every receipt.
 
-| Field | Meaning | Maintained by |
-| --- | --- | --- |
-| `parts.cost` | **Last cost** — the most recent price actually paid | Auto, on receipt |
-| `parts.avg_cost` `numeric(12,4)` | **Weighted average** — the accounting basis for work orders | Auto, on receipt |
-| `parts.price` | Sell price | Manual |
+| Field | Role | Precision | Maintained by |
+| --- | --- | --- | --- |
+| `parts.avg_cost` | **Weighted average** — authoritative costing basis for work orders | `numeric(12,4)` | Auto, on receipt (moving average from layers) |
+| `parts.cost` | **Internal cost** — the operational value everything already reads (margins, displays, quote defaults) | `numeric(12,2)` | Auto, on receipt = `ROUND(avg_cost, 2)` |
+| `parts.price` | Sell price | `numeric(12,2)` | Manual |
 
-**Both auto-fields update at receipt, never at PO entry.** Entering a PO
-records the line's `unit_cost` and snapshots the promo allocation, but moves
-nothing in costing. Only goods actually landing update cost — so a cancelled
-or never-shipped PO can't leave a cost with nothing behind it. Both updates
-happen inside the existing receive transaction alongside the layer write.
+Why keep two fields if they hold the same value: `avg_cost` is the 4-decimal
+accounting truth that must not decay under repeated receipts and that GL /
+WIP / COGS reconcile against; `parts.cost` is its 2-decimal reflection that
+the rest of the app was already built to read. The costing engine writes
+`avg_cost`; `parts.cost` follows it. (**Assumption:** `parts.cost =
+ROUND(avg_cost, 2)`. If instead you want `parts.cost` truncated, or to lag
+avg_cost in some way, say so — it's a one-line change in Phase 2.)
 
-### Trap: last cost must not contaminate PO pre-fill
+**Both update at receipt, never at PO entry.** Entering a PO records the
+line's `unit_cost` and snapshots the promo allocation, but moves nothing in
+costing. Only goods actually landing recompute `avg_cost` and refresh
+`parts.cost` from it — so a cancelled or never-shipped PO can't leave a cost
+with nothing behind it. Both writes happen inside the existing receive
+transaction alongside the layer write.
+
+### Trap: average cost must not contaminate PO pre-fill
 
 `POEditor.tsx:133` currently pre-fills a new PO line's `unitCost` from
-`parts.cost`. Once `parts.cost` is last-cost-auto-updated, a package receipt
-sets it to the **allocated** (discounted) cost — and the next *individual* PO
-for that SKU would then pre-fill at a promo price Whelen will not honour. We'd
-be raising POs at a price that doesn't exist.
+`parts.cost`. Once `parts.cost` tracks `avg_cost`, a package receipt pulls the
+average **down** (the discount is smeared across all units of the SKU — §0.8),
+so `parts.cost` sits **below** à la carte for as long as any package stock
+influences the average. The next *individual* PO for that SKU would then
+pre-fill at that below-market number — we'd be raising a full-price order at a
+promo-influenced price Whelen will not honour.
 
-Fix, and it's the reason Phase 1 comes first: **individual PO lines pre-fill
-from `vendor_part_price.alacarte_unit_cost`, not from `parts.cost`.** Last
-cost stays an honest record of what we paid (allocated cost included, because
-that *is* what we paid); the price list is what we quote a new order at. Phase
-4 must wire the pre-fill to the price list when it touches the PO editor.
+This is worse than the last-cost model would have been: last cost at least
+snaps back to full price on the next individual receipt, whereas a smeared
+average stays low. So the fix is load-bearing, and it's why Phase 1 comes
+first: **individual PO lines pre-fill from
+`vendor_part_price.alacarte_unit_cost`, not from `parts.cost`.** `parts.cost`
+stays an honest record of what the shelf costs on average; the price list is
+what we quote a new order at. Phase 4 wires the pre-fill to the price list
+when it touches the PO editor.
 
 ### The margin calculators move on their own now
 
 The part add/edit forms compute margin and markup from `cost` vs `price`, and
-`cost` will now change under them without anyone editing it. Keep the field
-editable — parts never yet received, and opening values, still need a way in —
-but relabel it "Last cost (auto-updated on receipt)" so nobody mistakes a
-moved number for someone's edit. Phase 2 does the relabel when it adds the
-auto-update.
+`cost` will now change under them (following `avg_cost`) without anyone editing
+it. Keep the field editable — parts never yet received, and opening values,
+still need a way in — but relabel it "Average cost (auto-updated on receipt)"
+so nobody mistakes a moved number for someone's edit. Phase 2 does the relabel
+when it adds the auto-update.
 
 ### Internal margin view on the invoice
 

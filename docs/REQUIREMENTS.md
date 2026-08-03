@@ -2268,12 +2268,13 @@ Phases (one at a time, approval between each):
       `costing_policy` table (default `weighted_average`), and make
       `inventoryValuation.ts` method-aware. Issuing drains layers oldest-first
       for quantity and provenance but charges the job at average cost.
-      **`parts.cost` becomes an auto-updated "last cost"** (relabelled on the
-      form, still editable for opening values) and `avg_cost` the separate
-      average — both updated at receipt, in the receive transaction, never at
-      PO entry. On quote→invoice conversion, snapshot `avg_cost` onto the line
-      items so the internal margin view reflects cost at sale, not today's
-      average.
+      **`parts.cost` auto-updates from `avg_cost`** (= `ROUND(avg_cost, 2)`,
+      relabelled "Average cost" on the form, still editable for opening
+      values); `avg_cost` `numeric(12,4)` is the authoritative average and
+      `parts.cost` `numeric(12,2)` its operational reflection. Both update at
+      receipt, in the receive transaction, never at PO entry. On
+      quote→invoice conversion, snapshot `avg_cost` onto the line items so the
+      internal margin view reflects cost at sale, not today's average.
 - [ ] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose
