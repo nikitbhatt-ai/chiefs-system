@@ -186,6 +186,12 @@ Answered by Nikit 2026-08-03:
    vendor ever does, it reopens as a new decision.
 4. **Customer POs vs vendor POs** — already separate, see §0.5. No work.
 
+6. **`parts.cost` vs average cost — stay distinct.** `parts.cost` becomes an
+   auto-updated **last cost**; `avg_cost` is the separate weighted average.
+   Both update **at receipt, not PO entry**. Average cost shows on an
+   **internal-only** margin view, never on the customer PDF. Full mechanics
+   and the last-cost/PO-pre-fill trap in §0.10.
+
 Still open:
 
 5. **PO lines: jsonb or a `purchase_order_line` table** — raised by the
@@ -264,6 +270,62 @@ lines and drives the margin calculators on the part form. It is *not* the
 same number as `avg_cost` and should stay distinct — one is what we expect to
 pay, the other what we actually paid. Whether the margin display should
 switch to `avg_cost` is a real question, but out of scope here.
+
+## 0.10 Three cost fields, and what maintains each
+
+Confirmed 2026-08-03: `parts.cost` and average cost stay **distinct fields**.
+The result is the standard ERP triple:
+
+| Field | Meaning | Maintained by |
+| --- | --- | --- |
+| `parts.cost` | **Last cost** — the most recent price actually paid | Auto, on receipt |
+| `parts.avg_cost` `numeric(12,4)` | **Weighted average** — the accounting basis for work orders | Auto, on receipt |
+| `parts.price` | Sell price | Manual |
+
+**Both auto-fields update at receipt, never at PO entry.** Entering a PO
+records the line's `unit_cost` and snapshots the promo allocation, but moves
+nothing in costing. Only goods actually landing update cost — so a cancelled
+or never-shipped PO can't leave a cost with nothing behind it. Both updates
+happen inside the existing receive transaction alongside the layer write.
+
+### Trap: last cost must not contaminate PO pre-fill
+
+`POEditor.tsx:133` currently pre-fills a new PO line's `unitCost` from
+`parts.cost`. Once `parts.cost` is last-cost-auto-updated, a package receipt
+sets it to the **allocated** (discounted) cost — and the next *individual* PO
+for that SKU would then pre-fill at a promo price Whelen will not honour. We'd
+be raising POs at a price that doesn't exist.
+
+Fix, and it's the reason Phase 1 comes first: **individual PO lines pre-fill
+from `vendor_part_price.alacarte_unit_cost`, not from `parts.cost`.** Last
+cost stays an honest record of what we paid (allocated cost included, because
+that *is* what we paid); the price list is what we quote a new order at. Phase
+4 must wire the pre-fill to the price list when it touches the PO editor.
+
+### The margin calculators move on their own now
+
+The part add/edit forms compute margin and markup from `cost` vs `price`, and
+`cost` will now change under them without anyone editing it. Keep the field
+editable — parts never yet received, and opening values, still need a way in —
+but relabel it "Last cost (auto-updated on receipt)" so nobody mistakes a
+moved number for someone's edit. Phase 2 does the relabel when it adds the
+auto-update.
+
+### Internal margin view on the invoice
+
+Average cost displays on an **internal-only** view: the on-screen
+quote/invoice page and an internal PDF variant, with per-line avg cost,
+extended cost, margin $ and margin %, plus an invoice-level summary. The
+customer-facing PDF is unchanged — `src/lib/pdf/templates/quote.tsx` carries
+no cost data today and must keep carrying none, since these documents go to
+government agencies.
+
+One design point this raises: margin on an invoice should reflect cost **at
+the time of sale**, not today's average. Per the brief's snapshot rule,
+Phase 2 should stamp `avg_cost` onto the quote's line items when the quote
+converts to an invoice, and the internal view reads that snapshot. Reading
+`parts.avg_cost` live would make last quarter's margins silently rewrite
+themselves every time we buy more stock.
 
 ## 0.9 Reservation trigger: the `confirmed` transition
 

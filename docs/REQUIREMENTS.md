@@ -2257,7 +2257,9 @@ Phases (one at a time, approval between each):
       behaviour. No code changes. Result: `docs/PROMO_PACKAGES.md` §0.
 - [ ] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
       Date-ranged rows per (vendor, sku); a price change adds a row rather
-      than overwriting, so historical POs stay explainable.
+      than overwriting, so historical POs stay explainable. This list — not
+      `parts.cost` — is what individual PO lines pre-fill from, so a
+      discounted package receipt can't leak into the next full-price order.
 - [ ] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
       `part_receipts` with `source_kind`/`promo_id`, add `inventory_issue`
       rows, a general `issue(sku, qty, workOrderId?)`, and opening-balance
@@ -2266,6 +2268,12 @@ Phases (one at a time, approval between each):
       `costing_policy` table (default `weighted_average`), and make
       `inventoryValuation.ts` method-aware. Issuing drains layers oldest-first
       for quantity and provenance but charges the job at average cost.
+      **`parts.cost` becomes an auto-updated "last cost"** (relabelled on the
+      form, still editable for opening values) and `avg_cost` the separate
+      average — both updated at receipt, in the receive transaction, never at
+      PO entry. On quote→invoice conversion, snapshot `avg_cost` onto the line
+      items so the internal margin view reflects cost at sale, not today's
+      average.
 - [ ] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose
