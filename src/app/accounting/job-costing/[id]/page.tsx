@@ -48,6 +48,17 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
         )}
       </div>
 
+      {rollup.missingRate && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-body text-amber-200">
+          <span className="font-semibold">Labor cost is understated.</span> Some clocked hours on this job
+          have no hourly cost rate, so they are valued at $0.{" "}
+          <Link href="/accounting/labor-rates" className="underline hover:text-amber-100">
+            Set a shop default or per-tech rate
+          </Link>{" "}
+          and this recomputes.
+        </div>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         {[
           { label: "Materials", value: fmtCents(rollup.materialsCents) },
@@ -83,7 +94,16 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
                 <tr key={e.userId ?? i} className="border-t border-white/5">
                   <td className="px-4 py-2 text-xs text-white">{e.userName ?? "—"}</td>
                   <td className="px-4 py-2 text-right font-mono text-xs">{e.hours.toFixed(1)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-xs text-zinc-400">{fmtCents(e.rateCents)}/h</td>
+                  <td className="px-4 py-2 text-right font-mono text-xs text-zinc-400">
+                    {e.rateSource === "unset" ? (
+                      <span className="text-amber-400">not set</span>
+                    ) : (
+                      <>
+                        {fmtCents(e.rateCents)}/h
+                        {e.rateSource === "default" ? <span className="text-zinc-600"> (default)</span> : null}
+                      </>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-right font-mono text-xs">{fmtCents(e.costCents)}</td>
                 </tr>
               ))

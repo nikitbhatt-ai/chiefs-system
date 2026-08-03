@@ -54,7 +54,17 @@ export default async function JobCostingPage() {
                   <td className="px-4 py-2.5 text-xs capitalize text-zinc-400">{j.status}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-xs">{fmtCents(j.materialsCents)}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-xs text-zinc-400">{j.laborHours.toFixed(1)}</td>
-                  <td className="px-4 py-2.5 text-right font-mono text-xs">{fmtCents(j.laborCents)}</td>
+                  <td className="px-4 py-2.5 text-right font-mono text-xs">
+                    {fmtCents(j.laborCents)}
+                    {j.missingRate ? (
+                      <span
+                        className="ml-1 text-amber-400"
+                        title="Some clocked hours have no cost rate — this labor cost is understated"
+                      >
+                        *
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-2.5 text-right font-mono text-xs text-white font-semibold">{fmtCents(j.totalCents)}</td>
                   <td className="px-4 py-2.5 text-right font-mono text-xs text-amber-300">{fmtCents(j.wipBalanceCents)}</td>
                   <td className="px-4 py-2.5">
@@ -71,10 +81,21 @@ export default async function JobCostingPage() {
         </table>
       </div>
 
+      {jobs.some((j) => j.missingRate) && (
+        <p className="text-[11px] text-amber-300/80 font-body">
+          <span className="text-amber-400">*</span> Some clocked hours have no hourly cost rate, so that job&apos;s labor
+          cost is understated.{" "}
+          <Link href="/accounting/labor-rates" className="underline hover:text-amber-200">
+            Set a shop default or per-tech rate
+          </Link>{" "}
+          and these figures recompute.
+        </p>
+      )}
+
       <p className="text-[11px] text-zinc-500 font-body">
-        Materials come from parts issued to the build (posted to Work in Progress at FIFO cost). Labor is hours from the
-        time clock valued at each tech&apos;s cost rate — informational here and expensed through payroll, not double-booked.
-        Settling a job moves its remaining WIP to Cost of Goods Sold.
+        Materials come from parts issued to the build (posted to Work in Progress at FIFO cost). Labor is the actual hours
+        clocked against each work order, valued at each tech&apos;s cost rate from Labor rates — informational here and
+        expensed through payroll, not double-booked. Settling a job moves its remaining WIP to Cost of Goods Sold.
       </p>
     </AppShell>
   );

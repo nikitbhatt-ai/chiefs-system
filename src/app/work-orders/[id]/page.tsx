@@ -9,7 +9,8 @@ import { fmtDateTime } from "@/lib/datetime";
 import { getOrCreateChecklist, setChecklistItems, qcComplete } from "@/lib/qc";
 import { resolveWorkOrderParts } from "@/lib/workOrderParts";
 import { laborByWorkOrder } from "@/lib/timeclock";
-import { DEFAULT_LABOR_RATE_USD_PER_HOUR } from "@/config/labor";
+import { blendedRateCents } from "@/lib/laborRates";
+import { fmtCents } from "@/lib/accounting";
 
 export const dynamic = "force-dynamic";
 
@@ -97,8 +98,10 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   const items = (checklist.items as QCItem[] | null) ?? [];
   const passed = await qcComplete(id);
 
-  const allLabor = await laborByWorkOrder();
-  const labor = allLabor.find((l) => l.workOrderId === id) ?? { hours: 0, laborCost: 0 };
+  // Actual clocked hours booked against THIS build, costed per technician at
+  // their rate from Accounting → Labor rates.
+  const labor =
+    (await laborByWorkOrder(id))[0] ?? { hours: 0, costCents: 0, missingRate: false };
 
   const vehicleLabel = vehicle
     ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") || vehicle.vin || "—"
@@ -175,8 +178,18 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
 
           <div className="flex items-center justify-between">
             <div className="text-xs text-zinc-400">
-              Labor: <span className="text-zinc-200">{labor.hours.toFixed(2)} h</span> · <span className="text-amber-300">{money(labor.laborCost)}</span>
-              <span className="text-zinc-600"> @ {money(DEFAULT_LABOR_RATE_USD_PER_HOUR)}/h</span>
+              Labor: <span className="text-zinc-200">{labor.hours.toFixed(2)} h</span> ·{" "}
+              <span className="text-amber-300">{fmtCents(labor.costCents)}</span>
+              {labor.missingRate ? (
+                <a href="/accounting/labor-rates" className="ml-1 text-amber-500 hover:text-amber-400 underline">
+                  no cost rate set
+                </a>
+              ) : labor.hours > 0 ? (
+                <span className="text-zinc-600">
+                  {" "}
+                  @ {fmtCents(blendedRateCents(labor.costCents, labor.hours))}/h
+                </span>
+              ) : null}
             </div>
             <button type="submit" className="text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold">Save</button>
           </div>
