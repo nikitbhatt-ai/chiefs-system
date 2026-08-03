@@ -2223,9 +2223,11 @@ Four governing ideas:
 1. **One SKU, one bin.** A part is never split into a "promo" SKU and an
    "individual" SKU. One `parts` row, one on-hand count.
 2. **Cost lives in layers.** Every receipt creates a cost layer with its own
-   unit cost; on-hand is the sum of the layers; consumption is FIFO. The
-   existing `part_receipts` table already is this — extend it, don't
-   duplicate it.
+   unit cost and provenance; on-hand is the sum of the layers. The existing
+   `part_receipts` table already is this — extend it, don't duplicate it.
+   **Weighted average is the primary costing basis** for work orders (see
+   below); layers still back it, and FIFO stays available as a second
+   valuation.
 3. **A package price is allocated across its parts**, in proportion to each
    line's à la carte cost, so every part carries a fair share of the
    discount. **Package purchases only** — allocation must be unreachable
@@ -2256,10 +2258,14 @@ Phases (one at a time, approval between each):
 - [ ] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
       Date-ranged rows per (vendor, sku); a price change adds a row rather
       than overwriting, so historical POs stay explainable.
-- [ ] **Phase 2 — Cost layers + FIFO consumption.** Extend `part_receipts`
-      with `source_kind`/`promo_id`, add `inventory_issue` rows, a general
-      `issue(sku, qty, workOrderId?)`, and opening-balance layers for stock
-      that predates the layer table.
+- [ ] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
+      `part_receipts` with `source_kind`/`promo_id`, add `inventory_issue`
+      rows, a general `issue(sku, qty, workOrderId?)`, and opening-balance
+      layers for stock that predates the layer table. Add `parts.avg_cost`
+      `numeric(12,4)` as a moving average maintained on receipt, a one-row
+      `costing_policy` table (default `weighted_average`), and make
+      `inventoryValuation.ts` method-aware. Issuing drains layers oldest-first
+      for quantity and provenance but charges the job at average cost.
 - [ ] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose
@@ -2268,18 +2274,25 @@ Phases (one at a time, approval between each):
       Allocation runs once at PO creation (Whelen ships partial, so a
       partial receipt needs a cost already on the line). Individual POs
       never call it.
-- [ ] **Phase 5 — `inventory_reservation` + available-to-pull.** Every
-      picking screen reads available, never raw on-hand.
+- [ ] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
+      fire when a work order enters `confirmed` (customer PO in hand, build
+      committed to the shop) — one `reserveForWorkOrder` called from
+      `maybePromoteWonDeal` and the `/workflow` board path. Every picking
+      screen reads available, never raw on-hand.
 - [ ] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
       Pulling reserved stock requires an override that logs who/why and
       raises its own replacement requisition.
 - [ ] **Phase 7 — Promo vs backfill savings report.** Did the package
-      discount survive the backfill spend?
+      discount survive the backfill spend? Must be built from the layer
+      table's `source_kind` + per-layer `unit_cost`, **not** from job costing
+      — under average costing the promo saving is smeared into the average
+      and is invisible in work-order cost by construction.
 
-Open decisions (see `docs/PROMO_PACKAGES.md` decision log): FIFO vs
-weighted-average; what triggers a reservation; whether Whelen rebates
-reduce part cost; and — raised by the audit — whether PO lines stay `jsonb`
-or get promoted to a `purchase_order_line` table.
+Decisions settled 2026-08-03: weighted average primary / FIFO secondary;
+reservations fire on the `confirmed` transition; Whelen pays no rebates so
+there is no rebate-to-cost mechanism. Still open: whether PO lines stay
+`jsonb` or get promoted to a `purchase_order_line` table (Phase 4;
+recommendation is to promote). Full reasoning in `docs/PROMO_PACKAGES.md`.
 
 ## Notes on building order
 

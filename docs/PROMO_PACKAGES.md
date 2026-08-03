@@ -172,13 +172,115 @@ whether to keep PO lines as jsonb or promote them to a table.
 
 ## Decision log
 
-Pending answers from Nikit before Phase 1:
+Answered by Nikit 2026-08-03:
 
-1. **Costing method** — FIFO (brief's assumption). Matches what's already
-   built in `part_receipts`.
-2. **Reservation trigger** — on work-order creation for a won, fixed-price
-   build (brief's assumption), not at quote stage.
-3. **Whelen rebates** — if paid after the fact, reduce part cost rather than
-   book as other income. Changes Phase 4.
-4. **Customer POs vs vendor POs** — confirmed already separate, see 0.5.
-5. **PO lines: jsonb or table** — new question raised by the audit, see 0.4.
+1. **Costing method — weighted average is primary, FIFO secondary.**
+   Overrides the brief's FIFO-only assumption. Average cost is the basis for
+   cost accounting on all work orders; FIFO stays available as a second
+   valuation. Design consequences in §0.8 below.
+2. **Reservation trigger — when the work order enters `confirmed`.** The
+   customer PO is received and the team moves the build into the confirmed
+   workflow stage. See §0.9.
+3. **Whelen rebates — none.** Whelen does not pay backend or growth
+   incentives, so Phase 4 needs no rebate-to-cost mechanism. If another
+   vendor ever does, it reopens as a new decision.
+4. **Customer POs vs vendor POs** — already separate, see §0.5. No work.
+
+Still open:
+
+5. **PO lines: jsonb or a `purchase_order_line` table** — raised by the
+   audit, see §0.4. Not needed until Phase 4; recommendation is to promote
+   to a table. Proceeding on that assumption unless told otherwise.
+
+---
+
+## 0.8 Costing method: weighted average primary, FIFO secondary
+
+### What stays the same
+
+Cost layers are still the foundation, and Phase 2 still builds them. Layers
+remain the subledger of record for **quantity and provenance** — which
+receipt, which PO, which promo, at what actual cost — under both methods.
+Average cost is derived *from* layers, not instead of them. Nothing about
+Phases 1, 3, 4 changes.
+
+### What changes
+
+**A per-part moving average, maintained on receipt.** Add `parts.avg_cost`
+as `numeric(12,4)` (4dp: the average is a derived rate, not a posted amount,
+and 2dp would decay under repeated receipts — same reasoning as
+`tax_rates.rate_pct`). Recomputed inside the existing receive transaction:
+
+```
+new_avg = (on_hand × old_avg + received_qty × receipt_unit_cost)
+          / (on_hand + received_qty)
+```
+
+**Issue splits quantity from cost.** Issuing N units drains layers
+oldest-first exactly as today — that preserves provenance and keeps on-hand
+honest — but the cost charged to the job is `N × avg_cost` under weighted
+average, or the summed layer cost under FIFO. This is a one-line lever:
+`postInventoryIssue`'s `totalCents` is the only thing job costing reads, since
+`src/lib/jobCosting.ts` takes a job's material cost from the WIP (1300) GL
+balance tagged with `work_order_id`. Change what gets debited and every
+work-order cost, WIP settlement, and COGS figure follows automatically.
+
+**The active method is an auditable policy setting**, not a per-call flag —
+a one-row `costing_policy` table `(method, changed_at, changed_by)`
+defaulting to `weighted_average`. Switching methods is a change in accounting
+policy: it applies forward only, never retroactively, and it must never
+rewrite posted entries.
+
+**Valuation and reconciliation follow the active method.**
+`src/lib/inventoryValuation.ts` currently hard-codes the FIFO subledger
+(`Σ remaining_qty × unit_cost`) and reconciles it to GL 1200. It becomes
+method-aware: under weighted average the subledger is
+`Σ on_hand × avg_cost`. The GL ties to whichever method is active; the other
+is computed alongside as the comparison view — that is what "FIFO a second
+option" buys us.
+
+Worth knowing: **the two methods agree whenever a SKU fully turns over.** At
+on-hand zero both valuations are zero. They differ only while stock is on the
+shelf, and the difference is timing, never a permanent gap.
+
+### The one thing to watch
+
+Under weighted average a discounted package receipt pulls the average down
+for *everyone* — the promo saving is smeared across all units of that SKU
+rather than sitting visibly in one layer. That is the correct economics and
+it is exactly why average costing is the right primary for work-order costing
+here: a build's cost reflects what the shelf actually costs, not which crate
+a bracket happened to come from.
+
+But it means **Phase 7's promo-vs-backfill report cannot be built from job
+costing** — the saving is invisible there by construction. It must key off
+the layer table's `source_kind` and per-layer `unit_cost`, which retain the
+package-vs-full-price distinction regardless of the active method. Phase 2
+must therefore keep layers even though average costing alone wouldn't
+strictly need them. Noted so a later session doesn't "simplify" them away.
+
+Separately: `parts.cost` today is the internal/list cost that pre-fills PO
+lines and drives the margin calculators on the part form. It is *not* the
+same number as `avg_cost` and should stay distinct — one is what we expect to
+pay, the other what we actually paid. Whether the margin display should
+switch to `avg_cost` is a real question, but out of scope here.
+
+## 0.9 Reservation trigger: the `confirmed` transition
+
+Reservations fire when a work order enters `confirmed` — the point where the
+customer's PO is in hand and the team commits the build to the shop.
+
+Conveniently this is one event in the existing system, not two. For
+government deals the Won bucket is `po_received`; for commercial and walk-in
+it is `deposit_received`. Both run `maybePromoteWonDeal`
+(`src/lib/dealTriggers.ts:35`), which inside a single transaction promotes the
+quote to `workflowStage = 'confirmed'` and creates or updates the work order
+to `status = 'confirmed'`. That transaction is the reservation hook.
+
+Phase 5 will therefore add one `reserveForWorkOrder(tx, woId)` called from
+every path that moves a WO into `confirmed` — `maybePromoteWonDeal`, plus
+`syncWorkflowToDeal` for a card dragged into Confirmed directly on
+`/workflow`. It must be idempotent (the existing promote path already guards
+against double-firing via `already_past_confirmed`, but the board path needs
+its own latch), and reservations release as parts are issued or when a build
+is walked back out of `confirmed`.
