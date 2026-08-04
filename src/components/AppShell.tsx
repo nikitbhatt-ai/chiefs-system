@@ -6,6 +6,7 @@ import { notifications } from "@/db/schema";
 import { TopNav } from "@/components/TopNav";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GlobalSearch } from "@/components/GlobalSearch";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export async function AppShell({
   title,
@@ -42,6 +43,7 @@ export async function AppShell({
           <GlobalSearch />
         </div>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <ThemeToggle />
           <Link
             href="/notifications"
             className="relative inline-flex items-center justify-center text-zinc-400 hover:text-white border border-white/10 rounded-lg px-2.5 py-1.5 transition-colors"

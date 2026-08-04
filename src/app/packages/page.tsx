@@ -81,7 +81,7 @@ export default async function PackagesPage({
 
   return (
     <AppShell title="Packages" subtitle="Reusable part + labor bundles the sales team can quote in one click">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New package
         </h3>
@@ -119,7 +119,7 @@ export default async function PackagesPage({
         </p>
       </div>
 
-      <form className="bg-[#161624] border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
+      <form className="bg-surface border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
         <span className="text-zinc-500 uppercase tracking-wider text-[10px]">Filter:</span>
         <label className="flex items-center gap-1 text-zinc-400">
           <input type="checkbox" name="archived" value="1" defaultChecked={sp.archived === "1"} />
@@ -143,7 +143,7 @@ export default async function PackagesPage({
         </div>
       ) : null}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

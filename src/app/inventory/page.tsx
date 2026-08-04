@@ -170,7 +170,7 @@ export default async function InventoryPage({
     <AppShell title="Inventory" subtitle="Parts and supplies">
       <PartAddForm action={createPart} vendors={vendorRows} />
 
-      <form className="bg-[#161624] border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
+      <form className="bg-surface border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
         {/* Preserve the active sort (and tag filter) when applying search/filters. */}
         <input type="hidden" name="sort" value={sort} />
         <input type="hidden" name="dir" value={dir} />
@@ -240,7 +240,7 @@ export default async function InventoryPage({
         </a>
       </form>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

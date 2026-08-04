@@ -52,15 +52,15 @@ export default async function InventoryAccountingPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-5">
+        <div className="bg-surface border border-white/5 rounded-lg p-5">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">FIFO subledger (on-hand value)</div>
           <div className="text-white font-display font-semibold text-lg mt-1">{fmtCents(recon.subledgerCents)}</div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-5">
+        <div className="bg-surface border border-white/5 rounded-lg p-5">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">Inventory ledger (1200)</div>
           <div className="text-white font-display font-semibold text-lg mt-1">{fmtCents(recon.glBalanceCents)}</div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-5">
+        <div className="bg-surface border border-white/5 rounded-lg p-5">
           <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">Difference</div>
           <div className={`font-display font-semibold text-lg mt-1 ${recon.ties ? "text-emerald-400" : "text-amber-300"}`}>
             {fmtCents(recon.differenceCents)}
@@ -79,7 +79,7 @@ export default async function InventoryAccountingPage() {
         </form>
       )}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-zinc-500 font-body">
           On-hand valuation by part ({byPart.length})
         </div>

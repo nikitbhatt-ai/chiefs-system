@@ -42,7 +42,7 @@ export default async function EditLeadPage({
     <AppShell title="Edit lead" subtitle={l.name}>
       <form
         action={update}
-        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl"
+        className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl"
       >
         <input
           name="name"

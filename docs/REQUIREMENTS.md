@@ -2312,6 +2312,72 @@ SELECT NULL, 9500
 Until the rate is set, every screen says so rather than reporting $0 as
 though it were real.
 
+## Themes — Dark / Black / Day
+
+**Requirement (user, this session):** three selectable themes. Dark stays as
+it was but with type ~2pt larger and a little bolder. Black = black
+background, white and other soft-toned fonts, bold. Day = tan/cream
+background with black/navy fonts.
+
+Selected by `data-theme` on `<html>`; all values live in
+`src/app/globals.css`. `src/lib/theme.ts` holds the theme list and the
+bootstrap script; `src/components/ThemeToggle.tsx` is the header picker.
+
+### How it re-skins 106 files with no component edits
+
+Tailwind v4 compiles every palette utility to `var(--color-…)` — including
+opacity variants, which become
+`color-mix(… var(--color-white) 5% …)`. So redefining those variables under
+`[data-theme="…"]` changes the whole app at once. Verified against the
+Tailwind CLI output before relying on it.
+
+The consequence is that **the palette is now semantic**, and Day inverts it:
+
+| Utility | Means | Day mode |
+| --- | --- | --- |
+| `text-white` | primary foreground | navy ink `#0d1b33` |
+| `text-zinc-200…700` | muted ramp | **inverted** — lower number = darker |
+| `bg-white/5`, `/10` | raised surface, hairline border | subtle navy wash |
+| `bg-black/20`, `/40` | recessed (inputs) | paper `#fffdf6` |
+| `bg-surface` | card background | `#fbf6ea` |
+| `amber-*` | brand accent | burnt amber, darkened |
+
+**When adding colour to a component, use a slot that already exists.** A
+literal hex will not follow the theme. The 161 old `bg-[#161624]` /
+`bg-[#0f0f1a]` usages were replaced with `bg-surface` / `bg-surface-2` for
+exactly this reason, and there are now no arbitrary hex colours in `src/`.
+
+### Type
+
+`--type-bump: 2.67px` (≈2pt) is added to every size, additively so the
+hierarchy keeps its proportions. Tailwind's line-heights are unitless
+ratios, so they follow automatically. 584 literal `text-[Npx]` usages span
+only five distinct values, so five unlayered rules scale them all.
+`--font-weight-*` is set per theme: Day lightest, Dark middle, Black
+heaviest (dark ink on cream already reads heavy; 700+ there turns muddy).
+
+### Contrast
+
+Black and Day were measured with a real contrast check (resolving `oklch`,
+which Tailwind emits by default) and have **zero** elements below 4.5:1.
+Getting there required lifting the faint end of both zinc ramps off a
+"natural" curve and darkening the Day ambers — the first pass had the
+primary button at 3.5:1 and Day's `text-zinc-600` at 3.5:1.
+
+**Dark is left as-is per the requirement, and it has ~54 elements below
+4.5:1** — `text-zinc-500` at 3.7:1 and `text-zinc-600` at 2.32:1 on a card.
+That is pre-existing, not introduced here. Two variable overrides in the
+dark block would fix it if wanted.
+
+### Exceptions
+
+- `.upfit-canvas` (the vehicle diagram) is literal white in every theme — it
+  is a spec sheet that gets printed.
+- `@media print` forces ink-on-paper regardless of the active theme.
+
+No schema change. Theme choice is per-browser (`localStorage`), not per-user
+in the database — so it does not follow someone to another machine.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

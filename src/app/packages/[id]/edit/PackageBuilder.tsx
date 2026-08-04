@@ -86,7 +86,7 @@ export function PackageBuilder({
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="components" value={JSON.stringify(components)} />
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         <input
           name="name"
           required
@@ -109,7 +109,7 @@ export function PackageBuilder({
         />
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between flex-wrap gap-2">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Bundle contents
@@ -307,7 +307,7 @@ export function PackageBuilder({
         )}
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
         <div className="flex flex-wrap gap-4 text-zinc-400">
           <span>Parts <span className="text-white">{fmt(value.parts)}</span></span>
           <span>Labor <span className="text-white">{fmt(value.labor)}</span></span>

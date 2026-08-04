@@ -72,7 +72,7 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
           { label: "Remitted this period", value: fmtCents(summary.remittedCents) },
           { label: "Closing liability", value: fmtCents(summary.closingLiabilityCents), strong: true },
         ].map((c) => (
-          <div key={c.label} className="bg-[#161624] border border-white/5 rounded-lg p-4">
+          <div key={c.label} className="bg-surface border border-white/5 rounded-lg p-4">
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">{c.label}</div>
             <div className={`font-mono mt-1 ${c.strong ? "text-white font-semibold text-lg font-display" : "text-white"}`}>{c.value}</div>
           </div>
@@ -83,7 +83,7 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
         Closing liability is the Sales Tax Payable balance owed as of {fmtDate(to)}.
       </p>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Record a remittance</h3>
         <form action={remit} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div>

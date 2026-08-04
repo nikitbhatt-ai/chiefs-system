@@ -38,7 +38,7 @@ export default async function PartnersPage() {
   const rows = await db.select().from(partners).orderBy(desc(partners.createdAt));
   return (
     <AppShell title="Partners" subtitle="Dealerships and referral sources">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add partner</h3>
         <form action={createPartner} className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input name="name" required placeholder="Name *" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
@@ -55,7 +55,7 @@ export default async function PartnersPage() {
           </div>
         </form>
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

@@ -113,7 +113,7 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
               className={`min-w-[260px] w-[260px] rounded-lg flex-shrink-0 transition-colors border ${
                 isHover
                   ? "bg-amber-500/10 border-amber-500/40"
-                  : "bg-[#0f0f1a] border-white/5"
+                  : "bg-surface-2 border-white/5"
               }`}
             >
               <div className="px-3 py-2.5 border-b border-white/5 flex items-center justify-between">
@@ -146,7 +146,7 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
                           setDraggingId(null);
                           setHoverStage(null);
                         }}
-                        className={`bg-[#161624] border rounded-md p-2.5 space-y-1.5 cursor-grab active:cursor-grabbing ${
+                        className={`bg-surface border rounded-md p-2.5 space-y-1.5 cursor-grab active:cursor-grabbing ${
                           isDragging ? "opacity-40 border-amber-500/40" : "border-white/10 hover:border-amber-500/30"
                         }`}
                       >

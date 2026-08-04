@@ -19,7 +19,7 @@ export default async function EditUserPage({
   if (session?.user?.role !== "admin") {
     return (
       <AppShell title="Users" subtitle="Admin only">
-        <div className="bg-[#161624] border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
+        <div className="bg-surface border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
           Admin access required.
         </div>
       </AppShell>
@@ -59,7 +59,7 @@ export default async function EditUserPage({
     <AppShell title="Edit user" subtitle={u.email}>
       <form
         action={update}
-        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl"
+        className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl"
       >
         <div className="md:col-span-2 text-[11px] text-zinc-500 font-body">
           Email is permanent and managed by Auth.js: <span className="text-white font-mono">{u.email}</span>

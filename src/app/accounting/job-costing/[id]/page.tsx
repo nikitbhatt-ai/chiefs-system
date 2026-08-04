@@ -66,14 +66,14 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
           { label: "Total cost", value: fmtCents(rollup.totalCents), strong: true },
           { label: "In WIP (unsettled)", value: fmtCents(rollup.wipBalanceCents) },
         ].map((c) => (
-          <div key={c.label} className="bg-[#161624] border border-white/5 rounded-lg p-4">
+          <div key={c.label} className="bg-surface border border-white/5 rounded-lg p-4">
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">{c.label}</div>
             <div className={`font-mono mt-1 ${c.strong ? "text-white font-semibold text-lg font-display" : "text-white"}`}>{c.value}</div>
           </div>
         ))}
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-zinc-500 font-body">
           Labor by tech ({labor.entries.length})
         </div>

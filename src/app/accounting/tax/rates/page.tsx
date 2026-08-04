@@ -37,7 +37,7 @@ export default async function TaxRatesPage({ searchParams }: { searchParams: Pro
       </div>
       {error && <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2 font-body">{error}</div>}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <form action={add} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div>
             <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-1">Jurisdiction</label>
@@ -54,7 +54,7 @@ export default async function TaxRatesPage({ searchParams }: { searchParams: Pro
         </form>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

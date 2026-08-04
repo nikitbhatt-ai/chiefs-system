@@ -83,7 +83,7 @@ export function PaymentForm({
   }
 
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-4">
+    <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-4">
       <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Record a payment</h3>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

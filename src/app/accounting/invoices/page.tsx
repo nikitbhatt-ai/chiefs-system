@@ -62,7 +62,7 @@ export default async function InvoicesPage() {
         {rows.filter((r) => r.status === "open").length} open invoice(s).
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

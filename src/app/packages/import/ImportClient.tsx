@@ -70,7 +70,7 @@ export function ImportClient() {
 
   return (
     <div className="space-y-4 max-w-5xl">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="text-xs font-body text-zinc-300">
           One row per component, grouped by{" "}
           <code className="text-amber-400">package_name</code>. Required:{" "}
@@ -144,7 +144,7 @@ export function ImportClient() {
       ) : null}
 
       {summary ? (
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-3 text-xs font-body flex-wrap">
             <span
               className={`text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${

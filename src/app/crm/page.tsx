@@ -75,7 +75,7 @@ export default async function CrmPage({
 
   return (
     <AppShell title="Customers" subtitle="CRM directory">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add customer</h3>
         <form action={createCustomer} className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <input name="name" required placeholder="Name *" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
@@ -107,7 +107,7 @@ export default async function CrmPage({
         </form>
         <ListFilters basePath="/crm" view={view} tag={tag} carry={{ q }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

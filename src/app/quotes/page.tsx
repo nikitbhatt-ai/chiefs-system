@@ -126,7 +126,7 @@ export default async function QuotesPage({
 
   return (
     <AppShell title="Quotes" subtitle="Estimates and quotes for customers">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New quote
         </h3>
@@ -166,7 +166,7 @@ export default async function QuotesPage({
         </form>
         <ListFilters basePath="/quotes" view={view} tag={tag} carry={{ q, status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

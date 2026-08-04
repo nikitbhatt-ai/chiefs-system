@@ -125,7 +125,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Details + editable fields */}
-        <form action={saveWorkOrder} className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <form action={saveWorkOrder} className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <input type="hidden" name="id" value={wo.id} />
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Details</h3>
 
@@ -196,7 +196,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
         </form>
 
         {/* Parts (de-priced) */}
-        <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden h-fit">
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden h-fit">
           <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
             Parts (build sheet — no pricing)
           </div>
@@ -228,7 +228,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
       </div>
 
       {/* QC checklist */}
-      <form action={saveQc} className="bg-[#161624] border border-white/5 rounded-lg p-4 mt-6 max-w-3xl">
+      <form action={saveQc} className="bg-surface border border-white/5 rounded-lg p-4 mt-6 max-w-3xl">
         <input type="hidden" name="id" value={wo.id} />
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">QC checklist</h3>

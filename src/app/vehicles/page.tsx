@@ -158,7 +158,7 @@ export default async function VehiclesPage({
       ) : null}
       <VehicleAddForm action={createVehicle} lots={LOTS as unknown as string[]} />
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

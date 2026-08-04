@@ -64,7 +64,7 @@ export default async function TimeClockPage() {
         <div className="space-y-6">
           <TimeClockPanel open={open} workOrders={woOptions} />
 
-          <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+          <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
             <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
               Your recent punches
             </div>
@@ -103,7 +103,7 @@ export default async function TimeClockPage() {
           </div>
         </div>
 
-        <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden h-fit">
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden h-fit">
           <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
             Labor per build (closed shifts)
           </div>

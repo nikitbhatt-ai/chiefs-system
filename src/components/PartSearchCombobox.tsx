@@ -122,7 +122,7 @@ export function PartSearchCombobox({
       <AnchoredPopover
         anchorRef={anchorRef}
         open={open && (results.length > 0 || loading)}
-        className="bg-[#161624] border border-white/10 rounded-md shadow-lg"
+        className="bg-surface border border-white/10 rounded-md shadow-lg"
       >
         <ul>
           {loading && results.length === 0 ? (

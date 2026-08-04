@@ -33,7 +33,7 @@ export default async function ProcurementIndex() {
           <Link
             key={p.href}
             href={p.href}
-            className="bg-[#161624] border border-white/5 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
+            className="bg-surface border border-white/5 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
           >
             <h3 className="text-sm font-body font-semibold text-white">{p.title}</h3>
             <p className="text-[11px] text-zinc-400 font-body mt-1">{p.description}</p>

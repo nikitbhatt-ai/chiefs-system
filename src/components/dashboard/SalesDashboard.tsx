@@ -71,7 +71,7 @@ function ListPanel({
   const items = Array.isArray(children) ? children : [children];
   const empty = items.flat().filter(Boolean).length === 0;
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+    <div className="bg-surface border border-white/5 rounded-lg p-4">
       <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">{title}</h3>
       <ul className="mt-2">
         {empty ? <li className="text-xs text-zinc-500 font-body py-1">{emptyText}</li> : children}

@@ -65,7 +65,7 @@ export default async function LeadsPage({
 
   return (
     <AppShell title="Leads" subtitle="Pipeline of prospects before they become customers">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add lead</h3>
         {sources.length === 0 ? (
           <div className="text-[11px] text-amber-300 font-body bg-amber-500/10 border border-amber-500/30 rounded p-3">
@@ -89,7 +89,7 @@ export default async function LeadsPage({
         </form>
         <ListFilters basePath="/leads" view={view} tag={tag} carry={{ q, status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
