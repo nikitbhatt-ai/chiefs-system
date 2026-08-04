@@ -1704,8 +1704,10 @@ Geo-verified clock-in plus per-build labor tracking. Also fixes the dead
 - [x] **`src/lib/timeclock.ts`** — transactional `clockIn` / `clockOut`
   (one open shift per user, enforced by a `FOR UPDATE` lock on the open
   row), `getOpenEntry`, and `laborByWorkOrder` (SQL roll-up of hours +
-  labor $ per work order). Labor rate: `src/config/labor.ts`
-  (`DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`).
+  labor cost per work order). ~~Labor rate: `src/config/labor.ts`
+  (`DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`).~~ **Superseded** — rates now
+  come from the `labor_rates` table via `src/lib/laborRates.ts`; see
+  "Labor cost per build" below.
 - [x] **API**: `POST /api/timeclock/clock-in` (validates geofence; 403
   when off-site, 409 when already clocked in) and
   `POST /api/timeclock/clock-out`.
@@ -2209,6 +2211,172 @@ won't scale once the catalog is large.
   load.
 
 No schema change.
+
+## Labor cost per build — one rate source, from actual clocked time
+
+**Requirement (user, this session):** the labor cost of a build must be
+driven by the actual hours clocked against that specific work order, and
+by one authoritative rate — not by a hardcoded number.
+
+### What was wrong
+
+Two independent labor-cost calculations disagreed:
+
+- `src/config/labor.ts` hardcoded `DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`,
+  read by `laborByWorkOrder()` in `src/lib/timeclock.ts` and shown on
+  `/work-orders/[id]`. It grouped by work order only, so every tech on a
+  build cost the same.
+- The `labor_rates` table (per-user + shop default, Phase 5) was read by
+  `src/lib/jobCosting.ts` and drove `/accounting/job-costing`.
+
+Measured on a seeded build — Senior 10 h @ $120 + Apprentice 10 h @ $40:
+the work-order page reported **$1,900** (20 h × $95) while job costing
+reported **$1,600**. Worse, `defaultLaborRateCents()` returned `0` when
+the shop-default row was never seeded, so job costing silently reported
+**$0** labor, and `listJobCosts()` then skipped such jobs entirely
+because it tested labor *cost* rather than *hours*.
+
+### What is true now
+
+- [x] **`src/lib/laborRates.ts` is the only place a cost rate resolves.**
+  `loadLaborRates()` reads the table once; `rateForUser()` returns the
+  user's override, else the shop default, else `"unset"`. A rate of `0`
+  is treated as not-filled-in and falls through.
+- [x] **`src/config/labor.ts` is deleted.** No hardcoded rate exists.
+- [x] **Cost derives from real punches per build, per tech.**
+  `laborByWorkOrder()` groups by `(work_order_id, user_id)` and values
+  each person's hours at their own rate. Only closed punches count.
+  It accepts an optional `workOrderId` so a single build can be costed
+  without scanning the shop.
+- [x] **Both sides use one hours expression** (`CLOCKED_SECONDS_SQL`) and
+  round per tech per job, so the per-tech rows add up to the job total
+  and the two screens agree by construction.
+- [x] **"No rate" is visible, never silently $0.** `missingRate` /
+  `rateSource` flow through `WorkOrderLabor`, `LaborEntry`, and
+  `JobCost`; `/work-orders/[id]`, `/timeclock`,
+  `/accounting/job-costing`, and its detail page all say so and link to
+  `/accounting/labor-rates`, which warns when no shop default exists.
+- [x] **A job with clocked hours but no rate still lists** —
+  `listJobCosts()` keys the skip on hours, not cost.
+
+These are **cost** rates (what a build costs us). What we *bill* for
+labor is entered per quote line in the quote editor and is deliberately
+unrelated — never use one for the other or margins go wrong.
+
+### Not done here (needs a decision)
+
+Labor still does **not** post to the ledger against a job. WIP holds
+materials only; the sole path into the books is the manual QBO payroll
+import (`src/lib/qbo.ts`), which posts Dr Wages / Cr Cash with no
+`work_order_id`. Posting labor to WIP would double-count against that
+import unless one of the two is made authoritative first. See P1 item
+D-1 in `audits/audit-2026-08-03.md`.
+
+### SQL to run in Neon
+
+`labor_rates` already exists (Phase 5), so no table is added. Two things
+still need running once — seeding the shop-default rate, and adding an
+index that Phase 5 left out.
+
+The gap: `labor_rates_user_uidx` is `UNIQUE (user_id)`, and Postgres
+treats NULLs as **distinct**, so that index never constrained the
+shop-default row. Nothing stopped several default rows existing, and
+`ON CONFLICT (user_id)` silently does not fire for them — an
+`INSERT ... ON CONFLICT` run twice creates two defaults. App code now
+resolves the most-recently-updated one so behaviour is at least
+deterministic, but the index below is the real fix.
+
+Safe to run more than once:
+
+```sql
+-- Collapse any duplicate shop-default rows, keeping the newest.
+DELETE FROM labor_rates
+ WHERE user_id IS NULL
+   AND id <> (SELECT id FROM labor_rates WHERE user_id IS NULL
+              ORDER BY updated_at DESC, created_at DESC LIMIT 1);
+
+-- Enforce at most one shop-default row from here on (Phase 5's
+-- UNIQUE (user_id) does not cover NULL).
+CREATE UNIQUE INDEX IF NOT EXISTS labor_rates_single_default_uidx
+  ON labor_rates ((user_id IS NULL)) WHERE user_id IS NULL;
+
+-- Shop-wide default hourly COST rate: $95.00/h, matching the old
+-- hardcoded constant so nothing shifts on day one. Adjust as needed —
+-- or set it from /accounting/labor-rates instead.
+UPDATE labor_rates SET rate_cents = 9500, updated_at = now() WHERE user_id IS NULL;
+INSERT INTO labor_rates (user_id, rate_cents)
+SELECT NULL, 9500
+ WHERE NOT EXISTS (SELECT 1 FROM labor_rates WHERE user_id IS NULL);
+```
+
+Until the rate is set, every screen says so rather than reporting $0 as
+though it were real.
+
+## Themes — Dark / Black / Day
+
+**Requirement (user, this session):** three selectable themes. Dark stays as
+it was but with type ~2pt larger and a little bolder. Black = black
+background, white and other soft-toned fonts, bold. Day = tan/cream
+background with black/navy fonts.
+
+Selected by `data-theme` on `<html>`; all values live in
+`src/app/globals.css`. `src/lib/theme.ts` holds the theme list and the
+bootstrap script; `src/components/ThemeToggle.tsx` is the header picker.
+
+### How it re-skins 106 files with no component edits
+
+Tailwind v4 compiles every palette utility to `var(--color-…)` — including
+opacity variants, which become
+`color-mix(… var(--color-white) 5% …)`. So redefining those variables under
+`[data-theme="…"]` changes the whole app at once. Verified against the
+Tailwind CLI output before relying on it.
+
+The consequence is that **the palette is now semantic**, and Day inverts it:
+
+| Utility | Means | Day mode |
+| --- | --- | --- |
+| `text-white` | primary foreground | navy ink `#0d1b33` |
+| `text-zinc-200…700` | muted ramp | **inverted** — lower number = darker |
+| `bg-white/5`, `/10` | raised surface, hairline border | subtle navy wash |
+| `bg-black/20`, `/40` | recessed (inputs) | paper `#fffdf6` |
+| `bg-surface` | card background | `#fbf6ea` |
+| `amber-*` | brand accent | burnt amber, darkened |
+
+**When adding colour to a component, use a slot that already exists.** A
+literal hex will not follow the theme. The 161 old `bg-[#161624]` /
+`bg-[#0f0f1a]` usages were replaced with `bg-surface` / `bg-surface-2` for
+exactly this reason, and there are now no arbitrary hex colours in `src/`.
+
+### Type
+
+`--type-bump: 2.67px` (≈2pt) is added to every size, additively so the
+hierarchy keeps its proportions. Tailwind's line-heights are unitless
+ratios, so they follow automatically. 584 literal `text-[Npx]` usages span
+only five distinct values, so five unlayered rules scale them all.
+`--font-weight-*` is set per theme: Day lightest, Dark middle, Black
+heaviest (dark ink on cream already reads heavy; 700+ there turns muddy).
+
+### Contrast
+
+Black and Day were measured with a real contrast check (resolving `oklch`,
+which Tailwind emits by default) and have **zero** elements below 4.5:1.
+Getting there required lifting the faint end of both zinc ramps off a
+"natural" curve and darkening the Day ambers — the first pass had the
+primary button at 3.5:1 and Day's `text-zinc-600` at 3.5:1.
+
+**Dark is left as-is per the requirement, and it has ~54 elements below
+4.5:1** — `text-zinc-500` at 3.7:1 and `text-zinc-600` at 2.32:1 on a card.
+That is pre-existing, not introduced here. Two variable overrides in the
+dark block would fix it if wanted.
+
+### Exceptions
+
+- `.upfit-canvas` (the vehicle diagram) is literal white in every theme — it
+  is a spec sheet that gets printed.
+- `@media print` forces ink-on-paper regardless of the active theme.
+
+No schema change. Theme choice is per-browser (`localStorage`), not per-user
+in the database — so it does not follow someone to another machine.
 
 ## Notes on building order
 

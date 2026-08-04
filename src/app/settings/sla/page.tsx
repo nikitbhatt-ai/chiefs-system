@@ -56,7 +56,7 @@ export default async function SlaSettingsPage() {
         {PIPELINE_SLUGS.map((slug) => {
           const pipeline = PIPELINES[slug as PipelineSlug];
           return (
-            <div key={slug} className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+            <div key={slug} className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">{pipeline.label}</h3>
                 <span className="text-[10px] font-body text-zinc-500">{pipeline.description}</span>

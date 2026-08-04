@@ -52,7 +52,7 @@ export default async function ChartOfAccountsPage() {
 
   return (
     <AppShell title="Chart of Accounts" subtitle="The ledger's account list — debits and credits post against these">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           Add account
         </h3>
@@ -88,7 +88,7 @@ export default async function ChartOfAccountsPage() {
       </div>
 
       {byType.map((group) => (
-        <div key={group.type} className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+        <div key={group.type} className="bg-surface border border-white/5 rounded-lg overflow-hidden">
           <div className="bg-white/5 px-4 py-2 text-[11px] font-body font-semibold text-white uppercase tracking-wider">
             {group.label}
           </div>

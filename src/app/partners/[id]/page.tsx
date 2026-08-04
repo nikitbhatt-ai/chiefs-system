@@ -62,7 +62,7 @@ export default async function PartnerEntityPage({ params }: { params: Promise<{ 
 
   return (
     <AppShell title={p.name} subtitle={`${p.type} partner`}>
-      <form action={update} className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+      <form action={update} className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
         <input name="name" defaultValue={p.name} className={inputCls} />
         <select name="type" defaultValue={p.type} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
           <option value="dealership">Dealership</option>
@@ -75,7 +75,7 @@ export default async function PartnerEntityPage({ params }: { params: Promise<{ 
         <label className="flex items-center gap-2 text-xs text-zinc-300 font-body"><input type="checkbox" name="active" defaultChecked={p.active} />Active (referrals can be attributed)</label>
         <div className="flex justify-end"><button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Save changes</button></div>
       </form>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Add contact</h3>
         <form action={addContact} className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <input name="name" required placeholder="Name *" className={inputCls} />
@@ -86,7 +86,7 @@ export default async function PartnerEntityPage({ params }: { params: Promise<{ 
           <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add contact</button>
         </form>
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

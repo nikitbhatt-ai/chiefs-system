@@ -17,18 +17,18 @@ export default async function ArAgingPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         {BUCKETS.map((b) => (
-          <div key={b} className="bg-[#161624] border border-white/5 rounded-lg p-3">
+          <div key={b} className="bg-surface border border-white/5 rounded-lg p-3">
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">{AGING_LABELS[b]}</div>
             <div className="text-white font-mono text-sm mt-1">{fmtCents(report.totals[b])}</div>
           </div>
         ))}
-        <div className="bg-[#161624] border border-amber-500/20 rounded-lg p-3">
+        <div className="bg-surface border border-amber-500/20 rounded-lg p-3">
           <div className="text-[10px] uppercase tracking-wider text-amber-400/80 font-body">Total AR</div>
           <div className="text-white font-mono text-sm mt-1 font-semibold">{fmtCents(report.grandTotal)}</div>
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm min-w-[640px]">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

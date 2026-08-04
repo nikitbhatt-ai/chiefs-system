@@ -76,7 +76,7 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         </span>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Entry date</div>
           <div className="text-white">{fmtDateTime(entry.entryDate)}</div>
@@ -101,7 +101,7 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

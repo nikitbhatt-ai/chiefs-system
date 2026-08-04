@@ -126,7 +126,7 @@ export default async function PartDetailPage({
       </div>
 
       {samples.length > 0 ? (
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+        <div className="bg-surface border border-white/5 rounded-lg p-4">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
             FIFO cost preview
           </h3>
@@ -148,7 +148,7 @@ export default async function PartDetailPage({
         </div>
       ) : null}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <div className="px-4 py-2.5 border-b border-white/5">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             FIFO layers (oldest first)
@@ -234,7 +234,7 @@ function Stat({
 }) {
   return (
     <div
-      className={`bg-[#161624] border rounded-lg p-3 ${
+      className={`bg-surface border rounded-lg p-3 ${
         highlight ? "border-amber-500/30" : "border-white/5"
       }`}
     >

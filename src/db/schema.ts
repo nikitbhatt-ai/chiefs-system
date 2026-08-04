@@ -14,7 +14,7 @@ import {
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const userRole = pgEnum("user_role", ["admin","manager","sales","warehouse","tech","accountant"]);
 export const customerType = pgEnum("customer_type", ["government","commercial","retail","walk_in_credentialed"]);
@@ -924,7 +924,17 @@ export const laborRates = pgTable("labor_rates", {
   rateCents: bigint("rate_cents", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (t) => [uniqueIndex("labor_rates_user_uidx").on(t.userId)]);
+}, (t) => [
+  uniqueIndex("labor_rates_user_uidx").on(t.userId),
+  // Postgres treats NULLs as distinct, so the index above never constrained the
+  // shop-default row and several could exist — which made "the" default rate
+  // non-deterministic. This partial index is the actual one-default rule. See
+  // "Labor cost per build" in docs/REQUIREMENTS.md for the SQL to add it to an
+  // existing database.
+  uniqueIndex("labor_rates_single_default_uidx")
+    .on(sql`(${t.userId} IS NULL)`)
+    .where(sql`${t.userId} IS NULL`),
+]);
 
 // ───────────────────────────────────────────────────────────────────────────
 // ACCOUNTING MODULE — Phase 7: AR/AP agents (draft-only)

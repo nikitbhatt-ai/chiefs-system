@@ -87,7 +87,7 @@ export default async function AccountingHomePage() {
           <Link
             key={c.href}
             href={c.href}
-            className="block bg-[#161624] border border-white/5 rounded-lg p-5 hover:border-amber-500/40 transition-colors"
+            className="block bg-surface border border-white/5 rounded-lg p-5 hover:border-amber-500/40 transition-colors"
           >
             <div className="text-white font-display font-semibold">{c.title}</div>
             <div className="text-xs text-zinc-500 font-body mt-1">{c.desc}</div>

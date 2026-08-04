@@ -360,7 +360,7 @@ export default async function DealEntityPage({
 
   return (
     <AppShell title={`Deal ${d.id.slice(0, 8)}`} subtitle={`${pipeline.label} pipeline`}>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Parallel tracks</h3>
           {latestQuote ? (
@@ -431,7 +431,7 @@ export default async function DealEntityPage({
 
       {tab === "details" && (<>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div className="flex items-center gap-3 mb-2 flex-wrap">
             <span className={`inline-block text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${STAGE_COLORS[d.stage] ?? "bg-zinc-500/10 text-zinc-400 border-zinc-500/30"}`}>{stageLabel(d.stage)}</span>
             {(() => {
@@ -470,13 +470,13 @@ export default async function DealEntityPage({
             <a href="/deals" className="text-[11px] text-zinc-400 hover:text-white">Back to list</a>
           </div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-2 text-center">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-2 text-center">
           <Stat label="Activity" value={activity.length} />
           <Stat label="Open tasks" value={taskRows.filter((tk) => !tk.completedAt).length} />
         </div>
       </div>
       {pipeline.hardGate ? (
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Credentials</h3>
             <span className="text-[10px] font-body text-zinc-500">
@@ -587,7 +587,7 @@ export default async function DealEntityPage({
           ? `/deals/${d.id}/documents/${docSpec.slug.replace(/^pipeline_doc:/, "")}/print`
           : null;
         return (
-          <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+          <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Documents</h3>
               {docSpec ? (
@@ -727,7 +727,7 @@ export default async function DealEntityPage({
         };
 
         return (
-          <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+          <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
             <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
             <form action={postNote} className="flex gap-2">
               <textarea name="body" rows={2} placeholder="Post an internal note (@mention someone with @username)…" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs font-body text-white placeholder:text-zinc-500" />
@@ -743,7 +743,7 @@ export default async function DealEntityPage({
       })()}
 
       {tab === "tasks" && (
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Tasks</h3>
         <form action={createTask} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
           <input name="title" required placeholder="Task title *" className="md:col-span-2 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
@@ -802,7 +802,7 @@ export default async function DealEntityPage({
       )}
 
       {tab === "communication" && (
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Communication log</h3>
         <form action={logMessage} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
           <select name="channel" required defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">

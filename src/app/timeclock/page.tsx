@@ -5,13 +5,10 @@ import { timeEntries, workOrders, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 import { getOpenEntry, laborByWorkOrder } from "@/lib/timeclock";
+import { fmtCents } from "@/lib/accounting";
 import { TimeClockPanel } from "./TimeClockPanel";
 
 export const dynamic = "force-dynamic";
-
-function money(n: number) {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
-}
 
 function durationLabel(inAt: Date, outAt: Date | null): string {
   const end = outAt ?? new Date();
@@ -67,7 +64,7 @@ export default async function TimeClockPage() {
         <div className="space-y-6">
           <TimeClockPanel open={open} workOrders={woOptions} />
 
-          <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+          <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
             <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
               Your recent punches
             </div>
@@ -106,7 +103,7 @@ export default async function TimeClockPage() {
           </div>
         </div>
 
-        <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden h-fit">
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden h-fit">
           <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
             Labor per build (closed shifts)
           </div>
@@ -130,12 +127,25 @@ export default async function TimeClockPage() {
                   <tr key={l.workOrderId} className="border-t border-white/5">
                     <td className="px-3 py-2 font-mono text-xs text-white">{l.woNumber ?? l.workOrderId.slice(0, 8)}</td>
                     <td className="px-3 py-2 text-xs text-right">{l.hours.toFixed(2)}</td>
-                    <td className="px-3 py-2 text-xs text-right text-amber-300">{money(l.laborCost)}</td>
+                    <td className="px-3 py-2 text-xs text-right text-amber-300">
+                      {fmtCents(l.costCents)}
+                      {l.missingRate ? (
+                        <span className="ml-1 text-amber-500" title="Some hours have no cost rate set — see Accounting → Labor rates">
+                          *
+                        </span>
+                      ) : null}
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
+          {labor.some((l) => l.missingRate) && (
+            <p className="px-4 py-2.5 text-[11px] text-amber-300/80 font-body border-t border-white/5">
+              <span className="text-amber-400">*</span> Some clocked hours have no hourly cost rate, so that
+              build&apos;s labor cost is understated. An admin can set rates under Accounting → Labor rates.
+            </p>
+          )}
         </div>
       </div>
     </AppShell>

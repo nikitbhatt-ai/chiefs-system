@@ -14,7 +14,7 @@ export default async function BalanceSheetPage({ searchParams }: { searchParams:
   const bs = await balanceSheet(asOf);
 
   const Section = ({ title, rows, total }: { title: string; rows: BsRow[]; total: number }) => (
-    <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+    <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
       <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-amber-400/80 font-body font-semibold">{title}</div>
       <table className="w-full text-sm">
         <tbody className="font-body text-zinc-200">
@@ -66,7 +66,7 @@ export default async function BalanceSheetPage({ searchParams }: { searchParams:
       <Section title="Assets" rows={bs.assets} total={bs.assetsTotal} />
       <Section title="Liabilities" rows={bs.liabilities} total={bs.liabilitiesTotal} />
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-amber-400/80 font-body font-semibold">Equity</div>
         <table className="w-full text-sm">
           <tbody className="font-body text-zinc-200">
