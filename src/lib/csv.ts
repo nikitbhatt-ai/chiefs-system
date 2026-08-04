@@ -79,7 +79,15 @@ export type ImportRow = {
   quantityOnHand: number;
   quantityOnOrder: number;
   reorderPoint: number | null;
+  // Hard problems that stop THIS row from importing (in lenient mode, only a
+  // missing or duplicate SKU — the one field we can't invent, since it's the
+  // identity used to match on re-upload). Everything else is a warning.
   errors: string[];
+  // Soft problems: the row still imports, but a value was defaulted or coerced
+  // (missing name → SKU, unparseable cost → blank, etc.). Surfaced in the
+  // preview so nothing is silently changed. In strict mode these are promoted
+  // to hard errors and the row is skipped instead.
+  warnings: string[];
 };
 
 const HEADER_ALIASES: Record<string, string> = {
@@ -99,13 +107,23 @@ const HEADER_ALIASES: Record<string, string> = {
   item_name: "name",
   part_name: "name",
   description: "description",
+  // Vendor/package sheets label the descriptive column "Part Description".
+  // When there's no dedicated name column, name falls back to this (below).
+  part_description: "description",
+  part_desc: "description",
+  item_description: "description",
   category: "category",
+  section: "category",
   manufacturer: "manufacturer",
+  brand: "manufacturer",
   supplier: "supplier",
   vendor: "supplier",
   internal_cost: "internalCost",
   cost: "internalCost",
+  unit_cost: "internalCost",
   price: "price",
+  sell_price: "price",
+  unit_price: "price",
   quantity_on_hand: "quantityOnHand",
   on_hand: "quantityOnHand",
   qty_on_hand: "quantityOnHand",
@@ -126,13 +144,19 @@ export function rowsToImport(rows: string[][]): {
 } {
   if (rows.length === 0) return { parsed: [], fatalError: "Empty file" };
   const header = rows[0].map(normalizeHeader);
-  const missing = (["sku", "name"] as const).filter((k) => !header.includes(k));
-  if (missing.length > 0) {
+  // Only the SKU column is truly required — it's the identity we upsert on and
+  // can't invent. A missing name (or anything else) is handled per-row with a
+  // default, not a file-level rejection, so partial vendor/package sheets still
+  // import. If the SKU column itself is absent there's nothing to key on, so
+  // that stays fatal, with the accepted labels spelled out.
+  if (!header.includes("sku")) {
     const seen = rows[0].map((h) => h.trim()).filter(Boolean).join(", ");
     return {
       parsed: [],
       fatalError:
-        `Header is missing required column${missing.length > 1 ? "s" : ""}: ${missing.join(", ")}. ` +
+        `Couldn't find a SKU column — this is the one column the import needs, ` +
+        `since it identifies each part. Name it any of: SKU, Part Number, ` +
+        `Manufacturer SKU, MFG SKU, Part No, or Item Number. ` +
         `Detected headers: ${seen || "(none)"}.`,
     };
   }
@@ -147,17 +171,19 @@ export function rowsToImport(rows: string[][]): {
       return (cells[i] ?? "").trim();
     };
     const errors: string[] = [];
+    const warnings: string[] = [];
 
     const sku = get("sku");
-    const name = get("name");
-    if (!sku) errors.push("missing sku");
-    if (!name) errors.push("missing name");
+    const rawName = get("name");
+    const rawDescription = get("description");
 
+    // Numbers are coerced, never fatal: an unparseable value defaults and logs
+    // a warning so the row still imports.
     const num = (v: string, label: string): string | null => {
       if (!v) return null;
       const n = Number(v.replace(/[$,]/g, ""));
       if (Number.isNaN(n)) {
-        errors.push(`${label} not a number: ${v}`);
+        warnings.push(`${label} not a number (${v}) — left blank`);
         return null;
       }
       return n.toFixed(2);
@@ -166,26 +192,51 @@ export function rowsToImport(rows: string[][]): {
       if (!v) return dflt;
       const n = Number(v.replace(/[,]/g, ""));
       if (Number.isNaN(n) || !Number.isFinite(n)) {
-        errors.push(`${label} not an integer: ${v}`);
+        warnings.push(`${label} not a whole number (${v}) — used ${dflt ?? "blank"}`);
         return dflt;
       }
       return Math.trunc(n);
     };
 
+    const internalCost = num(get("internalCost"), "cost");
+    const price = num(get("price"), "price");
+    const quantityOnHand = intNum(get("quantityOnHand"), "quantity_on_hand", 0) ?? 0;
+    const quantityOnOrder = intNum(get("quantityOnOrder"), "quantity_on_order", 0) ?? 0;
+    const reorderPoint = intNum(get("reorderPoint"), "reorder_point", null);
+
+    // Rows with nothing usable are structural noise (blank lines, section
+    // dividers like "SEATING & PRISONER AREA"). Drop them silently rather than
+    // cluttering the report — they were never meant to be parts.
+    const hasAnyData =
+      sku || rawName || rawDescription || internalCost || price ||
+      quantityOnHand || quantityOnOrder || reorderPoint != null;
+    if (!hasAnyData) continue;
+
+    // Name is never a blocker: fall back to the description, then the SKU.
+    const name = rawName || rawDescription || sku;
+    if (!rawName && name) {
+      warnings.push(`name missing — used ${rawDescription ? "the description" : "the SKU"}`);
+    }
+
+    // SKU is the one thing we can't default. Without it the row can't be
+    // created or matched, so it's a hard skip — but only this row, not the file.
+    if (!sku) errors.push("no SKU / Part Number — can't identify the part, so this row is skipped");
+
     parsed.push({
       rowNumber: r + 1,
       sku,
       name,
-      description: get("description") || null,
+      description: rawDescription || null,
       category: get("category") || null,
       manufacturer: get("manufacturer") || null,
       supplier: get("supplier") || null,
-      internalCost: num(get("internalCost"), "internal_cost"),
-      price: num(get("price"), "price"),
-      quantityOnHand: intNum(get("quantityOnHand"), "quantity_on_hand", 0) ?? 0,
-      quantityOnOrder: intNum(get("quantityOnOrder"), "quantity_on_order", 0) ?? 0,
-      reorderPoint: intNum(get("reorderPoint"), "reorder_point", null),
+      internalCost,
+      price,
+      quantityOnHand,
+      quantityOnOrder,
+      reorderPoint,
       errors,
+      warnings,
     });
   }
 

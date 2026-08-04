@@ -13,6 +13,7 @@ type Result = {
   name: string;
   action: Action;
   errors: string[];
+  warnings: string[];
   manufacturerCreated?: boolean;
   supplierCreated?: boolean;
 };
@@ -26,6 +27,10 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "expected JSON { csv: string, commit?: boolean }" }, { status: 400 });
   }
   const commit = body.commit === true;
+  // Lenient by default: rows import even with warnings (defaulted name, coerced
+  // numbers). Strict mode promotes every warning to a skip, for a deliberate
+  // clean catalog load where you want to catch every imperfection.
+  const strict = body.strict === true;
 
   const rows = parseCsv(body.csv);
   const { parsed, fatalError } = rowsToImport(rows);
@@ -73,14 +78,18 @@ export async function POST(req: Request) {
   let skipped = 0;
 
   for (const r of parsed) {
+    // In strict mode a warning is disqualifying too; otherwise only hard
+    // errors (missing / duplicate SKU) skip the row.
+    const blocking = strict ? [...r.errors, ...r.warnings] : r.errors;
     const result: Result = {
       rowNumber: r.rowNumber,
       sku: r.sku,
       name: r.name,
       action: "skip",
       errors: [...r.errors],
+      warnings: [...r.warnings],
     };
-    if (r.errors.length > 0) {
+    if (blocking.length > 0) {
       results.push(result);
       skipped++;
       continue;

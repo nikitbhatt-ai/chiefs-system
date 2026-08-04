@@ -965,6 +965,25 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
     and later rows with the same SKU are flagged (`duplicate sku in file …`)
     so they show in the dry-run preview and are skipped, rather than silently
     colliding on commit.
+  - **Lenient by default** (added 2026-08-04, from real vendor/package sheets
+    that don't carry every field). The import imports what it can and reports
+    the rest instead of failing:
+    - **Only `sku` is required** — it's the identity we upsert on and can't
+      invent (a generated SKU would duplicate on every re-upload). A missing
+      SKU *column* is still fatal, with a message naming the accepted labels;
+      a row missing its SKU *value* is skipped-and-listed, not file-fatal.
+    - **`name` is optional** — falls back to the description, then the SKU.
+      New aliases: `part_description`/`part_desc`/`item_description` →
+      description; `unit_cost` → internal cost; `sell_price`/`unit_price` →
+      price; `section` → category; `brand` → manufacturer.
+    - **Numbers coerce, never fail** — an unparseable cost/qty defaults and
+      logs a warning; the row still imports.
+    - **Structural rows** (blank lines, section dividers like
+      `SEATING & PRISONER AREA` with no SKU or data) are dropped silently.
+    - Defaults/coercions surface as **warnings** in the preview (nothing is
+      silently changed). A **Strict mode** checkbox promotes every warning to
+      a skip, for a deliberate clean catalog load. The `strict` flag is sent
+      to `POST /api/parts/import`.
 - [ ] Per-part PO history button — currently shown as the FIFO layers
       table on /inventory/[id]; consider a dedicated button if needed.
 - [ ] Inline "Add new vendor" inside the dropdown (currently links
