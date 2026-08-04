@@ -2462,7 +2462,24 @@ background with black/navy fonts.
 
 Selected by `data-theme` on `<html>`; all values live in
 `src/app/globals.css`. `src/lib/theme.ts` holds the theme list and the
-bootstrap script; `src/components/ThemeToggle.tsx` is the header picker.
+bootstrap script; `src/components/ThemeToggle.tsx` is the header control.
+
+### The header control (user, this session)
+
+A single **sun/moon icon button**, top-right next to the notification bell —
+requested in place of the original three-way Dark/Black/Day segmented
+control. The icon shows what you'll *get*, not where you are: a sun means
+"click for day".
+
+There are three themes but only one moon, so **the night side resolves to
+whichever dark theme was last used** (`chiefs-theme-night` in
+localStorage, default `dark`). Someone on Black who flips to day and back
+returns to Black rather than being silently moved to Dark. Black therefore
+has no UI to reach it from Day — switching a browser's night side to Black
+means setting `chiefs-theme` to `black` once (dev tools, or
+`localStorage.setItem('chiefs-theme','black')`), after which the toggle
+remembers it. If Black needs to be pickable again, that is a third state on
+this button or a small picker elsewhere.
 
 ### How it re-skins 106 files with no component edits
 

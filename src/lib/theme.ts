@@ -6,22 +6,29 @@ export type Theme = (typeof THEMES)[number];
 
 export const DEFAULT_THEME: Theme = "dark";
 
-export const THEME_LABELS: Record<Theme, string> = {
-  dark: "Dark",
-  black: "Black",
-  day: "Day",
-};
-
-export const THEME_HINTS: Record<Theme, string> = {
-  dark: "Deep navy — the original look",
-  black: "True black, soft-toned text",
-  day: "Cream paper, navy ink",
-};
-
 export const THEME_STORAGE_KEY = "chiefs-theme";
+
+/**
+ * Which dark theme the sun/moon button returns to.
+ *
+ * The header control is a plain two-state flip — day ⇄ night — but there are
+ * two dark themes. Remembering the last one used means someone who picked
+ * Black keeps Black as their night side instead of being silently moved to
+ * Dark the first time they toggle.
+ */
+export const NIGHT_THEME_STORAGE_KEY = "chiefs-theme-night";
+
+export const DEFAULT_NIGHT_THEME: NightTheme = "dark";
+
+/** The non-day themes — i.e. anything the moon side can resolve to. */
+export type NightTheme = Exclude<Theme, "day">;
 
 export function isTheme(v: unknown): v is Theme {
   return typeof v === "string" && (THEMES as readonly string[]).includes(v);
+}
+
+export function isNightTheme(v: unknown): v is NightTheme {
+  return v === "dark" || v === "black";
 }
 
 /**
