@@ -1032,18 +1032,37 @@ those SKUs.
       discounting stays on the quote). POSTs to `/api/packages`.
 - [x] **Package bulk upload** — `/packages/import` UI +
       `POST /api/packages/import` (dry-run preview → confirm). One row per
-      component grouped by `package_name`; `part` rows resolve by SKU against
-      the live catalog (unknown SKU = error, since inventory loads first).
-      Upserts by name; a package with any errored row is skipped whole (no
-      partial bundles). Sample template + column docs in the import UI.
+      component grouped by package name; upserts by name. Sample template +
+      column docs in the import UI.
+  - **Lenient by default** (added 2026-08-04, same rationale as the inventory
+    importer — real vendor/package templates lack a `component_type` column
+    and don't carry every field):
+    - **Only a package-name column is required** (`package_name` /
+      `template_name` / `package` / `name`). A blank name cell **inherits the
+      row above**, matching section templates that print the title once.
+    - **`component_type` is optional and inferred** — no SKU + hours → labor,
+      amount-only → fee, else a part; defaults to `item`. Explicit
+      `part`/`labor`/`fee` still honored.
+    - **Unresolved part SKUs still import** — the component is kept linked by
+      SKU snapshot with `partId = null` (the data model already allowed this),
+      so a package can reference a part not yet loaded into inventory. Was
+      previously a hard error.
+    - **A bad row is dropped and reported, not the whole package** — reversing
+      the old "any errored row skips the bundle" behavior. A package is only
+      skipped if it has no name or zero usable components.
+    - **Structural rows** (blank lines, section dividers like
+      `SEATING & PRISONER AREA`) are dropped silently; unparseable numbers
+      coerce with a warning. Defaults/coercions/dropped rows surface as
+      per-package **warnings** in the preview.
 
 ### CSV columns (package import)
 
-`package_name` (req), `component_type` (req: `part`/`labor`/`fee`),
-`package_category`, `package_description`, `sku` (req for `part`), `label`
-(line description; part rows default to `SKU — name`), `quantity`,
-`unit_price` (blank part price defaults to the part's inventory price),
-`hours`, `rate`, `amount`.
+Only `package_name` (or `template_name`/`package`/`name`) is required.
+Optional: `component_type` (`part`/`labor`/`fee`, inferred if absent),
+`package_category`, `package_description`, `sku`/`part_number`,
+`label`/`part_description` (line description; part rows default to
+`SKU — name`), `quantity`/`qty`, `unit_price`/`sell_price` (blank part price
+defaults to the part's inventory price), `hours`, `rate`, `amount`.
 
 ### Schema additions (Packages) — run in Neon's SQL Editor
 
