@@ -13,7 +13,7 @@
 // docs/sql/accounting_phase1.sql. We resolve them by code at runtime so the
 // module keeps working even if the accounts get different UUIDs per environment.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   glAccounts,
@@ -21,6 +21,8 @@ import {
   receipts,
   quotes,
   customers,
+  parts,
+  type QuoteLineItem,
 } from "@/db/schema";
 import { dollarsToCents, postJournalEntryTx, LedgerError, reverseJournalEntry } from "@/lib/accounting";
 
@@ -153,6 +155,25 @@ export async function issueInvoiceFromQuote(input: IssueInvoiceInput) {
         createdBy: input.createdBy ?? null,
       })
       .returning();
+
+    // Snapshot each line's part avg_cost at sale time (Phase 2), so the internal
+    // margin view reflects cost when invoiced, not today's moving average.
+    const items = (quote.lineItems as QuoteLineItem[] | null) ?? [];
+    const partIds = Array.from(new Set(items.map((i) => i.partId).filter((x): x is string => !!x)));
+    if (partIds.length) {
+      const rows = await tx
+        .select({ id: parts.id, avgCost: parts.avgCost, cost: parts.cost })
+        .from(parts)
+        .where(inArray(parts.id, partIds));
+      const avgById = new Map(
+        rows.map((r) => [r.id, r.avgCost != null ? Number(r.avgCost) : r.cost != null ? Number(r.cost) : undefined]),
+      );
+      const snapped = items.map((i) => {
+        const avg = i.partId ? avgById.get(i.partId) : undefined;
+        return avg != null ? { ...i, avgCostSnap: avg } : i;
+      });
+      await tx.update(quotes).set({ lineItems: snapped as never, updatedAt: new Date() }).where(eq(quotes.id, quote.id));
+    }
 
     return invoice;
   });

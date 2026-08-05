@@ -132,7 +132,7 @@ export function PartAddForm({
             className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
           />
         </FormField>
-        <FormField label="Internal cost" hint="$">
+        <FormField label="Average cost" hint="$ · opening value; auto-updated on receipt">
           <input
             name="cost"
             type="number"

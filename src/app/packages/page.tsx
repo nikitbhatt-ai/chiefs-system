@@ -134,6 +134,13 @@ export default async function PackagesPage({
         <a href="/packages/import" className="text-zinc-300 hover:text-white px-3 py-1 border border-white/10 rounded">
           Import CSV
         </a>
+        <a
+          href="/packages/import-template"
+          className="text-amber-400 hover:text-amber-300 px-3 py-1 border border-amber-500/30 rounded"
+          title="Vendor template sheet — loads à la carte costs and, if the sheet carries a package price, an allocated vendor promo"
+        >
+          Import vendor template
+        </a>
       </form>
 
       {tag ? (

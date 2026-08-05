@@ -3,6 +3,7 @@ import { eq, desc, asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { parts, partReceipts, vendors, purchaseOrders } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { reservedForPart } from "@/lib/reservations";
 
 function fmt(v: number | string | null | undefined) {
   if (v == null) return "—";
@@ -19,6 +20,10 @@ export default async function PartDetailPage({
   const { id } = await params;
   const [p] = await db.select().from(parts).where(eq(parts.id, id));
   if (!p) notFound();
+
+  // Available-to-pull = on-hand − active reservations (Phase 5).
+  const reserved = await reservedForPart(id);
+  const available = p.quantityOnHand - reserved;
 
   // Active FIFO layers: any receipt with quantityRemaining > 0, oldest first.
   const allReceipts = await db
@@ -93,12 +98,23 @@ export default async function PartDetailPage({
     <AppShell title={`${p.sku}`} subtitle={p.name}>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Stat label="On hand" value={p.quantityOnHand.toString()} />
-        <Stat label="On order" value={p.quantityOnOrder.toString()} />
         <Stat
-          label="Stored cost"
-          value={p.cost ? fmt(p.cost) : "—"}
-          hint="From part record"
+          label="Reserved"
+          value={reserved.toString()}
+          hint="Claimed by committed builds"
         />
+        <Stat
+          label="Available"
+          value={available.toString()}
+          hint="On hand − reserved (what pulls draw from)"
+          highlight
+        />
+        <Stat label="On order" value={p.quantityOnOrder.toString()} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Stat label="Average cost" value={p.avgCost ? fmt(p.avgCost) : p.cost ? fmt(p.cost) : "—"} hint="Weighted average" />
+        <Stat label="Stored cost" value={p.cost ? fmt(p.cost) : "—"} hint="parts.cost (= avg, 2dp)" />
         <Stat label="Price" value={p.price ? fmt(p.price) : "—"} />
       </div>
 
