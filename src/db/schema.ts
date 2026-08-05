@@ -493,7 +493,30 @@ export const purchaseOrders = pgTable("purchase_orders", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export type POLineItem = { partId?: string; description: string; quantity: number; quantityReceived: number; unitCost: number; };
+// Purchase-order line. Stored in purchase_orders.line_items (jsonb). Phase 4
+// adds: a stable `id` (so receiving keys on identity, not array position, and
+// can build an idempotent receipt key), `sku`, and the package-buy fields.
+// `unitCost` is the ALLOCATED cost for a package line and the actual price paid
+// for an individual line — always a 2-decimal value (money math goes through
+// dollarsToCents, which rounds, so the JSON float never drifts).
+export type POLineItem = {
+  id?: string;
+  partId?: string;
+  sku?: string;
+  description: string;
+  quantity: number;
+  quantityReceived: number;
+  unitCost: number;
+  // Set = this line is part of a package buy; carries the promo whose engine
+  // produced unitCost. Null / absent = an individual (full-price) line.
+  sourcePromoId?: string | null;
+  // À la carte basis captured at PO time, for audit. Package lines only.
+  alacarteCostSnap?: number | null;
+  // Explicit provenance override for the cost layer written on receipt.
+  // Defaults to 'package' when sourcePromoId is set, else 'individual';
+  // Phase 6 sets 'backfill' on lines generated from a backfill requisition.
+  sourceKind?: "package" | "individual" | "backfill";
+};
 
 export const workOrders = pgTable("work_orders", {
   id: uuid("id").defaultRandom().primaryKey(),

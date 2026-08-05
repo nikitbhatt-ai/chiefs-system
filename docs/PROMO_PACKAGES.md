@@ -195,11 +195,19 @@ Answered by Nikit 2026-08-03:
    and the PO-pre-fill trap in §0.10. (Supersedes the earlier "last cost"
    reading.)
 
-Still open:
+Resolved:
 
-5. **PO lines: jsonb or a `purchase_order_line` table** — raised by the
-   audit, see §0.4. Not needed until Phase 4; recommendation is to promote
-   to a table. Proceeding on that assumption unless told otherwise.
+5. **PO lines: jsonb or a `purchase_order_line` table** — raised by the audit
+   (§0.4); recommendation had been to promote. **Resolved 2026-08-05 (Phase 4):
+   kept jsonb, extended the `POLineItem` shape.** The promotion is a multi-file,
+   high-risk refactor (PO editor, list/detail, receiving, PO PDF, AP bill
+   linkage) and every Phase 4 "Done when" is achievable without it: lines gained
+   a stable `id` (receiving now keys on identity, not array position, and builds
+   an idempotent `receipt_key`), plus `sku` / `source_promo_id` /
+   `alacarte_cost_snap` / `source_kind`. Money in the jsonb stays 2-decimal and
+   only ever moves through `dollarsToCents` (which rounds), so no float drift.
+   If a future phase needs relational PO-line queries, promotion can still
+   happen then — the shape already names the columns a table would use.
 
 ---
 
@@ -516,3 +524,41 @@ in exactly one place and is reachable only with a promo.
 Whelen package on `/vendor-promos` once the full 17-line à la carte sheet is
 loaded on `/vendor-pricing` — the engine will tie it to $6,840 exactly and show
 the ~$2,590 saving.
+
+---
+
+## Phase 4 — DELIVERED
+
+POs apply the package; receiving writes layers. Allocation runs once at PO
+build time; individual POs never call it.
+
+- **PO line shape** (`POLineItem`, jsonb — decision #5 kept jsonb): added `id`
+  (stable line identity), `sku`, `source_promo_id`, `alacarte_cost_snap`, and an
+  optional `source_kind`. **No new SQL** — the `part_receipts` columns
+  (`source_kind` / `promo_id` / `receipt_key`) shipped in Phase 2 and the promo
+  FK in Phase 3; PO lines are jsonb, so nothing to migrate.
+- **Package PO** (`src/lib/promos.ts :: buildPackagePOLines`): runs the
+  allocation engine ONCE and stamps allocated `unit_cost`, `source_promo_id`,
+  and `alacarte_cost_snap` onto each line. Exposed at
+  `GET /api/vendor-promos/[id]/po-lines`. The PO editor's "Apply a promo
+  package" control fetches it, replaces the lines, and pins the vendor. Promo
+  lines render a `pkg` badge and their unit cost is read-only (edit the promo to
+  change it).
+- **Individual PO pre-fill fix** (the §0.10 trap): the PO editor now pre-fills a
+  picked part's unit cost from `vendor_part_price` (à la carte) for the PO's
+  vendor, falling back to `parts.cost` only when there's no price-list entry —
+  so a full-price order never inherits the promo-depressed average.
+- **Receiving** (`src/lib/inventory.ts :: receivePurchaseOrder`): each received
+  line writes a layer via `recordReceiptLayer` with `source_kind` = the line's
+  kind (`package` when `source_promo_id` is set, `backfill` when the line says
+  so — Phase 6, else `individual`) and `promo_id` = `source_promo_id`.
+  Idempotency is now key-based as well as lock-based: a stable
+  `receipt_key = {poId}:{lineId}:{cumulativeReceived}` is checked before insert
+  and enforced by the partial unique index. `saveDraft` assigns a line `id` to
+  any line missing one.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** nothing new to run — Phase 2 + Phase 3 SQL already cover the
+columns. Create a PO, click **Apply a promo package**, save, and receive: 17
+layers land at their allocated costs; an individual PO for the same SKUs lands
+at à la carte, both under one SKU / one on-hand.

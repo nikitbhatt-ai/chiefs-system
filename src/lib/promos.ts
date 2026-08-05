@@ -8,9 +8,10 @@
 // Allocation itself lives ONLY in promoAllocation.ts and is reachable only with
 // a vendor_promo — never from an individual PO line.
 
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { vendorPromo, vendorPromoLine, vendors, parts } from "@/db/schema";
+import { vendorPromo, vendorPromoLine, vendors, parts, type POLineItem } from "@/db/schema";
 import { currentAlacarteCost } from "@/lib/vendorPricing";
 import { allocatePromo, PromoAllocationError, type PromoAllocationResult } from "@/lib/promoAllocation";
 
@@ -136,6 +137,44 @@ export async function createPromo(input: CreatePromoInput) {
     );
     return promo;
   });
+}
+
+/**
+ * Build the PO lines for a package buy — runs the allocation engine ONCE and
+ * stamps the allocated unit cost, source_promo_id, and à la carte snapshot onto
+ * each line. This is the single place a promo becomes PO lines; individual PO
+ * lines never pass through here. Throws if the promo is missing/retired or the
+ * allocation is invalid.
+ */
+export async function buildPackagePOLines(promoId: string): Promise<{ vendorId: string; lines: POLineItem[] }> {
+  const pwl = await getPromoWithLines(promoId);
+  if (!pwl) throw new Error("Promo not found.");
+  if (pwl.promo.status !== "active") throw new Error("This promo is retired — reactivate it before ordering.");
+
+  const alloc = allocatePromo(allocationInputFor(pwl));
+
+  const skus = Array.from(new Set(pwl.lines.map((l) => l.sku)));
+  const partRows = skus.length
+    ? await db.select({ id: parts.id, sku: parts.sku, name: parts.name }).from(parts).where(inArray(parts.sku, skus))
+    : [];
+  const bySku = new Map(partRows.map((p) => [p.sku, p]));
+
+  const lines: POLineItem[] = alloc.lines.map((al) => {
+    const p = bySku.get(al.sku);
+    return {
+      id: randomUUID(),
+      partId: p?.id,
+      sku: al.sku,
+      description: p ? `${al.sku} — ${p.name}` : al.sku,
+      quantity: al.quantity,
+      quantityReceived: 0,
+      unitCost: al.allocatedUnitCost,
+      sourcePromoId: promoId,
+      alacarteCostSnap: al.alacarteCostSnap,
+      sourceKind: "package",
+    };
+  });
+  return { vendorId: pwl.promo.vendorId, lines };
 }
 
 /** Retire / reactivate a promo. Retired promos can't be picked on a new PO. */

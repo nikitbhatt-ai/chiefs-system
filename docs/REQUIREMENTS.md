@@ -2328,10 +2328,11 @@ Phases (one at a time, approval between each):
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose
       allocated unit cost exceeds its à la carte snapshot.
-- [ ] **Phase 4 — POs apply the package; receiving writes layers.**
+- [x] **Phase 4 — POs apply the package; receiving writes layers.**
       Allocation runs once at PO creation (Whelen ships partial, so a
       partial receipt needs a cost already on the line). Individual POs
-      never call it.
+      never call it. PO lines stayed jsonb (extended, not promoted to a
+      table — see PROMO_PACKAGES.md decision #5).
 - [ ] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
       fire when a work order enters `confirmed` (customer PO in hand, build
       committed to the shop) — one `reserveForWorkOrder` called from

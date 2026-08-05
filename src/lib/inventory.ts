@@ -243,21 +243,38 @@ export async function receivePurchaseOrder(
       const receiveNow = receiveByIndex.get(i) ?? 0;
       const remaining = (l.quantity || 0) - (l.quantityReceived || 0);
       const qty = Math.max(0, Math.min(receiveNow, remaining));
-      if (qty > 0 && l.partId) {
-        anyReceivedThisRound = true;
-        receivedCents += qty * dollarsToCents(l.unitCost);
-        // Layer + moving average + parts.cost + cost history, in one place.
-        await recordReceiptLayer(tx, {
-          partId: l.partId,
-          quantityReceived: qty,
-          unitCost: l.unitCost,
-          sourceKind: "individual",
-          purchaseOrderId: po.id,
-          vendorId: po.vendorId ?? null,
-          costHistorySource: po.poNumber ?? "PO",
-        });
-      }
       const newReceived = (l.quantityReceived || 0) + qty;
+      if (qty > 0 && l.partId) {
+        // Idempotency: a stable per-line, per-cumulative-quantity key. A replayed
+        // receipt computes the same key and is skipped (the partial unique index
+        // on part_receipts.receipt_key is the DB backstop).
+        const lineId = l.id ?? `idx${i}`;
+        const receiptKey = `${po.id}:${lineId}:${newReceived}`;
+        const [dupe] = await tx
+          .select({ id: partReceipts.id })
+          .from(partReceipts)
+          .where(eq(partReceipts.receiptKey, receiptKey))
+          .limit(1);
+        if (!dupe) {
+          anyReceivedThisRound = true;
+          receivedCents += qty * dollarsToCents(l.unitCost);
+          // Package lines land as `package` layers carrying their promo id (for
+          // Phase 7); backfill lines as `backfill`; everything else individual.
+          const sourceKind = l.sourceKind ?? (l.sourcePromoId ? "package" : "individual");
+          // Layer + moving average + parts.cost + cost history, in one place.
+          await recordReceiptLayer(tx, {
+            partId: l.partId,
+            quantityReceived: qty,
+            unitCost: l.unitCost,
+            sourceKind,
+            promoId: l.sourcePromoId ?? null,
+            purchaseOrderId: po.id,
+            vendorId: po.vendorId ?? null,
+            receiptKey,
+            costHistorySource: po.poNumber ?? "PO",
+          });
+        }
+      }
       if (newReceived < (l.quantity || 0)) allFullyReceived = false;
       updatedLines.push({ ...l, quantityReceived: newReceived });
     }
