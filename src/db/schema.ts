@@ -242,7 +242,17 @@ export const quotes = pgTable("quotes", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export type QuoteLineItem = { description: string; quantity: number; unitPrice: number; total: number; partId?: string; };
+export type QuoteLineItem = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  partId?: string;
+  // Weighted-average cost snapshotted at invoice conversion (Phase 2), so the
+  // internal margin view reflects cost at the time of sale rather than today's
+  // moving average. Absent on quotes not yet invoiced.
+  avgCostSnap?: number;
+};
 
 export const parts = pgTable("parts", {
   id: uuid("id").defaultRandom().primaryKey(),

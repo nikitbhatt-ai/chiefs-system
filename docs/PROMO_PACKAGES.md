@@ -403,3 +403,70 @@ is walked back out of `confirmed`.
 
 **To activate:** run `docs/sql/promo_phase1.sql` in Neon, then load the Whelen
 F-150 sheet through `/vendor-pricing` (or extend the seed VALUES and re-run).
+
+---
+
+## Phase 2 — DELIVERED
+
+Cost layers + weighted-average/FIFO costing spine. Weighted average is the
+primary work-order costing basis (decision #1); FIFO stays available as a second
+valuation. Layers remain the quantity + provenance subledger under both methods
+so Phase 7 can still see package vs full-price cost.
+
+- **Schema** (`src/db/schema.ts`):
+  - `parts.avg_cost numeric(12,4)` — the authoritative moving average.
+  - `part_receipts` gains `source_kind` (`inventory_source_kind` enum:
+    package/individual/backfill/opening, default `individual`), `promo_id`
+    (bare uuid; FK to `vendor_promo` added in Phase 3), and `receipt_key`
+    (partial unique index, nulls exempt — the key-based idempotency the audit
+    asked for; wired up in Phase 4).
+  - `inventory_issue` — per-layer-slice consumption subledger
+    `(part_id, work_order_id, layer_id, qty, unit_cost, issued_at)`.
+  - `costing_policy` — single-row policy `(method, changed_by, changed_at)`,
+    default `weighted_average`.
+- **SQL:** `docs/sql/promo_phase2.sql` — enums, column adds, `inventory_issue`,
+  `costing_policy` seed (all idempotent), plus an **optional opening-balance
+  backfill**: seeds one `opening` layer per part for `quantity_on_hand −
+  Σ layers` at `parts.cost`, dated `2000-01-01` so FIFO drains it first, then
+  seeds `avg_cost` from the resulting layers. This closes the stored-on-hand ↔
+  layer-sum drift the Phase 0 audit flagged (§0.3). Review before running:
+  NULL-cost parts get a $0 opening layer.
+- **Costing library** (`src/lib/costing.ts`):
+  - `getCostingMethod` / `getCostingMethodTx` / `setCostingMethod` (policy).
+  - `recordReceiptLayer(tx, …)` — inserts the layer, rolls the moving average
+    (`new_avg = (on_hand·old_avg + qty·unit_cost)/(on_hand+qty)`), sets
+    `parts.cost = ROUND(avg_cost, 2)`, and writes cost history. One place, so
+    Phase 4 package/backfill receiving reuses it.
+  - `drainLayersTx` / `reverseIssuesTx` — oldest-first drain writing
+    `inventory_issue` rows, and its exact inverse.
+  - `chargeCents(method, …)` — the job charge: `qty × avg_cost` under weighted
+    average, summed layer cost under FIFO (falls back to FIFO if avg unknown).
+  - `issueStock({partId|sku, qty, workOrderId?})` — the general
+    `issue(sku, qty, workOrderId?)` the brief asks for. STRICT: a shortfall
+    throws and rolls back. Phases 5/6 call it for reserved/override pulls.
+- **Wiring** (`src/lib/inventory.ts`): `receivePurchaseOrder` now rolls the
+  average via `recordReceiptLayer` (ledger still values receipts at actual PO
+  cost); `consumeWorkOrderParts` / `restoreWorkOrderParts` write/reverse
+  `inventory_issue` rows, decrement on-hand by what actually left the layers,
+  and charge WIP at the active method. Restore has a legacy fallback (quote
+  rollup) for work orders consumed before Phase 2 that carry no issue rows.
+- **Valuation** (`src/lib/inventoryValuation.ts`): method-aware. FIFO =
+  Σ remaining × layer cost; weighted = Σ on_hand × avg_cost. The GL ties to the
+  active method; the other shows as a comparison. `/accounting/inventory`
+  surfaces both, a per-part FIFO-vs-avg table, and an auditable method switch.
+- **`parts.cost` relabel:** the part add/edit forms now label the field
+  "Average cost" (auto-updated on receipt), still editable for opening values.
+- **Invoice snapshot** (`src/lib/ar.ts`): `issueInvoiceFromQuote` stamps each
+  line's `avg_cost` onto `quotes.line_items` as `avgCostSnap`, so a later
+  internal margin view reads cost at sale, not today's average. The
+  customer-facing PDF is untouched (carries no cost — these go to gov agencies).
+- **Verification:** `tsc --noEmit` clean across the project.
+
+**To activate:** run `docs/sql/promo_phase2.sql` in Neon. The opening-balance
+section is optional but recommended — without it, parts loaded via CSV keep
+`on_hand > Σ layers` until their first real receipt.
+
+**Deferred to a later phase (noted, not built):** the full internal margin
+*view* (on-screen invoice cost breakdown + internal-only PDF variant) that
+consumes `avgCostSnap` — §0.10. Phase 2 writes the snapshot data; rendering it
+is a small follow-up that doesn't block Phases 3–7.

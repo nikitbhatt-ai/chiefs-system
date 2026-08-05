@@ -2309,7 +2309,7 @@ Phases (one at a time, approval between each):
       SQL seeds the two à la carte costs the brief states (XI3JC 112.00,
       TCRWX6 1282.80); the rest of the Whelen sheet is loaded via the screen —
       not fabricated, so Phase 3's reconciliation stays honest.
-- [ ] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
+- [x] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
       `part_receipts` with `source_kind`/`promo_id`, add `inventory_issue`
       rows, a general `issue(sku, qty, workOrderId?)`, and opening-balance
       layers for stock that predates the layer table. Add `parts.avg_cost`

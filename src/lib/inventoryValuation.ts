@@ -1,29 +1,51 @@
-// Inventory valuation + reconciliation — Phase 4.
+// Inventory valuation + reconciliation — Phase 4, made method-aware in Phase 2.
 //
-// Rule #6: the inventory subledger must always reconcile to the Inventory
-// ledger account. The subledger here is the FIFO layer table (part_receipts):
-// on-hand value = Σ quantity_remaining × unit_cost. The ledger side is the
-// posted balance of GL account 1200 (Inventory). This module computes both and
-// offers a one-click adjustment that books the difference to equity so the two
-// tie — used once to seed the opening balance (inventory that existed before
-// accounting went live) and thereafter to catch any drift.
+// Rule #6: the inventory subledger must always reconcile to the Inventory GL
+// account (1200). There are now two valuations of the same stock:
+//   • FIFO      = Σ part_receipts.quantity_remaining × layer unit_cost
+//   • Weighted  = Σ parts.quantity_on_hand × parts.avg_cost
+// The GL ties to whichever the active costing_policy names (weighted_average by
+// default); the other is computed alongside as the comparison view. The two
+// agree whenever a SKU fully turns over (both are zero at on-hand zero) — they
+// differ only while stock is on the shelf, and the difference is timing, not a
+// permanent gap.
+//
+// The one-click adjustment books any subledger↔ledger difference to equity —
+// used once to seed the opening balance and thereafter to catch drift.
 
 import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { parts, partReceipts, glAccounts, journalEntries, journalLines } from "@/db/schema";
 import { postJournalEntry, LedgerError } from "@/lib/accounting";
+import { getCostingMethod, type CostingMethod } from "@/lib/costing";
 
 const INVENTORY_CODE = "1200";
 const EQUITY_CODE = "3000"; // Owner's Equity — the offset for opening balance / adjustments
 
-/** FIFO on-hand value across all parts, in integer cents. */
-export async function inventorySubledgerCents(): Promise<number> {
+/** FIFO on-hand value across all parts (Σ remaining × layer cost), in integer cents. */
+export async function inventorySubledgerFifoCents(): Promise<number> {
   const [row] = await db
     .select({
       cents: sql<number>`COALESCE(SUM(${partReceipts.quantityRemaining} * ROUND(${partReceipts.unitCost} * 100)), 0)`.mapWith(Number),
     })
     .from(partReceipts);
   return row?.cents ?? 0;
+}
+
+/** Weighted-average on-hand value (Σ on_hand × avg_cost), in integer cents. */
+export async function inventorySubledgerAvgCents(): Promise<number> {
+  const [row] = await db
+    .select({
+      cents: sql<number>`COALESCE(SUM(${parts.quantityOnHand} * ROUND(COALESCE(${parts.avgCost}, ${parts.cost}, 0) * 100)), 0)`.mapWith(Number),
+    })
+    .from(parts);
+  return row?.cents ?? 0;
+}
+
+/** Subledger value under the ACTIVE costing method, in integer cents. */
+export async function inventorySubledgerCents(): Promise<number> {
+  const method = await getCostingMethod();
+  return method === "fifo" ? inventorySubledgerFifoCents() : inventorySubledgerAvgCents();
 }
 
 /** Posted balance of the Inventory GL account (debits − credits), in cents. */
@@ -39,7 +61,7 @@ export async function inventoryGlBalanceCents(): Promise<number> {
   return row?.cents ?? 0;
 }
 
-/** Per-part on-hand valuation (only parts with remaining FIFO layers). */
+/** Per-part on-hand valuation under both methods (only parts with stock or layers). */
 export async function inventoryValuationByPart() {
   return db
     .select({
@@ -47,37 +69,45 @@ export async function inventoryValuationByPart() {
       sku: parts.sku,
       name: parts.name,
       quantityOnHand: parts.quantityOnHand,
+      avgCost: parts.avgCost,
       layerQty: sql<number>`COALESCE(SUM(${partReceipts.quantityRemaining}), 0)`.mapWith(Number),
-      valueCents: sql<number>`COALESCE(SUM(${partReceipts.quantityRemaining} * ROUND(${partReceipts.unitCost} * 100)), 0)`.mapWith(Number),
+      fifoValueCents: sql<number>`COALESCE(SUM(${partReceipts.quantityRemaining} * ROUND(${partReceipts.unitCost} * 100)), 0)`.mapWith(Number),
+      avgValueCents: sql<number>`${parts.quantityOnHand} * ROUND(COALESCE(${parts.avgCost}, ${parts.cost}, 0) * 100)`.mapWith(Number),
     })
     .from(parts)
     .leftJoin(partReceipts, eq(partReceipts.partId, parts.id))
     .groupBy(parts.id)
-    .having(sql`COALESCE(SUM(${partReceipts.quantityRemaining}), 0) > 0`)
+    .having(sql`COALESCE(SUM(${partReceipts.quantityRemaining}), 0) > 0 OR ${parts.quantityOnHand} > 0`)
     .orderBy(parts.sku);
 }
 
 export type InventoryReconciliation = {
-  subledgerCents: number;
+  method: CostingMethod;
+  subledgerCents: number; // active method
+  fifoCents: number;
+  avgCents: number;
   glBalanceCents: number;
-  differenceCents: number; // subledger − ledger; >0 means ledger needs to catch up
+  differenceCents: number; // active subledger − ledger; >0 means ledger needs to catch up
   ties: boolean;
 };
 
 export async function inventoryReconciliation(): Promise<InventoryReconciliation> {
-  const [subledgerCents, glBalanceCents] = await Promise.all([
-    inventorySubledgerCents(),
+  const [method, fifoCents, avgCents, glBalanceCents] = await Promise.all([
+    getCostingMethod(),
+    inventorySubledgerFifoCents(),
+    inventorySubledgerAvgCents(),
     inventoryGlBalanceCents(),
   ]);
+  const subledgerCents = method === "fifo" ? fifoCents : avgCents;
   const differenceCents = subledgerCents - glBalanceCents;
-  return { subledgerCents, glBalanceCents, differenceCents, ties: differenceCents === 0 };
+  return { method, subledgerCents, fifoCents, avgCents, glBalanceCents, differenceCents, ties: differenceCents === 0 };
 }
 
 /**
  * Book the current subledger↔ledger difference to Owner's Equity so the
- * Inventory GL account matches the FIFO valuation. Idempotent in effect: once
- * they tie the difference is zero and this no-ops. Offsets to equity because the
- * primary use is seeding the opening inventory balance.
+ * Inventory GL account matches the active-method valuation. Idempotent in
+ * effect: once they tie the difference is zero and this no-ops. Offsets to
+ * equity because the primary use is seeding the opening inventory balance.
  */
 export async function postInventoryAdjustment(createdBy?: string | null) {
   const { differenceCents } = await inventoryReconciliation();
