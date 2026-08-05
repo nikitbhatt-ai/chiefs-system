@@ -2519,6 +2519,69 @@ dark block would fix it if wanted.
 No schema change. Theme choice is per-browser (`localStorage`), not per-user
 in the database — so it does not follow someone to another machine.
 
+## Vendor package-template import (user requirement, 2026-08-05)
+
+**Requirement (user, this session):** import a vendor package template
+sheet (e.g. `PIU Whelen Lightbar Regional Promo`) in one pass. Rules the
+user stated:
+
+- **One sheet = one sellable package.** Every part line belongs to it —
+  lighting, siren, brackets, all sections. Sections are groupings, not
+  separate packages.
+- **The package price covers ALL parts on the sheet.** In the sample, the
+  `Lightbar Regional Promo · $7,200` header row (a price with no part
+  number) is the cost of the whole basket, allocated across every part.
+- **Not every package has promo pricing** — a sheet with no package-price
+  row imports at plain à la carte, no promo. Both cases must work.
+- **Promo pricing varies by deal** (regional heavily discounted, national
+  and bulk different, and they don't take every promo), so the price is
+  always read from the sheet — never computed or assumed.
+- **Ignore the Notes column** entirely (it lists Whelen promo codes that
+  aren't all used).
+- Each part's allocated cost is the **net of its own à la carte cost** —
+  parts do not share a price.
+
+### Implementation
+
+- [x] `src/lib/packageTemplateCsv.ts` — pure parser. Alias-matched headers
+      (`Template Name`, `Section`, `Part Number`, `Part Description`, `Qty`,
+      `Unit Cost`, `Sell Price`, `Install Hrs`); `Line #`, `Discount %`,
+      `Extended Sell`, `Notes` ignored. A priced row with **no part number**
+      is the package price (or freight, if the label says freight/shipping);
+      it is never a component line. Section name infers labor/fee vs item.
+      Blank Template Name / Section cells inherit the row above. Structural
+      rows drop silently.
+- [x] `src/lib/packageTemplateImport.ts` — preview/commit importer. Creates:
+      à la carte `vendor_part_price` rows from each part's Unit Cost (via the
+      append-only `setCurrentPrice`), ONE `vendor_promo` + lines allocated
+      across all parts when the sheet is priced, and the sellable `packages`
+      row (items with Sell Price + labor + fees). Missing SKUs are created
+      with the sheet's cost/price as opening values. Packages upsert by name.
+      **Duplicate SKUs on a sheet are merged for the promo** (summed qty —
+      e.g. XI3JC 4 roof + 2 grille = 6) while the sellable package keeps the
+      lines separate as distinct placements.
+- [x] `POST /api/package-templates/import` `{ csv, vendorId, commit? }`.
+- [x] `/packages/import-template` — vendor picker (defaults to a
+      Whelen-matching vendor), file/paste, **dry-run preview → confirm**,
+      per-template result showing items / new parts / à la carte set /
+      promo saving. Linked from `/packages` and the Operations nav.
+- [x] **Report hardening:** `promoReport.ts` looked up the à la carte basis
+      with a join on `(promo_id, sku)`, which would multiply receipt rows
+      when a promo carries the same SKU twice. Now a correlated subquery, so
+      duplicate promo lines can't inflate units or cost.
+
+**Verified against the user's real sheet:** 19 part lines → 18 merged promo
+lines; basis $11,324.70 → package $7,200.00 = $4,124.70 saved; allocation
+ties to $7,200 exactly; every allocated cost ≤ its à la carte; 18 distinct
+allocated unit costs (no two parts share a price).
+
+### Deferred
+
+- Labor `rate` and fee `amount` import as 0 when the sheet leaves those
+  columns blank (the sample does) — filled in on the package editor.
+- Multi-sheet `.xlsx` upload (today: one CSV sheet per import; export each
+  tab, or paste it).
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

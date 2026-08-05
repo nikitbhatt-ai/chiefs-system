@@ -67,6 +67,20 @@ export async function promoSavingsReport(range: { from: Date; to: Date }): Promi
   const inPeriod = and(gte(partReceipts.receivedAt, range.from), lt(partReceipts.receivedAt, range.to));
 
   // Package layers, with à la carte basis joined from the promo line.
+  //
+  // The basis is looked up via a correlated subquery, NOT a join: one promo can
+  // legitimately carry the same SKU on more than one line (a sheet listing
+  // XI3JC as 4 roof + 2 grille), and joining would multiply every receipt row
+  // by the number of matching promo lines, inflating units and cost. MAX() over
+  // the matching lines picks the single à la carte cost for that SKU (all lines
+  // for a SKU share it — the importer warns if a sheet disagrees with itself).
+  const alacarteSnapCents = sql<number>`ROUND(COALESCE((
+    SELECT MAX(${vendorPromoLine.alacarteCostSnap})
+    FROM ${vendorPromoLine}
+    WHERE ${vendorPromoLine.promoId} = ${partReceipts.promoId}
+      AND ${vendorPromoLine.sku} = ${parts.sku}
+  ), ${partReceipts.unitCost}) * 100)`;
+
   const pkgRows = await db
     .select({
       partId: parts.id,
@@ -74,14 +88,10 @@ export async function promoSavingsReport(range: { from: Date; to: Date }): Promi
       name: parts.name,
       units: sql<number>`COALESCE(SUM(${partReceipts.quantityReceived}), 0)`.mapWith(Number),
       costCents: sql<number>`COALESCE(SUM(${partReceipts.quantityReceived} * ROUND(${partReceipts.unitCost} * 100)), 0)`.mapWith(Number),
-      alacarteCents: sql<number>`COALESCE(SUM(${partReceipts.quantityReceived} * ROUND(COALESCE(${vendorPromoLine.alacarteCostSnap}, ${partReceipts.unitCost}) * 100)), 0)`.mapWith(Number),
+      alacarteCents: sql<number>`COALESCE(SUM(${partReceipts.quantityReceived} * ${alacarteSnapCents}), 0)`.mapWith(Number),
     })
     .from(partReceipts)
     .innerJoin(parts, eq(parts.id, partReceipts.partId))
-    .leftJoin(
-      vendorPromoLine,
-      and(eq(vendorPromoLine.promoId, partReceipts.promoId), eq(vendorPromoLine.sku, parts.sku)),
-    )
     .where(and(inPeriod, eq(partReceipts.sourceKind, "package")))
     .groupBy(parts.id);
 
