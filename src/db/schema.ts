@@ -256,6 +256,12 @@ export const parts = pgTable("parts", {
   quantityOnOrder: integer("quantity_on_order").notNull().default(0),
   reorderPoint: integer("reorder_point"),
   cost: numeric("cost", { precision: 12, scale: 2 }),
+  // Weighted-average cost — the authoritative costing basis for work orders
+  // (Phase 2). numeric(12,4): the average is a derived rate, not a posted
+  // amount, and 2dp would decay under repeated receipts. Maintained by the
+  // receive transaction as a moving average; `cost` above follows it at 2dp
+  // (= ROUND(avg_cost, 2)). Null until the part's first receipt / opening layer.
+  avgCost: numeric("avg_cost", { precision: 12, scale: 4 }),
   price: numeric("price", { precision: 12, scale: 2 }),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   manufacturerId: uuid("manufacturer_id").references(() => vendors.id),
@@ -267,17 +273,77 @@ export const parts = pgTable("parts", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("parts_sku_idx").on(t.sku)]);
 
+// Provenance of a cost layer / issue. `individual` = full-price single-SKU buy,
+// `package` = part of a vendor promo (Phase 3/4, carries promo_id), `backfill`
+// = a reorder-point or reserved-override replacement PO (Phase 6), `opening` =
+// an opening-balance layer seeded for stock that predates the layer table
+// (Phase 2). Phase 7's savings report keys off this to tell package cost from
+// full-price cost even under weighted-average, which smears the two together.
+export const inventorySourceKind = pgEnum("inventory_source_kind", ["package", "individual", "backfill", "opening"]);
+
+// Active costing method — an auditable accounting policy, not a per-call flag.
+// weighted_average is primary (the work-order costing basis); fifo stays
+// available as a second valuation. Switching applies forward only.
+export const costingMethod = pgEnum("costing_method", ["weighted_average", "fifo"]);
+
+// A cost layer. Each receipt (package, individual, backfill, or an opening
+// balance) creates one with its own unit_cost and provenance; on-hand is the
+// sum of remaining_qty across a part's layers. This IS the brief's
+// `inventory_cost_layer` — extended in place rather than duplicated.
 export const partReceipts = pgTable("part_receipts", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
   purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   vendorId: uuid("vendor_id").references(() => vendors.id),
+  // Provenance. Defaults to `individual` so pre-Phase-2 rows read correctly.
+  sourceKind: inventorySourceKind("source_kind").notNull().default("individual"),
+  // Set only for `package` layers, for Phase 7 reporting. FK to vendor_promo is
+  // added in Phase 3 (the table doesn't exist yet); kept a bare uuid here.
+  promoId: uuid("promo_id"),
   quantityReceived: integer("quantity_received").notNull(),
   quantityRemaining: integer("quantity_remaining").notNull(),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
+  // Idempotency key for a receipt event (Phase 4). Unique when set; null for
+  // opening-balance and legacy layers.
+  receiptKey: text("receipt_key"),
   receivedAt: timestamp("received_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("part_receipts_part_idx").on(t.partId), index("part_receipts_received_at_idx").on(t.receivedAt)]);
+}, (t) => [
+  index("part_receipts_part_idx").on(t.partId),
+  index("part_receipts_received_at_idx").on(t.receivedAt),
+  index("part_receipts_promo_idx").on(t.promoId),
+  uniqueIndex("part_receipts_receipt_key_uq").on(t.receiptKey).where(sql`${t.receiptKey} IS NOT NULL`),
+]);
+
+// One row per layer-slice consumed. `qty` units of `part_id` drawn from a
+// single `layer_id` at that layer's `unit_cost` (provenance). A single logical
+// issue of N units can span several layers → several rows. The cost CHARGED to
+// the job (the ledger) is method-dependent (avg vs FIFO) and lives in the
+// journal; these rows are the quantity+provenance subledger Phase 7 reads.
+export const inventoryIssue = pgTable("inventory_issue", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  layerId: uuid("layer_id").references(() => partReceipts.id, { onDelete: "set null" }),
+  qty: integer("qty").notNull(),
+  unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+}, (t) => [
+  index("inventory_issue_part_idx").on(t.partId),
+  index("inventory_issue_work_order_idx").on(t.workOrderId),
+  index("inventory_issue_layer_idx").on(t.layerId),
+]);
+
+// Single-row costing policy. The active method applies to every job costed
+// after it is set; it never rewrites posted entries. Read via
+// src/lib/costing.ts :: getCostingMethod (defaults to weighted_average if the
+// row is absent).
+export const costingPolicy = pgTable("costing_policy", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  method: costingMethod("method").notNull().default("weighted_average"),
+  changedBy: uuid("changed_by").references(() => users.id),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+});
 
 export const partCostHistory = pgTable("part_cost_history", {
   id: uuid("id").defaultRandom().primaryKey(),
