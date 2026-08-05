@@ -2341,7 +2341,7 @@ Phases (one at a time, approval between each):
 - [x] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
       Pulling reserved stock requires an override that logs who/why and
       raises its own replacement requisition.
-- [ ] **Phase 7 — Promo vs backfill savings report.** Did the package
+- [x] **Phase 7 — Promo vs backfill savings report.** Did the package
       discount survive the backfill spend? Must be built from the layer
       table's `source_kind` + per-layer `unit_cost`, **not** from job costing
       — under average costing the promo saving is smeared into the average

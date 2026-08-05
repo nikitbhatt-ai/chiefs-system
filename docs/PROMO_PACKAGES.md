@@ -631,3 +631,54 @@ Reorder points, reserved-stock override, and auto-backfill.
 - **Verification:** `tsc --noEmit` clean.
 
 **To activate:** run `docs/sql/promo_phase6.sql` in Neon.
+
+---
+
+## Phase 7 — DELIVERED
+
+Promo vs backfill savings report — the number that says whether the discount is
+real. Built from the LAYER table's `source_kind` + per-layer `unit_cost`, NOT
+from job costing (under weighted average the saving is smeared into the average
+and invisible there — §0.8).
+
+- **Library** (`src/lib/promoReport.ts`): `promoSavingsReport({ from, to })`.
+  Per SKU over the period: package units + allocated cost + à la carte basis
+  (joined from the promo line) → package saving; individual + backfill units +
+  actual cost; units consumed (from `inventory_issue`). Derived per SKU:
+  `backfillPremium` = extra paid per backfilled unit over the package unit cost,
+  `netSaving` = packageSaving − backfillPremium, and a `reconsider` flag when
+  backfill volume ≥ 50% of package volume.
+- **Screen** `/promo-savings`: date-range picker (defaults to the last 90 days),
+  a headline net-saving card ("Package discount captured − extra spent
+  backfilling"), summary tiles, and a per-SKU table with the reconsider flag.
+  Wired into Operations nav + breadcrumbs.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** no SQL — reads existing tables. Meaningful once package and
+backfill/individual receipts exist.
+
+---
+
+## Activation checklist (run in Neon, in order)
+
+All schema changes ship as hand-run SQL (never `drizzle-kit push`). Run these in
+Neon's SQL Editor in order; each is idempotent:
+
+1. `docs/sql/promo_phase1.sql` — vendor_part_price (+ seed the two known costs).
+2. `docs/sql/promo_phase2.sql` — cost-layer columns, inventory_issue,
+   costing_policy, **and the optional opening-balance backfill** (review the
+   NULL-cost note before running that section).
+3. `docs/sql/promo_phase3.sql` — vendor_promo / vendor_promo_line + the
+   part_receipts.promo_id FK.
+4. Phase 4 — **nothing to run** (PO lines are jsonb; columns already added).
+5. `docs/sql/promo_phase5.sql` — inventory_reservation.
+6. `docs/sql/promo_phase6.sql` — reorder_point, stock_override_log,
+   backfill_requisition.
+7. Phase 7 — **nothing to run.**
+
+Then: load the à la carte sheet on `/vendor-pricing`, define the F-150 promo on
+`/vendor-promos`, set reorder points on `/backfill`, and the rest flows through
+the PO editor, the workflow board, and the reports.
+
+Costing is **weighted-average by default**; FIFO is a second valuation toggled
+on `/accounting/inventory`.
