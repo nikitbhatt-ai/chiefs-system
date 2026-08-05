@@ -28,6 +28,7 @@ import {
 } from "@/db/schema";
 import { dollarsToCents } from "@/lib/accounting";
 import { postInventoryIssue } from "@/lib/inventoryLedger";
+import { availableForPart } from "@/lib/reservations";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 type SourceKind = (typeof inventorySourceKind.enumValues)[number];
@@ -265,6 +266,10 @@ export async function issueStock(opts: {
   workOrderId?: string | null;
   woNumber?: string | null;
   createdBy?: string | null;
+  // Phase 5/6: by default the pull is gated to available (on-hand − reserved by
+  // OTHER work orders). Pulling reserved stock requires allowReserved = true,
+  // which the Phase 6 override path sets after logging who/why.
+  allowReserved?: boolean;
 }): Promise<{ partId: string; taken: number; chargeCents: number }> {
   const qty = Math.max(0, Math.trunc(opts.qty));
   if (qty <= 0) throw new Error("Issue quantity must be greater than zero.");
@@ -290,6 +295,18 @@ export async function issueStock(opts: {
       avgCost = p?.avgCost ?? null;
     }
     if (!partId) throw new Error("issueStock needs a partId or sku.");
+
+    // Available-to-pull gate: a walk-in / non-owning pull can't touch stock
+    // reserved for other builds unless an override says so (Phase 6).
+    if (!opts.allowReserved) {
+      const avail = await availableForPart(partId, { excludeWorkOrderId: opts.workOrderId ?? null, tx });
+      if (qty > avail) {
+        throw new Error(
+          `Only ${Math.max(0, avail)} available to pull (the rest is reserved for other builds). ` +
+            `Pulling reserved stock requires an override.`,
+        );
+      }
+    }
 
     const method = await getCostingMethodTx(tx);
     const drain = await drainLayersTx(tx, { partId, qty, workOrderId: opts.workOrderId ?? null });

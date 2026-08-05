@@ -2333,7 +2333,7 @@ Phases (one at a time, approval between each):
       partial receipt needs a cost already on the line). Individual POs
       never call it. PO lines stayed jsonb (extended, not promoted to a
       table — see PROMO_PACKAGES.md decision #5).
-- [ ] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
+- [x] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
       fire when a work order enters `confirmed` (customer PO in hand, build
       committed to the shop) — one `reserveForWorkOrder` called from
       `maybePromoteWonDeal` and the `/workflow` board path. Every picking

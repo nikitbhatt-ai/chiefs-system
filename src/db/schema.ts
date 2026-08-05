@@ -354,6 +354,34 @@ export const costingPolicy = pgTable("costing_policy", {
   changedAt: timestamp("changed_at").notNull().defaultNow(),
 });
 
+// Reservations — Phase 5. A sold, committed build claims the parts it needs
+// against on-hand without moving anything physically. Available-to-pull =
+// on-hand − Σ active reservations; every picking/pull screen reads available,
+// never raw on-hand, so a walk-in job can't raid a sold build's parts.
+//
+// Lifecycle: created `active` when a work order enters `confirmed`; flipped to
+// `fulfilled` when its parts are issued (consumed) so on-hand and the claim
+// don't double-count; `released` when the build is walked back out of the
+// committed stages. Only `active` rows count toward reserved.
+export const reservationStatus = pgEnum("reservation_status", ["active", "fulfilled", "released"]);
+
+export const inventoryReservation = pgTable("inventory_reservation", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workOrderId: uuid("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
+  partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+  // Denormalized for reporting / available-by-sku; parts.sku is unique so this
+  // is 1:1 with part_id.
+  sku: text("sku"),
+  qtyReserved: integer("qty_reserved").notNull(),
+  status: reservationStatus("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("inventory_reservation_part_idx").on(t.partId),
+  index("inventory_reservation_work_order_idx").on(t.workOrderId),
+  index("inventory_reservation_status_idx").on(t.status),
+]);
+
 export const partCostHistory = pgTable("part_cost_history", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),

@@ -5,6 +5,11 @@ import { db } from "@/db";
 import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
+import {
+  reserveForWorkOrder,
+  fulfillReservationsForWorkOrder,
+  releaseReservationsForWorkOrder,
+} from "@/lib/reservations";
 import { qcComplete } from "@/lib/qc";
 
 export const dynamic = "force-dynamic";
@@ -127,14 +132,25 @@ export async function POST(
       await db.update(workOrders).set({ status: stage, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
     }
 
-    // Transactional, idempotent FIFO consumption (see src/lib/inventory.ts).
-    // Advancing to or past in_progress consumes the quote's parts exactly once;
-    // walking the build back before in_progress restores the drained layers.
+    // Transactional, idempotent consumption (see src/lib/inventory.ts) plus the
+    // reservation lifecycle (Phase 5):
+    //   - in_progress+ : consume the quote's parts once, then fulfill the WO's
+    //     reservation (the claim is realized; on-hand already dropped).
+    //   - confirmed / awaiting_parts / next_in_line : committed but not yet
+    //     consumed — restore any prior consumption and (re)reserve the parts.
+    //   - estimate : de-committed — restore and release the reservation.
     if (wo) {
+      const CONFIRMED_INDEX = STAGE_KEYS.indexOf("confirmed");
       if (targetIndex >= BUILD_START_INDEX) {
         await consumeWorkOrderParts(wo.id);
+        await fulfillReservationsForWorkOrder(wo.id);
       } else {
         await restoreWorkOrderParts(wo.id);
+        if (targetIndex >= CONFIRMED_INDEX) {
+          await reserveForWorkOrder(wo.id);
+        } else {
+          await releaseReservationsForWorkOrder(wo.id);
+        }
       }
     }
 

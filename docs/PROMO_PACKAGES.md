@@ -562,3 +562,35 @@ build time; individual POs never call it.
 columns. Create a PO, click **Apply a promo package**, save, and receive: 17
 layers land at their allocated costs; an individual PO for the same SKUs lands
 at à la carte, both under one SKU / one on-hand.
+
+---
+
+## Phase 5 — DELIVERED
+
+Reservations + available-to-pull. A sold, committed build claims its parts
+against on-hand without a second bin.
+
+- **Schema:** `inventory_reservation (work_order_id, part_id, sku, qty_reserved,
+  status active|fulfilled|released)` + `reservation_status` enum.
+  `docs/sql/promo_phase5.sql`.
+- **Library** (`src/lib/reservations.ts`): `reservedForPart` /
+  `availableForPart` (on-hand − Σ active reserved, with an optional
+  `excludeWorkOrderId` so a build can draw its own claim), `reservedByPart` (set
+  map for lists), and the lifecycle — `reserveForWorkOrder(Tx)` (idempotent +
+  reactivating, matches the WO's current quote BOM),
+  `fulfillReservationsForWorkOrder`, `releaseReservationsForWorkOrder`.
+- **Trigger** (decision §0.9 — the `confirmed` transition):
+  `reserveForWorkOrderTx` runs inside `maybePromoteWonDeal` (deal → Won), and
+  the single quote-workflow move path (`/api/quotes/[id]/workflow-stage`, used
+  by both the /workflow board and the /quotes strip) now drives the whole
+  lifecycle: reserve on confirmed/awaiting_parts/next_in_line, fulfill on
+  in_progress (right after consumption, so on-hand and the claim never
+  double-count), release on the walk-back to estimate.
+- **Available-to-pull gate:** `issueStock` (the general pull path) refuses to
+  draw more than available (on-hand − reserved by *other* builds) unless
+  `allowReserved` is set — the hook the Phase 6 override uses. The part detail
+  page (`/inventory/[id]`) now shows Reserved and Available alongside On hand.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** run `docs/sql/promo_phase5.sql` in Neon. Reservations then
+accrue automatically as deals/builds cross into confirmed.
