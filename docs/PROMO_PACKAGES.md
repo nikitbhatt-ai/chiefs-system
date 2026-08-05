@@ -470,3 +470,49 @@ section is optional but recommended — without it, parts loaded via CSV keep
 *view* (on-screen invoice cost breakdown + internal-only PDF variant) that
 consumes `avgCostSnap` — §0.10. Phase 2 writes the snapshot data; rendering it
 is a small follow-up that doesn't block Phases 3–7.
+
+---
+
+## Phase 3 — DELIVERED
+
+`vendor_promo` / `vendor_promo_line` + the allocation engine. Allocation lives
+in exactly one place and is reachable only with a promo.
+
+- **Schema** (`src/db/schema.ts`): `vendor_promo (vendor_id, name,
+  package_price, freight?, effective_from/to, status active|retired, notes)` and
+  `vendor_promo_line (promo_id, sku, quantity, alacarte_cost_snap)`. Phase 2's
+  `part_receipts.promo_id` now carries its FK to `vendor_promo`.
+- **SQL:** `docs/sql/promo_phase3.sql` — enum, both tables, and the
+  `part_receipts_promo_id_fk` constraint (all idempotent).
+- **Allocation engine** (`src/lib/promoAllocation.ts`) — PURE, deterministic,
+  no I/O/clock/randomness, integer-cents throughout:
+  1. `extended_basis = alacarte_cost_snap × qty`; `total_basis = Σ`.
+  2. freight folds into the package price first.
+  3. proportional split, then a **rounding plug** puts the residual cent(s) on
+     the single largest-basis line so allocated line totals sum to the package
+     price EXACTLY.
+  4. **sanity assertion:** every allocated unit cost ≤ its à la carte snapshot,
+     else it throws `PromoAllocationError` (a package dearer than its basket is
+     a data-entry mistake).
+- **Tests** (`src/lib/promoAllocation.test.ts`, run `npx tsx …`) — 7 cases
+  covering the tie, the rounding plug, freight, qty>1, the refusal, determinism,
+  and an F-150-shape check ($9,430 basis → $6,840 package, ties exactly, ~$2,590
+  saving). All green. (No framework in the repo; standalone under tsx.)
+- **DB layer** (`src/lib/promos.ts`): `createPromo` snapshots each line's à la
+  carte cost from `vendor_part_price` and runs the engine to VALIDATE before it
+  persists (an impossible promo is refused at save, not on a later PO);
+  `listPromos`, `getPromoWithLines`, `allocationForPromo`, `setPromoStatus`,
+  `deletePromo`.
+- **API:** `/api/vendor-promos` (GET list, POST create — 422 on allocation
+  failure) and `/[id]` (GET promo+lines+live allocation, PATCH status, DELETE).
+- **Admin screen** `/vendor-promos`: a client `PromoBuilder` (imports the pure
+  engine for a **live** preview — allocated unit/extended costs + saving vs à la
+  carte as you type, cost auto-filled from the price list) plus a table of
+  defined promos with basis/package/saving and retire/activate/delete. Wired
+  into the Operations nav + breadcrumbs.
+- **Verification:** `tsc --noEmit` clean; allocation tests pass.
+
+**To activate:** run `docs/sql/promo_phase3.sql` in Neon. Define the real F-150
+Whelen package on `/vendor-promos` once the full 17-line à la carte sheet is
+loaded on `/vendor-pricing` — the engine will tie it to $6,840 exactly and show
+the ~$2,590 saving.

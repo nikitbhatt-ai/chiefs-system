@@ -2324,7 +2324,7 @@ Phases (one at a time, approval between each):
       receipt, in the receive transaction, never at PO entry. On
       quote→invoice conversion, snapshot `avg_cost` onto the line items so the
       internal margin view reflects cost at sale, not today's average.
-- [ ] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
+- [x] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose
       allocated unit cost exceeds its à la carte snapshot.

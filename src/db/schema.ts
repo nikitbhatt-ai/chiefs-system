@@ -307,9 +307,8 @@ export const partReceipts = pgTable("part_receipts", {
   vendorId: uuid("vendor_id").references(() => vendors.id),
   // Provenance. Defaults to `individual` so pre-Phase-2 rows read correctly.
   sourceKind: inventorySourceKind("source_kind").notNull().default("individual"),
-  // Set only for `package` layers, for Phase 7 reporting. FK to vendor_promo is
-  // added in Phase 3 (the table doesn't exist yet); kept a bare uuid here.
-  promoId: uuid("promo_id"),
+  // Set only for `package` layers, for Phase 7 reporting. FK to vendor_promo.
+  promoId: uuid("promo_id").references((): AnyPgColumn => vendorPromo.id, { onDelete: "set null" }),
   quantityReceived: integer("quantity_received").notNull(),
   quantityRemaining: integer("quantity_remaining").notNull(),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
@@ -399,6 +398,51 @@ export const vendorPartPrice = pgTable("vendor_part_price", {
     .on(t.vendorId, t.sku)
     .where(sql`${t.effectiveTo} IS NULL`),
 ]);
+
+// Promo packages — Phase 3: vendor promos and the allocation engine's data.
+//
+// A vendor_promo is one price for a fixed basket of parts (e.g. Whelen's
+// "Inner Edge Regional Promo"). The single package price is spread across the
+// lines in proportion to each line's à la carte cost (src/lib/promoAllocation.ts)
+// so every part carries a fair share of the discount. Allocation is the ONLY
+// place that logic lives, and it runs for a package purchase only — never for an
+// individual PO line.
+//
+// Snapshot rule: each line snapshots its à la carte cost (alacarte_cost_snap)
+// from vendor_part_price at save time, so a later price-list edit never
+// retroactively changes an already-defined promo. The allocated cost itself is
+// computed by the engine and snapshotted onto the PO line at PO creation
+// (Phase 4), not stored here.
+export const vendorPromoStatus = pgEnum("vendor_promo_status", ["active", "retired"]);
+
+export const vendorPromo = pgTable("vendor_promo", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  packagePrice: numeric("package_price", { precision: 12, scale: 2 }).notNull(),
+  // Optional freight on the package. Folded into package_price before
+  // allocation so it spreads across the parts the same way.
+  freight: numeric("freight", { precision: 12, scale: 2 }),
+  effectiveFrom: date("effective_from").notNull().default(sql`CURRENT_DATE`),
+  effectiveTo: date("effective_to"),
+  status: vendorPromoStatus("status").notNull().default("active"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("vendor_promo_vendor_idx").on(t.vendorId),
+  index("vendor_promo_status_idx").on(t.status),
+]);
+
+export const vendorPromoLine = pgTable("vendor_promo_line", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  promoId: uuid("promo_id").notNull().references(() => vendorPromo.id, { onDelete: "cascade" }),
+  sku: text("sku").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  // Allocation basis, snapshotted from vendor_part_price at save time.
+  alacarteCostSnap: numeric("alacarte_cost_snap", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("vendor_promo_line_promo_idx").on(t.promoId)]);
 
 // Inventory packages (a.k.a. kits / canned services). A reusable bundle of
 // parts + labor + fees the sales team can drop onto a quote in one click.
