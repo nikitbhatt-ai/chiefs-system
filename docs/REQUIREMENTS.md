@@ -2338,7 +2338,7 @@ Phases (one at a time, approval between each):
       committed to the shop) — one `reserveForWorkOrder` called from
       `maybePromoteWonDeal` and the `/workflow` board path. Every picking
       screen reads available, never raw on-hand.
-- [ ] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
+- [x] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
       Pulling reserved stock requires an override that logs who/why and
       raises its own replacement requisition.
 - [ ] **Phase 7 — Promo vs backfill savings report.** Did the package

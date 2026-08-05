@@ -382,6 +382,59 @@ export const inventoryReservation = pgTable("inventory_reservation", {
   index("inventory_reservation_status_idx").on(t.status),
 ]);
 
+// Reorder points + backfill — Phase 6. Replenish before you're squeezed, and
+// make any borrow from reserved stock a logged, self-tracking act.
+export const backfillTrigger = pgEnum("backfill_trigger", ["reorder_point", "reserved_override"]);
+export const backfillStatus = pgEnum("backfill_status", ["open", "ordered", "received"]);
+
+// Per-part reorder thresholds. Distinct from the legacy parts.reorder_point
+// scalar: this pair drives the auto-backfill (raise a requisition for
+// reorder_to_qty − available when available hits min_qty).
+export const reorderPoint = pgTable("reorder_point", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  partId: uuid("part_id").notNull().unique().references(() => parts.id, { onDelete: "cascade" }),
+  sku: text("sku"),
+  minQty: integer("min_qty").notNull().default(0),
+  reorderToQty: integer("reorder_to_qty").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("reorder_point_part_idx").on(t.partId)]);
+
+// Audit of every deliberate pull from reserved stock. Pulling reserved stock is
+// impossible without one of these (who + why), and each raises its own backfill.
+export const stockOverrideLog = pgTable("stock_override_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  partId: uuid("part_id").references(() => parts.id, { onDelete: "set null" }),
+  sku: text("sku"),
+  qty: integer("qty").notNull(),
+  reason: text("reason").notNull(),
+  userId: uuid("user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("stock_override_log_part_idx").on(t.partId)]);
+
+// A request to replenish a SKU. Ordinary path: a reorder point fired. Override
+// path: someone pulled reserved stock and must replace it by the reserved
+// build's need_by date. Becomes an individual PO with source_kind = backfill on
+// receipt (Phase 4).
+export const backfillRequisition = pgTable("backfill_requisition", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  partId: uuid("part_id").references(() => parts.id, { onDelete: "set null" }),
+  sku: text("sku"),
+  qty: integer("qty").notNull(),
+  triggeredBy: backfillTrigger("triggered_by").notNull(),
+  sourceOverrideId: uuid("source_override_id").references(() => stockOverrideLog.id, { onDelete: "set null" }),
+  needBy: date("need_by"),
+  status: backfillStatus("status").notNull().default("open"),
+  // The PO raised to fulfil this requisition, once created.
+  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("backfill_requisition_part_idx").on(t.partId),
+  index("backfill_requisition_status_idx").on(t.status),
+]);
+
 export const partCostHistory = pgTable("part_cost_history", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),

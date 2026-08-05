@@ -594,3 +594,40 @@ against on-hand without a second bin.
 
 **To activate:** run `docs/sql/promo_phase5.sql` in Neon. Reservations then
 accrue automatically as deals/builds cross into confirmed.
+
+---
+
+## Phase 6 — DELIVERED
+
+Reorder points, reserved-stock override, and auto-backfill.
+
+- **Schema:** `reorder_point (part_id unique, min_qty, reorder_to_qty)`,
+  `stock_override_log (work_order_id, part_id, qty, reason, user_id)`,
+  `backfill_requisition (part_id, qty, triggered_by reorder_point|
+  reserved_override, source_override_id, need_by, status open|ordered|received,
+  purchase_order_id)` + the two enums. `docs/sql/promo_phase6.sql`.
+- **Library** (`src/lib/backfill.ts`):
+  - `setReorderPoint` / `listReorderPoints` (with live available).
+  - `maybeRaiseReorder(partId)` — raises an OPEN requisition for
+    `reorder_to_qty − available` when available ≤ min_qty, deduped to one open
+    reorder-point requisition per part. `checkReordersForWorkOrder` /
+    `scanAllReorderPoints` drive it.
+  - `overridePull(...)` — issues reserved stock via `issueStock({allowReserved})`
+    (the Phase 5 hook), writes a `stock_override_log` row, and raises a
+    `reserved_override` requisition with `need_by` = the soonest scheduled date
+    among the builds whose reservation was raided.
+  - `createPOFromRequisition` — turns an open requisition into an individual PO
+    whose single line carries `source_kind = 'backfill'` (so the received layer
+    is tagged backfill for Phase 7) and pre-fills unit cost from the à la carte
+    price list; links the PO and flips the requisition to `ordered`.
+- **Wiring:** the workflow-stage move path calls `checkReordersForWorkOrder`
+  after reserve/consume (available just dropped); `receivePurchaseOrder` flips a
+  linked requisition to `received` when its PO is fully received.
+- **Screen** `/backfill`: set reorder points, an override-pull form (part, qty,
+  reason), the requisition list with **Create PO** / **Mark received**, a
+  reorder-points table flagging at/below-min parts, and a **Scan reorder points
+  now** button. APIs: `POST /api/reorder-points`, `POST /api/backfill/override`.
+  Wired into Operations nav + breadcrumbs.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** run `docs/sql/promo_phase6.sql` in Neon.

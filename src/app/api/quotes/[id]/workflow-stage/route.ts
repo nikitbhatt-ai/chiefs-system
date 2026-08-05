@@ -10,6 +10,7 @@ import {
   fulfillReservationsForWorkOrder,
   releaseReservationsForWorkOrder,
 } from "@/lib/reservations";
+import { checkReordersForWorkOrder } from "@/lib/backfill";
 import { qcComplete } from "@/lib/qc";
 
 export const dynamic = "force-dynamic";
@@ -151,6 +152,13 @@ export async function POST(
         } else {
           await releaseReservationsForWorkOrder(wo.id);
         }
+      }
+      // Reserving or consuming dropped available — raise reorder-point
+      // backfills for any part that hit its threshold (best-effort).
+      try {
+        await checkReordersForWorkOrder(wo.id);
+      } catch (err) {
+        console.error("checkReordersForWorkOrder failed:", err);
       }
     }
 

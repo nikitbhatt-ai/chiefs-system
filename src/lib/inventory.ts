@@ -33,8 +33,10 @@ import {
   partReceipts,
   inventoryIssue,
   purchaseOrders,
+  backfillRequisition,
   type POLineItem,
 } from "@/db/schema";
+import { and } from "drizzle-orm";
 import { dollarsToCents } from "@/lib/accounting";
 import { postInventoryReceipt, postInventoryIssue, postInventoryRestore } from "@/lib/inventoryLedger";
 import {
@@ -297,6 +299,15 @@ export async function receivePurchaseOrder(
         updatedAt: new Date(),
       })
       .where(eq(purchaseOrders.id, purchaseOrderId));
+
+    // Close the loop on any backfill requisition this PO was raised to fulfil
+    // (Phase 6): once fully received, mark it received.
+    if (allFullyReceived) {
+      await tx
+        .update(backfillRequisition)
+        .set({ status: "received", updatedAt: new Date() })
+        .where(and(eq(backfillRequisition.purchaseOrderId, po.id), eq(backfillRequisition.status, "ordered")));
+    }
 
     return { ok: true, status: nextStatus, anyReceived: anyReceivedThisRound };
   });
