@@ -51,7 +51,7 @@ export default async function EditDealPage({ params }: { params: Promise<{ id: s
 
   return (
     <AppShell title="Edit deal" subtitle={d.id.slice(0, 8)}>
-      <form action={update} className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl">
+      <form action={update} className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl">
         <select name="customerId" defaultValue={d.customerId ?? ""} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
           <option value="">— Customer —</option>
           {customerRows.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}

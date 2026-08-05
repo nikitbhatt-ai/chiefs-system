@@ -66,7 +66,7 @@ export default async function StageMappingPage() {
 
   return (
     <AppShell title="Stage mapping" subtitle="CRM stage → Workflow stage routing">
-      <form action={save} className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3 max-w-3xl">
+      <form action={save} className="bg-surface border border-white/5 rounded-lg p-4 space-y-3 max-w-3xl">
         <p className="text-[11px] text-zinc-400 font-body">
           The workflow board is filtered by these targets. A CRM stage with no
           workflow target is pre-shop (won&apos;t appear in /workflow). Use the

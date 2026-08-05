@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtCents, dollarsToCents, centsToDollars } from "@/lib/accounting";
-import { defaultLaborRateCents, laborRateMap, setLaborRate } from "@/lib/jobCosting";
+import { defaultLaborRateCents, laborRateMap, setLaborRate } from "@/lib/laborRates";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +37,15 @@ export default async function LaborRatesPage() {
         <Link href="/accounting/job-costing" className="text-xs text-amber-400 hover:text-amber-300 font-body">← Job costing</Link>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      {defaultCents <= 0 && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-body text-amber-200">
+          <span className="font-semibold">No shop default rate is set.</span> Until one is, any tech without their own
+          rate has their clocked hours valued at $0 — so job costs and build margins are understated everywhere. Set
+          the Shop default below.
+        </div>
+      )}
+
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

@@ -18,7 +18,7 @@ export default async function QboSyncLogPage() {
     <AppShell title="QuickBooks sync log" subtitle="Every connection, mapping, and import attempt">
       <Link href="/accounting/quickbooks" className="text-xs text-amber-400 hover:text-amber-300 font-body">← QuickBooks</Link>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

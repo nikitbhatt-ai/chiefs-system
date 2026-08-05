@@ -44,7 +44,7 @@ export default async function SignInPage({
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
-      <div className="w-full max-w-sm bg-[#161624] border border-white/5 rounded-xl p-8 space-y-6">
+      <div className="w-full max-w-sm bg-surface border border-white/5 rounded-xl p-8 space-y-6">
         <div>
           <h1 className="text-2xl font-display font-bold text-white">
             Chiefs Pursuit Surplus

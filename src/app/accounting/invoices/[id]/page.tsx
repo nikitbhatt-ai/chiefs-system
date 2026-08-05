@@ -57,7 +57,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         {overdue && <span className="text-[10px] font-body uppercase tracking-wider rounded px-2 py-0.5 text-red-400 bg-red-500/10">overdue</span>}
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Invoice date</div>
           <div className="text-white">{fmtDate(invoice.invoiceDate)}</div>
@@ -90,7 +90,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Subtotal</div>
           <div className="text-white font-mono">{fmtCents(invoice.subtotalCents)}</div>
@@ -111,7 +111,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-zinc-500 font-body">
           Receipts applied ({appliedReceipts.length})
         </div>

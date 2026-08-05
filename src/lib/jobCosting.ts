@@ -12,50 +12,36 @@
 // material cost in COGS. Labor is treated as a period expense via payroll (not
 // double-booked here); it still shows in the rollup for management.
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   workOrders,
   timeEntries,
   users,
-  laborRates,
   glAccounts,
   journalEntries,
   journalLines,
 } from "@/db/schema";
 import { postJournalEntry, reverseJournalEntry, LedgerError } from "@/lib/accounting";
+import {
+  CLOCKED_SECONDS_SQL,
+  laborCostCents,
+  loadLaborRates,
+  rateForUser,
+} from "@/lib/laborRates";
 
 const WIP_CODE = "1300";
 const COGS_CODE = "5100";
 
 // ── Labor rates ───────────────────────────────────────────────────────────────
-
-/** Shop-wide default hourly cost rate in cents (0 if unset). */
-export async function defaultLaborRateCents(): Promise<number> {
-  const [row] = await db.select({ rateCents: laborRates.rateCents }).from(laborRates).where(isNull(laborRates.userId)).limit(1);
-  return row?.rateCents ?? 0;
-}
-
-/** Map of userId → rate cents (per-user overrides only; excludes the default). */
-export async function laborRateMap(): Promise<Map<string, number>> {
-  const rows = await db.select({ userId: laborRates.userId, rateCents: laborRates.rateCents }).from(laborRates);
-  const map = new Map<string, number>();
-  for (const r of rows) if (r.userId) map.set(r.userId, r.rateCents);
-  return map;
-}
-
-/** Upsert a rate. userId null sets the shop default. */
-export async function setLaborRate(userId: string | null, rateCents: number) {
-  const cents = Math.max(0, Math.round(rateCents));
-  const existing = userId
-    ? await db.select({ id: laborRates.id }).from(laborRates).where(eq(laborRates.userId, userId)).limit(1)
-    : await db.select({ id: laborRates.id }).from(laborRates).where(isNull(laborRates.userId)).limit(1);
-  if (existing.length) {
-    await db.update(laborRates).set({ rateCents: cents, updatedAt: new Date() }).where(eq(laborRates.id, existing[0].id));
-  } else {
-    await db.insert(laborRates).values({ userId, rateCents: cents });
-  }
-}
+// Rate resolution lives in src/lib/laborRates.ts so the time clock and these
+// accounting screens cost the same hours identically. Re-exported here because
+// /accounting/labor-rates has always imported them from this module.
+export {
+  defaultLaborRateCents,
+  laborRateMap,
+  setLaborRate,
+} from "@/lib/laborRates";
 
 // ── Cost rollup ─────────────────────────────────────────────────────────────
 
@@ -83,35 +69,51 @@ export type LaborEntry = {
   userName: string | null;
   hours: number;
   rateCents: number;
+  /** Where `rateCents` came from — lets the UI flag hours nothing can value. */
+  rateSource: "user" | "default" | "unset";
   costCents: number;
 };
 
-/** Labor lines for a work order: hours per tech × their rate. Only closed punches count. */
-export async function laborForWorkOrder(workOrderId: string): Promise<{ entries: LaborEntry[]; totalHours: number; totalCents: number }> {
-  const rows = await db
-    .select({
-      userId: timeEntries.userId,
-      userName: users.displayName,
-      userNameFallback: users.name,
-      hours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntries.clockedOutAt} - ${timeEntries.clockedInAt})) / 3600.0), 0)`.mapWith(Number),
-    })
-    .from(timeEntries)
-    .leftJoin(users, eq(users.id, timeEntries.userId))
-    .where(and(eq(timeEntries.workOrderId, workOrderId), sql`${timeEntries.clockedOutAt} IS NOT NULL`))
-    .groupBy(timeEntries.userId, users.displayName, users.name);
-
-  const [rateMap, defaultRate] = await Promise.all([laborRateMap(), defaultLaborRateCents()]);
+/** Labor lines for a work order: each tech's actual clocked hours × their rate.
+ *  Only closed punches count (an open shift has no end time to value). */
+export async function laborForWorkOrder(
+  workOrderId: string,
+): Promise<{ entries: LaborEntry[]; totalHours: number; totalCents: number; missingRate: boolean }> {
+  const [rows, rates] = await Promise.all([
+    db
+      .select({
+        userId: timeEntries.userId,
+        userName: users.displayName,
+        userNameFallback: users.name,
+        seconds: CLOCKED_SECONDS_SQL,
+      })
+      .from(timeEntries)
+      .leftJoin(users, eq(users.id, timeEntries.userId))
+      .where(and(eq(timeEntries.workOrderId, workOrderId), sql`${timeEntries.clockedOutAt} IS NOT NULL`))
+      .groupBy(timeEntries.userId, users.displayName, users.name),
+    loadLaborRates(),
+  ]);
 
   let totalHours = 0;
   let totalCents = 0;
+  let missingRate = false;
   const entries: LaborEntry[] = rows.map((r) => {
-    const rateCents = (r.userId && rateMap.get(r.userId)) || defaultRate;
-    const costCents = Math.round(r.hours * rateCents);
-    totalHours += r.hours;
+    const hours = (Number(r.seconds) || 0) / 3600;
+    const { rateCents, source } = rateForUser(rates, r.userId);
+    const costCents = laborCostCents(hours, rateCents);
+    totalHours += hours;
     totalCents += costCents;
-    return { userId: r.userId, userName: r.userName ?? r.userNameFallback ?? null, hours: r.hours, rateCents, costCents };
+    if (source === "unset" && hours > 0) missingRate = true;
+    return {
+      userId: r.userId,
+      userName: r.userName ?? r.userNameFallback ?? null,
+      hours,
+      rateCents,
+      rateSource: source,
+      costCents,
+    };
   });
-  return { entries, totalHours, totalCents };
+  return { entries, totalHours, totalCents, missingRate };
 }
 
 export type JobCost = {
@@ -124,6 +126,8 @@ export type JobCost = {
   laborCents: number;
   totalCents: number; // materials issued (wip + settled) + labor
   settled: boolean;
+  /** Some clocked hours on this job had no cost rate, so laborCents is low. */
+  missingRate: boolean;
 };
 
 /** Full cost rollup for a single work order. */
@@ -148,6 +152,7 @@ export async function jobCostRollup(workOrderId: string): Promise<JobCost | null
     wipBalanceCents,
     laborHours: labor.totalHours,
     laborCents: labor.totalCents,
+    missingRate: labor.missingRate,
     totalCents: materialsCents + labor.totalCents,
     settled: Boolean(wo.cogsJournalEntryId),
   };
@@ -178,7 +183,7 @@ async function settledCogsForWorkOrder(workOrderId: string): Promise<number> {
  * of jobs without an N+1.
  */
 export async function listJobCosts(): Promise<JobCost[]> {
-  const [wos, wipRows, cogsRows, laborRows, rateMap, defaultRate] = await Promise.all([
+  const [wos, wipRows, cogsRows, laborRows, rates] = await Promise.all([
     db.select({ id: workOrders.id, woNumber: workOrders.woNumber, status: workOrders.status, cogsJournalEntryId: workOrders.cogsJournalEntryId }).from(workOrders),
     ledgerByWorkOrder(WIP_CODE),
     ledgerByWorkOrder(COGS_CODE),
@@ -186,22 +191,23 @@ export async function listJobCosts(): Promise<JobCost[]> {
       .select({
         workOrderId: timeEntries.workOrderId,
         userId: timeEntries.userId,
-        hours: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntries.clockedOutAt} - ${timeEntries.clockedInAt})) / 3600.0), 0)`.mapWith(Number),
+        seconds: CLOCKED_SECONDS_SQL,
       })
       .from(timeEntries)
       .where(sql`${timeEntries.clockedOutAt} IS NOT NULL AND ${timeEntries.workOrderId} IS NOT NULL`)
       .groupBy(timeEntries.workOrderId, timeEntries.userId),
-    laborRateMap(),
-    defaultLaborRateCents(),
+    loadLaborRates(),
   ]);
 
-  const laborByWo = new Map<string, { hours: number; cents: number }>();
+  const laborByWo = new Map<string, { hours: number; cents: number; missingRate: boolean }>();
   for (const r of laborRows) {
     if (!r.workOrderId) continue;
-    const rate = (r.userId && rateMap.get(r.userId)) || defaultRate;
-    const cur = laborByWo.get(r.workOrderId) ?? { hours: 0, cents: 0 };
-    cur.hours += r.hours;
-    cur.cents += Math.round(r.hours * rate);
+    const hours = (Number(r.seconds) || 0) / 3600;
+    const { rateCents, source } = rateForUser(rates, r.userId);
+    const cur = laborByWo.get(r.workOrderId) ?? { hours: 0, cents: 0, missingRate: false };
+    cur.hours += hours;
+    cur.cents += laborCostCents(hours, rateCents);
+    if (source === "unset" && hours > 0) cur.missingRate = true;
     laborByWo.set(r.workOrderId, cur);
   }
 
@@ -209,9 +215,12 @@ export async function listJobCosts(): Promise<JobCost[]> {
   for (const wo of wos) {
     const wip = wipRows.get(wo.id) ?? 0;
     const settled = cogsRows.get(wo.id) ?? 0;
-    const labor = laborByWo.get(wo.id) ?? { hours: 0, cents: 0 };
+    const labor = laborByWo.get(wo.id) ?? { hours: 0, cents: 0, missingRate: false };
     const materialsCents = wip + settled;
-    if (materialsCents === 0 && labor.cents === 0) continue; // no accounting activity — skip
+    // Keyed off hours, not cost: a job with real clocked time but no rate to
+    // value it at still belongs on this list. Testing cost alone made such a
+    // job vanish entirely instead of showing up with a rate warning.
+    if (materialsCents === 0 && labor.hours === 0) continue; // no activity at all — skip
     out.push({
       workOrderId: wo.id,
       woNumber: wo.woNumber,
@@ -222,6 +231,7 @@ export async function listJobCosts(): Promise<JobCost[]> {
       laborCents: labor.cents,
       totalCents: materialsCents + labor.cents,
       settled: Boolean(wo.cogsJournalEntryId),
+      missingRate: labor.missingRate,
     });
   }
   out.sort((a, b) => b.totalCents - a.totalCents);

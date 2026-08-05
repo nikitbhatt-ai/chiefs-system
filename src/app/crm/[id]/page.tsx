@@ -313,7 +313,7 @@ export default async function CustomerEntityPage({
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Email:</span>{c.email ?? "—"}</div>
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Phone:</span>{c.phone ?? "—"}</div>
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Address:</span>{c.address ?? "—"}</div>
@@ -324,7 +324,7 @@ export default async function CustomerEntityPage({
             <a href="/crm" className="text-[11px] text-zinc-400 hover:text-white">Back to list</a>
           </div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-3 text-center">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-3 text-center">
           <Stat label="Total deals" value={totalDeals} />
           <Stat label="Active deals" value={activeDeals} />
           <div className="col-span-2">
@@ -378,7 +378,7 @@ export default async function CustomerEntityPage({
         </div>
       )}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Customer folder</h3>
           <span className="text-[10px] font-body text-zinc-500">
@@ -620,7 +620,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-2">
+    <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">{title}</h3>
         {action}

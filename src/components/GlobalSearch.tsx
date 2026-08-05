@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
+import { AnchoredPopover } from "@/components/AnchoredPopover";
 
 type SearchHit = {
   type: "customer" | "lead" | "quote" | "work_order";
@@ -31,11 +32,18 @@ export function GlobalSearch() {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResponse | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+  // The results panel is portalled to <body>, so it is not a descendant of
+  // wrapRef — the outside-click check has to consider it separately or clicking
+  // a result would close the menu before the link navigates.
+  const panelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
       if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (wrapRef.current.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -112,8 +120,16 @@ export function GlobalSearch() {
           className="w-full pl-8 pr-3 py-1.5 text-xs font-body bg-white/5 border border-white/10 rounded-lg text-white placeholder:text-zinc-500 focus:outline-none focus:border-amber-500/50"
         />
       </div>
-      {open && q.trim().length >= 2 ? (
-        <div className="absolute right-0 top-full mt-1 w-96 max-h-[60vh] overflow-y-auto z-50 bg-zinc-950 border border-white/10 rounded-md shadow-lg">
+      <AnchoredPopover
+        anchorRef={wrapRef}
+        panelRef={panelRef}
+        open={open && q.trim().length >= 2}
+        align="right"
+        width={384}
+        maxHeight={480}
+        className="bg-zinc-950 border border-white/10 rounded-md shadow-lg"
+      >
+        <div>
           {loading ? (
             <div className="px-3 py-2 text-xs text-zinc-500 font-body">
               Searching…
@@ -151,7 +167,7 @@ export function GlobalSearch() {
             })
           )}
         </div>
-      ) : null}
+      </AnchoredPopover>
     </div>
   );
 }

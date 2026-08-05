@@ -115,7 +115,7 @@ export default async function EditVehiclePage({
       <VehiclePhotos vehicleId={v.id} photos={v.photos ?? []} />
       <form
         action={update}
-        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
+        className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
       >
         <input
           name="vin"
@@ -249,7 +249,7 @@ export default async function EditVehiclePage({
         </div>
       </form>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Publish to Shopify

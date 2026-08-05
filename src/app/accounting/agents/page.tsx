@@ -73,7 +73,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* AR agent */}
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">AR agent · overdue reminders</h3>
           {overdue.length === 0 ? (
             <p className="text-[11px] text-zinc-500 font-body">No overdue invoices need a reminder right now.</p>
@@ -98,7 +98,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         </div>
 
         {/* AP agent */}
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">AP agent · payment plan</h3>
           <p className="text-[11px] text-zinc-500 font-body">
             Analyze all open bills — flag anomalies and propose a prioritized payment schedule for you to review.
@@ -111,7 +111,7 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-zinc-500 font-body">Drafts ({drafts.length})</div>
         <table className="w-full text-sm">
           <tbody className="font-body text-zinc-200">

@@ -168,7 +168,7 @@ export default async function DealsPage({
 
   return (
     <AppShell title="Deals" subtitle="Sales opportunities">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">New deal</h3>
         <form action={createDeal} className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <select name="customerId" defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
@@ -215,7 +215,7 @@ export default async function DealsPage({
         </form>
         <ListFilters basePath="/deals" view={view} tag={tag} carry={{ q, stage }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

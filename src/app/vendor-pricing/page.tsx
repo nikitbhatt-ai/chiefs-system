@@ -68,7 +68,7 @@ export default async function VendorPricingPage({
 
   return (
     <AppShell title="Vendor Pricing" subtitle="À la carte cost basis">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-1">
           Set à la carte price
         </h3>
@@ -146,7 +146,7 @@ export default async function VendorPricingPage({
         </a>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

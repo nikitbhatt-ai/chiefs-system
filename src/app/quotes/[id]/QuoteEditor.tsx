@@ -675,7 +675,7 @@ export function QuoteEditor({
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="lines" value={JSON.stringify(lines)} />
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* Uncontrolled selects: React 19 auto-resets the <form> after a
             server action, which snaps a *controlled* select back to its
             first option (Draft) and then won't re-sync the DOM — that was
@@ -721,7 +721,7 @@ export function QuoteEditor({
       {/* Vehicle — VIN decoder. The exact car this quote (and, once
           converted, this invoice) is for. Decoded fields post with the
           form and persist on the quote. */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Vehicle
@@ -804,7 +804,7 @@ export function QuoteEditor({
         </p>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Line items
@@ -888,7 +888,7 @@ export function QuoteEditor({
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body block mb-1">
             Notes (internal)

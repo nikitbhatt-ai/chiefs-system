@@ -56,7 +56,7 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
   if (session?.user?.role !== "admin") {
     return (
       <AppShell title="Settings" subtitle="Admin only">
-        <div className="bg-[#161624] border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
+        <div className="bg-surface border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
           You need the <strong>admin</strong> role to manage settings.
         </div>
       </AppShell>
@@ -76,7 +76,7 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
           <a key={c.slug} href={`/settings/lookups?category=${c.slug}`} className={`text-[11px] font-body px-3 py-1.5 rounded-md border ${category === c.slug ? "bg-amber-500/10 border-amber-500/40 text-amber-300" : "border-white/10 text-zinc-400 hover:text-white"}`}>{c.label}</a>
         ))}
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add option</h3>
         <form action={createLookup} className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <input type="hidden" name="category" value={category} />
@@ -91,7 +91,7 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
           <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</button>
         </form>
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

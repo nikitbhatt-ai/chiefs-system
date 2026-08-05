@@ -61,7 +61,7 @@ export function POEditor({
       <form action={saveDraft} className="space-y-3">
         <input type="hidden" name="id" value={id} />
         <input type="hidden" name="lines" value={JSON.stringify(lines)} />
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
           <select
             name="vendorId"
             defaultValue={vendorId}
@@ -88,7 +88,7 @@ export function POEditor({
           </div>
         </div>
 
-        <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
           <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
             <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
               Line items
@@ -177,7 +177,7 @@ export function POEditor({
           </div>
         </div>
 
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+        <div className="bg-surface border border-white/5 rounded-lg p-4">
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body block mb-1">
             Notes
           </label>
@@ -212,7 +212,7 @@ export function POEditor({
       {!fullyReceived ? (
         <form
           action={receivePO}
-          className="bg-[#161624] border border-amber-500/30 rounded-lg p-4 space-y-3"
+          className="bg-surface border border-amber-500/30 rounded-lg p-4 space-y-3"
         >
           <input type="hidden" name="id" value={id} />
           <h3 className="text-xs font-body font-semibold text-amber-300 uppercase tracking-wider">

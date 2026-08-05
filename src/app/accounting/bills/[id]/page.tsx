@@ -69,7 +69,7 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
         {overdue && <span className="text-[10px] font-body uppercase tracking-wider rounded px-2 py-0.5 text-red-400 bg-red-500/10">overdue</span>}
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Bill date</div>
           <div className="text-white">{fmtDate(bill.billDate)}</div>
@@ -108,7 +108,7 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -139,7 +139,7 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
         </table>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-zinc-500 font-body">
           Payments applied ({billPayments.length})
         </div>

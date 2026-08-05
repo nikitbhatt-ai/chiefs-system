@@ -167,7 +167,7 @@ export function KanbanBoard({
                 const id = e.dataTransfer.getData("text/plain");
                 if (id) void moveBucket(id, b.slug);
               }}
-              className={`bg-[#161624] border rounded-lg p-2 min-h-[200px] transition-colors ${
+              className={`bg-surface border rounded-lg p-2 min-h-[200px] transition-colors ${
                 isHover ? "border-amber-400/60 bg-amber-500/5" : "border-white/5"
               }`}
             >
@@ -256,9 +256,9 @@ function ModalShell({ title, children, onClose }: { title: string; children: Rea
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#161624] border border-white/10 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+        className="bg-surface border border-white/10 rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
       >
-        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 sticky top-0 bg-[#161624]">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-white/10 sticky top-0 bg-surface">
           <h3 className="text-sm font-body font-semibold text-white">{title}</h3>
           <button onClick={onClose} className="text-zinc-500 hover:text-white text-lg leading-none">×</button>
         </div>

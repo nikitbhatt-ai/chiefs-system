@@ -32,7 +32,7 @@ export default async function AccountLedgerPage({
     <AppShell title={`${account.code} · ${account.name}`} subtitle={`Ledger detail · ${fmtDate(from)} – ${fmtDate(to)}`}>
       <Link href="/accounting/reports/pnl" className="text-xs text-amber-400 hover:text-amber-300 font-body">← P&amp;L</Link>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm min-w-[560px]">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">

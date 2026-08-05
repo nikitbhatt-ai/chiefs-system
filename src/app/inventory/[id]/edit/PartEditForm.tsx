@@ -46,7 +46,7 @@ export function PartEditForm({
   return (
     <form
       action={action}
-      className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl"
+      className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl"
     >
       <FormField label="SKU" required>
         <input
