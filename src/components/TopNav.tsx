@@ -31,6 +31,7 @@ const NAV: NavGroup[] = [
       { href: "/purchase-orders", label: "Purchase Orders" },
       { href: "/procurement", label: "Procurement" },
       { href: "/vendors", label: "Vendors" },
+      { href: "/vendor-pricing", label: "Vendor Pricing" },
     ],
   },
   {

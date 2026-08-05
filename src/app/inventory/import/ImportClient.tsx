@@ -8,6 +8,7 @@ type Result = {
   name: string;
   action: "create" | "update" | "skip";
   errors: string[];
+  warnings: string[];
   manufacturerCreated?: boolean;
   supplierCreated?: boolean;
 };
@@ -29,6 +30,7 @@ SC-SETINA-PB400,Setina PB400 Push Bumper,Police push bumper,Push Bumpers,Setina,
 export function ImportClient() {
   const [csv, setCsv] = useState("");
   const [busy, setBusy] = useState(false);
+  const [strict, setStrict] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ImportResponse | null>(null);
   const [committed, setCommitted] = useState<ImportResponse | null>(null);
@@ -50,7 +52,7 @@ export function ImportClient() {
       const res = await fetch("/api/parts/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv, commit }),
+        body: JSON.stringify({ csv, commit, strict }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -68,20 +70,26 @@ export function ImportClient() {
 
   const summary = committed ?? preview;
   const errorRows = summary?.results.filter((r) => r.errors.length > 0) ?? [];
+  const warningRows = summary?.results.filter((r) => r.warnings.length > 0) ?? [];
 
   return (
     <div className="space-y-4 max-w-5xl">
       <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="text-xs font-body text-zinc-300">
-          Required columns:{" "}
-          <code className="text-amber-400">sku</code>,{" "}
-          <code className="text-amber-400">name</code>. Optional:{" "}
-          <code>description</code>, <code>category</code>,{" "}
+          Only <code className="text-amber-400">sku</code> is required (also
+          accepted as <code>part_number</code>, <code>manufacturer_sku</code>,{" "}
+          <code>mfg_sku</code>, <code>part_no</code>, <code>item_number</code>) —
+          it&apos;s how each part is identified. Everything else is optional and
+          filled in when present:{" "}
+          <code>name</code> (falls back to <code>part_description</code> then the
+          SKU), <code>description</code>, <code>category</code>/<code>section</code>,{" "}
           <code>manufacturer</code>, <code>supplier</code>,{" "}
-          <code>internal_cost</code>, <code>price</code>,{" "}
+          <code>internal_cost</code>/<code>unit_cost</code>,{" "}
+          <code>price</code>/<code>sell_price</code>,{" "}
           <code>quantity_on_hand</code>, <code>quantity_on_order</code>,{" "}
-          <code>reorder_point</code>. Existing SKUs are updated; new ones are
-          created. Vendor names that don&apos;t exist will be auto-created.
+          <code>reorder_point</code>. Rows missing a value import with a sensible
+          default and a note; only a row with no SKU is skipped. Existing SKUs
+          are updated, new ones created, and unknown vendor names auto-created.
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
@@ -114,7 +122,21 @@ export function ImportClient() {
           className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs font-mono text-white placeholder:text-zinc-500"
         />
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-between items-center gap-2">
+          <label className="text-[11px] font-body text-zinc-400 flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={strict}
+              onChange={(e) => {
+                setStrict(e.target.checked);
+                setPreview(null);
+                setCommitted(null);
+              }}
+              className="accent-amber-500"
+            />
+            Strict mode — skip any row with a warning (for a clean catalog load)
+          </label>
+          <div className="flex gap-2">
           <button
             type="button"
             disabled={!csv.trim() || busy}
@@ -131,6 +153,7 @@ export function ImportClient() {
           >
             {busy && committed === null && preview ? "Importing…" : "Confirm import"}
           </button>
+          </div>
         </div>
       </div>
 
@@ -166,6 +189,12 @@ export function ImportClient() {
             <span className="text-red-400">
               Skipped: <strong>{summary.skipped}</strong>
             </span>
+            {warningRows.length > 0 ? (
+              <span className="text-amber-400">
+                {summary.commit ? "Imported with fixes" : "Warnings"}:{" "}
+                <strong>{warningRows.length}</strong>
+              </span>
+            ) : null}
           </div>
 
           {summary.vendorsCreated.length > 0 ? (
@@ -196,6 +225,35 @@ export function ImportClient() {
                       <td className="px-2 py-1 text-zinc-500">{r.rowNumber}</td>
                       <td className="px-2 py-1 font-mono">{r.sku || "—"}</td>
                       <td className="px-2 py-1 text-red-300">{r.errors.join("; ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {warningRows.length > 0 ? (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-amber-400 font-body mb-1">
+                {summary.commit ? "Imported with fixes" : "Warnings"} ({warningRows.length})
+                <span className="normal-case tracking-normal text-zinc-500">
+                  {" "}— {summary.commit ? "these rows imported; a value was defaulted or coerced" : "these rows will import; a value is defaulted or coerced"}
+                </span>
+              </div>
+              <table className="w-full text-xs font-body">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500">
+                    <th className="px-2 py-1">Row</th>
+                    <th className="px-2 py-1">SKU</th>
+                    <th className="px-2 py-1">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="text-zinc-300">
+                  {warningRows.map((r) => (
+                    <tr key={r.rowNumber} className="border-t border-white/5">
+                      <td className="px-2 py-1 text-zinc-500">{r.rowNumber}</td>
+                      <td className="px-2 py-1 font-mono">{r.sku || "—"}</td>
+                      <td className="px-2 py-1 text-amber-300">{r.warnings.join("; ")}</td>
                     </tr>
                   ))}
                 </tbody>

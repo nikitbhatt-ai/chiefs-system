@@ -965,6 +965,25 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
     and later rows with the same SKU are flagged (`duplicate sku in file …`)
     so they show in the dry-run preview and are skipped, rather than silently
     colliding on commit.
+  - **Lenient by default** (added 2026-08-04, from real vendor/package sheets
+    that don't carry every field). The import imports what it can and reports
+    the rest instead of failing:
+    - **Only `sku` is required** — it's the identity we upsert on and can't
+      invent (a generated SKU would duplicate on every re-upload). A missing
+      SKU *column* is still fatal, with a message naming the accepted labels;
+      a row missing its SKU *value* is skipped-and-listed, not file-fatal.
+    - **`name` is optional** — falls back to the description, then the SKU.
+      New aliases: `part_description`/`part_desc`/`item_description` →
+      description; `unit_cost` → internal cost; `sell_price`/`unit_price` →
+      price; `section` → category; `brand` → manufacturer.
+    - **Numbers coerce, never fail** — an unparseable cost/qty defaults and
+      logs a warning; the row still imports.
+    - **Structural rows** (blank lines, section dividers like
+      `SEATING & PRISONER AREA` with no SKU or data) are dropped silently.
+    - Defaults/coercions surface as **warnings** in the preview (nothing is
+      silently changed). A **Strict mode** checkbox promotes every warning to
+      a skip, for a deliberate clean catalog load. The `strict` flag is sent
+      to `POST /api/parts/import`.
 - [ ] Per-part PO history button — currently shown as the FIFO layers
       table on /inventory/[id]; consider a dedicated button if needed.
 - [ ] Inline "Add new vendor" inside the dropdown (currently links
@@ -1013,18 +1032,37 @@ those SKUs.
       discounting stays on the quote). POSTs to `/api/packages`.
 - [x] **Package bulk upload** — `/packages/import` UI +
       `POST /api/packages/import` (dry-run preview → confirm). One row per
-      component grouped by `package_name`; `part` rows resolve by SKU against
-      the live catalog (unknown SKU = error, since inventory loads first).
-      Upserts by name; a package with any errored row is skipped whole (no
-      partial bundles). Sample template + column docs in the import UI.
+      component grouped by package name; upserts by name. Sample template +
+      column docs in the import UI.
+  - **Lenient by default** (added 2026-08-04, same rationale as the inventory
+    importer — real vendor/package templates lack a `component_type` column
+    and don't carry every field):
+    - **Only a package-name column is required** (`package_name` /
+      `template_name` / `package` / `name`). A blank name cell **inherits the
+      row above**, matching section templates that print the title once.
+    - **`component_type` is optional and inferred** — no SKU + hours → labor,
+      amount-only → fee, else a part; defaults to `item`. Explicit
+      `part`/`labor`/`fee` still honored.
+    - **Unresolved part SKUs still import** — the component is kept linked by
+      SKU snapshot with `partId = null` (the data model already allowed this),
+      so a package can reference a part not yet loaded into inventory. Was
+      previously a hard error.
+    - **A bad row is dropped and reported, not the whole package** — reversing
+      the old "any errored row skips the bundle" behavior. A package is only
+      skipped if it has no name or zero usable components.
+    - **Structural rows** (blank lines, section dividers like
+      `SEATING & PRISONER AREA`) are dropped silently; unparseable numbers
+      coerce with a warning. Defaults/coercions/dropped rows surface as
+      per-package **warnings** in the preview.
 
 ### CSV columns (package import)
 
-`package_name` (req), `component_type` (req: `part`/`labor`/`fee`),
-`package_category`, `package_description`, `sku` (req for `part`), `label`
-(line description; part rows default to `SKU — name`), `quantity`,
-`unit_price` (blank part price defaults to the part's inventory price),
-`hours`, `rate`, `amount`.
+Only `package_name` (or `template_name`/`package`/`name`) is required.
+Optional: `component_type` (`part`/`labor`/`fee`, inferred if absent),
+`package_category`, `package_description`, `sku`/`part_number`,
+`label`/`part_description` (line description; part rows default to
+`SKU — name`), `quantity`/`qty`, `unit_price`/`sell_price` (blank part price
+defaults to the part's inventory price), `hours`, `rate`, `amount`.
 
 ### Schema additions (Packages) — run in Neon's SQL Editor
 
@@ -2211,6 +2249,108 @@ won't scale once the catalog is large.
   load.
 
 No schema change.
+
+## Promo packages, cost layers, reservations & backfill (brief 2026-08-03)
+
+Whelen (and vendors like them) sell most of our lighting as discounted
+**packages** — one price for a fixed basket of parts — while we also buy
+those same part numbers individually at full price. This build makes both
+work under one SKU. Full brief, phase plan, and the Phase 0 audit map live
+in **`docs/PROMO_PACKAGES.md`**; read that before touching any of it.
+
+Four governing ideas:
+
+1. **One SKU, one bin.** A part is never split into a "promo" SKU and an
+   "individual" SKU. One `parts` row, one on-hand count.
+2. **Cost lives in layers.** Every receipt creates a cost layer with its own
+   unit cost and provenance; on-hand is the sum of the layers. The existing
+   `part_receipts` table already is this — extend it, don't duplicate it.
+   **Weighted average is the primary costing basis** for work orders (see
+   below); layers still back it, and FIFO stays available as a second
+   valuation.
+3. **A package price is allocated across its parts**, in proportion to each
+   line's à la carte cost, so every part carries a fair share of the
+   discount. **Package purchases only** — allocation must be unreachable
+   from an individual PO line.
+4. **Claims, not separate bins.** A sold build reserves the parts it needs;
+   everyone else pulls against available (= on-hand − reserved).
+
+Ground rules for every phase:
+
+- Money is `numeric(12,2)`, never `real`/`float`/`double`. (Audit found no
+  float money columns; the exposure is money stored inside `jsonb` line
+  items — see `docs/PROMO_PACKAGES.md` §0.2.)
+- Multi-step money writes go in one Drizzle transaction.
+- **Snapshot, don't reference-live.** Promo lines snapshot the à la carte
+  cost at definition; PO lines snapshot the allocated cost at PO time. Later
+  price-list edits never retroactively change a placed PO or a used promo.
+- Allocation lives in exactly one code path, callable only with a
+  `vendor_promo`.
+- Receiving is idempotent — a receipt key or unique constraint, not just a
+  row lock.
+- Never edit a posted journal entry; corrections are reversing entries.
+
+Phases (one at a time, approval between each):
+
+- [x] **Phase 0 — Guardrails and inventory audit.** Written map of the real
+      tables, money-column types, on-hand storage, and current PO/receiving
+      behaviour. No code changes. Result: `docs/PROMO_PACKAGES.md` §0.
+- [x] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
+      Date-ranged rows per (vendor, sku); a price change adds a row rather
+      than overwriting, so historical POs stay explainable. This list — not
+      `parts.cost` — is what individual PO lines pre-fill from, so a
+      discounted package receipt can't leak into the next full-price order.
+      Delivered: `vendorPartPrice` table (schema + `docs/sql/promo_phase1.sql`,
+      partial unique index enforcing one current price per vendor+sku);
+      `src/lib/vendorPricing.ts` resolver (`currentAlacarteCost`,
+      `priceHistory`, transactional `setCurrentPrice` that closes-and-appends);
+      `/api/vendor-part-prices` route pair; `/vendor-pricing` admin screen
+      (set-price form + current/history views) wired into Operations nav.
+      SQL seeds the two à la carte costs the brief states (XI3JC 112.00,
+      TCRWX6 1282.80); the rest of the Whelen sheet is loaded via the screen —
+      not fabricated, so Phase 3's reconciliation stays honest.
+- [ ] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
+      `part_receipts` with `source_kind`/`promo_id`, add `inventory_issue`
+      rows, a general `issue(sku, qty, workOrderId?)`, and opening-balance
+      layers for stock that predates the layer table. Add `parts.avg_cost`
+      `numeric(12,4)` as a moving average maintained on receipt, a one-row
+      `costing_policy` table (default `weighted_average`), and make
+      `inventoryValuation.ts` method-aware. Issuing drains layers oldest-first
+      for quantity and provenance but charges the job at average cost.
+      **`parts.cost` auto-updates from `avg_cost`** (= `ROUND(avg_cost, 2)`,
+      relabelled "Average cost" on the form, still editable for opening
+      values); `avg_cost` `numeric(12,4)` is the authoritative average and
+      `parts.cost` `numeric(12,2)` its operational reflection. Both update at
+      receipt, in the receive transaction, never at PO entry. On
+      quote→invoice conversion, snapshot `avg_cost` onto the line items so the
+      internal margin view reflects cost at sale, not today's average.
+- [ ] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
+      engine.** Pure, deterministic, unit-tested; rounding plug ties the
+      allocation to the package price exactly; refuses any promo whose
+      allocated unit cost exceeds its à la carte snapshot.
+- [ ] **Phase 4 — POs apply the package; receiving writes layers.**
+      Allocation runs once at PO creation (Whelen ships partial, so a
+      partial receipt needs a cost already on the line). Individual POs
+      never call it.
+- [ ] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
+      fire when a work order enters `confirmed` (customer PO in hand, build
+      committed to the shop) — one `reserveForWorkOrder` called from
+      `maybePromoteWonDeal` and the `/workflow` board path. Every picking
+      screen reads available, never raw on-hand.
+- [ ] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
+      Pulling reserved stock requires an override that logs who/why and
+      raises its own replacement requisition.
+- [ ] **Phase 7 — Promo vs backfill savings report.** Did the package
+      discount survive the backfill spend? Must be built from the layer
+      table's `source_kind` + per-layer `unit_cost`, **not** from job costing
+      — under average costing the promo saving is smeared into the average
+      and is invisible in work-order cost by construction.
+
+Decisions settled 2026-08-03: weighted average primary / FIFO secondary;
+reservations fire on the `confirmed` transition; Whelen pays no rebates so
+there is no rebate-to-cost mechanism. Still open: whether PO lines stay
+`jsonb` or get promoted to a `purchase_order_line` table (Phase 4;
+recommendation is to promote). Full reasoning in `docs/PROMO_PACKAGES.md`.
 
 ## Labor cost per build — one rate source, from actual clocked time
 
