@@ -215,8 +215,27 @@ body {
   overflow-x: hidden;
 }
 
+/* Syne is a VARIABLE font with a 400–800 weight axis, and its glyphs widen
+   sharply along it — measured at the same size, weight 780 renders ~35% wider
+   than 700 ("Chiefs Pursuit Surplus" 332px vs 246px). So the app-wide weight
+   bump, which is right for the body face, stretched every heading and made
+   figures like "PO-4640938 · $13,531.25" hard to read.
+
+   Display weights are therefore capped here, independent of the theme: the
+   utilities on a `.font-display` element read these local values instead of the
+   `:root` ones, because a custom property resolves from the element it is used
+   on. 650/600 keeps Syne's character while staying compact — narrower even than
+   the original 700 — and the slight negative tracking firms up its wide
+   counters. Safe to set letter-spacing here: no `.font-display` element uses a
+   `tracking-*` utility, so nothing is being overridden.
+   To dial it: raise/lower these three numbers, or set letter-spacing to 0. */
 .font-display {
   font-family: var(--font-display);
+  --font-weight-normal: 520;
+  --font-weight-medium: 560;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 650;
+  letter-spacing: -0.02em;
 }
 
 .font-body {

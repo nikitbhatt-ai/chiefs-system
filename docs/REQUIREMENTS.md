@@ -2514,6 +2514,27 @@ only five distinct values, so five unlayered rules scale them all.
 `--font-weight-*` is set per theme: Day lightest, Dark middle, Black
 heaviest (dark ink on cream already reads heavy; 700+ there turns muddy).
 
+### Display font weight is capped — do not remove this
+
+**Syne is a variable font with a 400–800 weight axis, and its glyphs widen
+sharply along it.** Measured at one size, weight 780 renders **~35% wider**
+than 700 — "Chiefs Pursuit Surplus" at 332px vs 246px. So the app-wide weight
+bump, which is correct for DM Sans, stretched every heading and made figures
+like `PO-4640938 · $13,531.25` hard to read.
+
+`.font-display` therefore redefines `--font-weight-*` locally (bold 650,
+semibold 600) plus `letter-spacing: -0.02em`. This works because a custom
+property resolves from the element it is used on, so the `font-bold` utility
+on a `.font-display` element picks up the local value rather than `:root`'s.
+Result is 228px — narrower than even the original 700 — while keeping Syne's
+character.
+
+Display weight is deliberately **theme-independent**: letting it vary per
+theme would reintroduce width differences between themes. If the headings
+ever need adjusting, change those three numbers rather than the `:root`
+weights, or the stretching comes back. No `.font-display` element uses a
+`tracking-*` utility, which is what makes setting letter-spacing there safe.
+
 ### Contrast
 
 Black and Day were measured with a real contrast check (resolving `oklch`,
