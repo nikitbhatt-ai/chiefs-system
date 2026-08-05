@@ -2441,12 +2441,17 @@ DELETE FROM labor_rates
 CREATE UNIQUE INDEX IF NOT EXISTS labor_rates_single_default_uidx
   ON labor_rates ((user_id IS NULL)) WHERE user_id IS NULL;
 
--- Shop-wide default hourly COST rate: $95.00/h, matching the old
--- hardcoded constant so nothing shifts on day one. Adjust as needed —
--- or set it from /accounting/labor-rates instead.
-UPDATE labor_rates SET rate_cents = 9500, updated_at = now() WHERE user_id IS NULL;
+-- Shop-wide default hourly COST rate. Written in DOLLARS in one place;
+-- rate_cents is integer cents, so it is converted here rather than making
+-- you do the arithmetic. $95.00 matches the old hardcoded constant, so
+-- nothing shifts on day one. Or just set it at /accounting/labor-rates.
+WITH rate AS (SELECT ROUND(95.00 * 100)::bigint AS cents)
+UPDATE labor_rates SET rate_cents = (SELECT cents FROM rate), updated_at = now()
+ WHERE user_id IS NULL;
+
+WITH rate AS (SELECT ROUND(95.00 * 100)::bigint AS cents)
 INSERT INTO labor_rates (user_id, rate_cents)
-SELECT NULL, 9500
+SELECT NULL, (SELECT cents FROM rate)
  WHERE NOT EXISTS (SELECT 1 FROM labor_rates WHERE user_id IS NULL);
 ```
 

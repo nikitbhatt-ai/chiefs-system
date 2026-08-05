@@ -6,10 +6,9 @@ import { users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtCents, dollarsToCents, centsToDollars } from "@/lib/accounting";
 import { defaultLaborRateCents, laborRateMap, setLaborRate } from "@/lib/laborRates";
+import { RateInput } from "@/components/accounting/RateInput";
 
 export const dynamic = "force-dynamic";
-
-const inputCls = "bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white w-32 text-right";
 
 export default async function LaborRatesPage() {
   const [staff, rateMap, defaultCents] = await Promise.all([
@@ -63,7 +62,12 @@ export default async function LaborRatesPage() {
               <td className="px-4 py-2.5 text-right">
                 <form action={saveRate} className="flex justify-end gap-2 items-center">
                   <input type="hidden" name="userId" value="__default__" />
-                  <input name="rate" inputMode="decimal" defaultValue={defaultCents ? centsToDollars(defaultCents) : ""} placeholder="0.00" className={inputCls} />
+                  <RateInput
+                    name="rate"
+                    ariaLabel="Shop default hourly cost rate in dollars"
+                    defaultValue={defaultCents ? centsToDollars(defaultCents) : ""}
+                    placeholder="0.00"
+                  />
                   <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5">Save</button>
                 </form>
               </td>
@@ -78,7 +82,11 @@ export default async function LaborRatesPage() {
                   <td className="px-4 py-2.5 text-right">
                     <form action={saveRate} className="flex justify-end gap-2 items-center">
                       <input type="hidden" name="userId" value={u.id} />
-                      <input name="rate" inputMode="decimal" defaultValue={cents != null ? centsToDollars(cents) : ""} placeholder="0.00" className={inputCls} />
+                      <RateInput
+                        name="rate"
+                        ariaLabel={`Hourly cost rate in dollars for ${u.displayName || u.name || "this person"}`}
+                        defaultValue={cents != null ? centsToDollars(cents) : ""}
+                      />
                       <button type="submit" className="text-xs font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-3 py-1.5">Save</button>
                     </form>
                   </td>
