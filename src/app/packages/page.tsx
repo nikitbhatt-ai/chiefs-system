@@ -1,13 +1,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { desc, eq, and, count, arrayContains } from "drizzle-orm";
+import { desc, eq, and, count, arrayContains, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { packages } from "@/db/schema";
+import { packages, parts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
 import { ListRowControls } from "@/components/ListRowControls";
 import { parsePagination } from "@/lib/pagination";
-import { packageValue, packageCounts } from "@/lib/packages";
+import { packageValue, packageCounts, packagePartIds, packageCost } from "@/lib/packages";
 
 async function createPackage(formData: FormData) {
   "use server";
@@ -71,6 +71,20 @@ export default async function PackagesPage({
     db.select().from(packages).where(where).orderBy(desc(packages.createdAt)).limit(perPage).offset(offset),
   ]);
   const total = Number(totalRows[0]?.n ?? 0);
+
+  // Resolve part cost (weighted average, falling back to internal cost) for
+  // every part referenced by the packages on this page, so we can roll up each
+  // package's total cost + margin. This is what reconciles against the CSV: the
+  // sell total ties to Extended Sell, the cost total to Unit Cost.
+  const pagePartIds = Array.from(new Set(rows.flatMap((p) => packagePartIds(p.components ?? []))));
+  const costRows = pagePartIds.length
+    ? await db.select({ id: parts.id, avgCost: parts.avgCost, cost: parts.cost }).from(parts).where(inArray(parts.id, pagePartIds))
+    : [];
+  const costByPartId = new Map<string, number>();
+  for (const r of costRows) {
+    const c = r.avgCost ?? r.cost;
+    if (c != null) costByPartId.set(r.id, Number(c));
+  }
 
   const pagerBaseQuery = (() => {
     const qs = new URLSearchParams();
@@ -157,20 +171,26 @@ export default async function PackagesPage({
               <th className="px-3 py-2.5">Name</th>
               <th className="px-3 py-2.5">Category</th>
               <th className="px-3 py-2.5">Contents</th>
-              <th className="px-3 py-2.5 text-right">Package value</th>
+              <th className="px-3 py-2.5 text-right">Total price</th>
+              <th className="px-3 py-2.5 text-right">Total cost</th>
+              <th className="px-3 py-2.5 text-right">Margin</th>
               <th className="px-3 py-2.5"></th>
             </tr>
           </thead>
           <tbody className="font-body text-zinc-200">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-xs text-zinc-500">
+                <td colSpan={7} className="px-4 py-8 text-center text-xs text-zinc-500">
                   No packages {sp.archived === "1" ? "archived" : "yet"}. Create one above.
                 </td>
               </tr>
             ) : (
               rows.map((p) => {
                 const c = packageCounts(p.components ?? []);
+                const price = packageValue(p.components ?? []);
+                const cc = packageCost(p.components ?? [], costByPartId);
+                const marginD = cc.costedValue - cc.cost;
+                const marginP = cc.costedValue > 0 ? (marginD / cc.costedValue) * 100 : null;
                 return (
                   <tr key={p.id} className="border-t border-white/5">
                     <td className="px-3 py-2 text-xs text-white">
@@ -187,8 +207,23 @@ export default async function PackagesPage({
                       {c.labor ? ` · ${c.labor} labor` : ""}
                       {c.fees ? ` · ${c.fees} fee${c.fees === 1 ? "" : "s"}` : ""}
                     </td>
-                    <td className="px-3 py-2 text-xs text-right text-white">
-                      {fmtMoney(packageValue(p.components ?? []))}
+                    <td className="px-3 py-2 text-xs text-right text-white">{fmtMoney(price)}</td>
+                    <td className="px-3 py-2 text-xs text-right text-zinc-300">
+                      {fmtMoney(cc.cost)}
+                      {cc.missing > 0 ? (
+                        <span
+                          title={`${cc.missing} part${cc.missing === 1 ? "" : "s"} have no cost yet (not linked to inventory, or no cost set)`}
+                          className="text-amber-400/80 ml-1"
+                        >
+                          *
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-right">
+                      <span className={marginD >= 0 ? "text-emerald-300" : "text-red-400"}>
+                        {fmtMoney(marginD)}
+                        {marginP != null ? ` (${marginP.toFixed(1)}%)` : ""}
+                      </span>
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2 mb-1">
@@ -219,6 +254,16 @@ export default async function PackagesPage({
         </table>
         <Pagination page={page} total={total} perPage={perPage} baseQuery={pagerBaseQuery} />
       </div>
+
+      <p className="text-[11px] text-zinc-500 font-body">
+        Total price = the package&apos;s sell value (reconciles to your CSV&apos;s
+        Extended Sell / Sell Price). Total cost rolls up each part&apos;s current
+        internal cost — the weighted average from receipts, seeded from the
+        inventory CSV&apos;s Unit Cost — so it reconciles to the CSV&apos;s Unit
+        Cost column when the parts were loaded from the same file. Margin is over
+        the parts that have a cost. <span className="text-amber-400/80">*</span> = one
+        or more parts have no cost yet (not linked to inventory, or no cost set).
+      </p>
     </AppShell>
   );
 }

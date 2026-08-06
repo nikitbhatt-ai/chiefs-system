@@ -63,6 +63,45 @@ export function packageValue(components: PackageComponent[]): number {
   return total;
 }
 
+/** Distinct part ids referenced by a package's item components. */
+export function packagePartIds(components: PackageComponent[]): string[] {
+  const ids = new Set<string>();
+  for (const c of components ?? []) {
+    if (c.kind === "item" && c.partId) ids.add(c.partId);
+  }
+  return [...ids];
+}
+
+/**
+ * Internal cost of a package's parts: Σ (item qty × part cost), using the cost
+ * resolved per part id (weighted-average, from the caller). Only item lines
+ * with a resolvable cost count toward `cost`; `costedValue` is the sell value
+ * of just those lines, so margin isn't understated when some parts have no cost
+ * yet. Labor/fees are excluded from cost (they're not inventory).
+ */
+export function packageCost(
+  components: PackageComponent[],
+  costByPartId: Map<string, number>,
+): { cost: number; costedValue: number; itemValue: number; missing: number } {
+  let cost = 0;
+  let costedValue = 0;
+  let itemValue = 0;
+  let missing = 0;
+  for (const c of components ?? []) {
+    if (c.kind !== "item") continue;
+    const qty = c.quantity || 0;
+    itemValue += qty * (c.unitPrice || 0);
+    const unit = c.partId ? costByPartId.get(c.partId) : undefined;
+    if (unit != null) {
+      cost += qty * unit;
+      costedValue += qty * (c.unitPrice || 0);
+    } else {
+      missing += 1;
+    }
+  }
+  return { cost, costedValue, itemValue, missing };
+}
+
 // Coerce an arbitrary components payload (from a form, API body, or CSV) into
 // the PackageComponent shape. Unknown line kinds are dropped rather than
 // trusted, and every number is coerced so a stray string can never land in the
