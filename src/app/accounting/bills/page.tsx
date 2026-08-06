@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { bills, payments, glAccounts, departments, vendors } from "@/db/schema";
+import { bills, payments, glAccounts, departments, vendors, purchaseOrders, partReceipts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { BillForm } from "@/components/accounting/BillForm";
 import { fmtCents } from "@/lib/accounting";
@@ -17,10 +17,25 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default async function BillsPage() {
   const now = new Date();
-  const [vendorRows, accountRows, deptRows, rows] = await Promise.all([
+  const [vendorRows, accountRows, deptRows, poRows, rows] = await Promise.all([
     db.select({ id: vendors.id, name: vendors.name }).from(vendors).orderBy(asc(vendors.name)),
     db.select({ id: glAccounts.id, code: glAccounts.code, name: glAccounts.name }).from(glAccounts).where(eq(glAccounts.isActive, true)).orderBy(asc(glAccounts.code)),
     db.select({ id: departments.id, name: departments.name }).from(departments).where(eq(departments.isActive, true)).orderBy(asc(departments.name)),
+    // POs that have actually received goods — only those carry an accrual for a
+    // bill to relieve. Value comes from part_receipts (append-only, priced at the
+    // moment of arrival) rather than the PO's editable line items.
+    db
+      .select({
+        id: purchaseOrders.id,
+        poNumber: purchaseOrders.poNumber,
+        vendorId: purchaseOrders.vendorId,
+        receivedCents: sql<number>`COALESCE(SUM(${partReceipts.quantityReceived} * ROUND(${partReceipts.unitCost} * 100)), 0)`.mapWith(Number),
+      })
+      .from(purchaseOrders)
+      .innerJoin(partReceipts, eq(partReceipts.purchaseOrderId, purchaseOrders.id))
+      .groupBy(purchaseOrders.id)
+      .orderBy(desc(purchaseOrders.createdAt))
+      .limit(200),
     db
       .select({
         id: bills.id,
@@ -51,7 +66,7 @@ export default async function BillsPage() {
         <Link href="/accounting/payments" className="text-xs text-amber-400 hover:text-amber-300 font-body">Payments →</Link>
       </div>
 
-      <BillForm vendors={vendorRows} accounts={accountRows} departments={deptRows} />
+      <BillForm vendors={vendorRows} accounts={accountRows} departments={deptRows} purchaseOrders={poRows} />
 
       <div className="text-xs font-body text-zinc-400">
         Outstanding AP: <span className="text-white font-semibold">{fmtCents(totalOutstanding)}</span> across{" "}

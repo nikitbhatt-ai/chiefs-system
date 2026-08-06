@@ -173,6 +173,10 @@ INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
   ('1300', 'Work in Progress',      'asset',     'none', 'debit'),
   -- Liabilities
   ('2000', 'Accounts Payable',      'liability', 'none', 'credit'),
+  -- Goods received but not yet invoiced. Receiving credits this; the vendor
+  -- bill relieves it and credits 2000. Keeps a PO receipt and its bill from
+  -- both crediting Accounts Payable. See accounting_phase10.sql.
+  ('2050', 'Accrued Purchases (GRNI)', 'liability', 'none', 'credit'),
   ('2100', 'Sales Tax Payable',     'liability', 'none', 'credit'),
   -- Equity
   ('3000', 'Owner''s Equity',       'equity',    'none', 'credit'),
@@ -186,6 +190,9 @@ INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
   ('5030', 'Contractor Labor',      'expense',   'labor', 'debit'),
   -- Cost of goods sold + other operating expenses
   ('5100', 'Cost of Goods Sold',    'expense',   'other_expense', 'debit'),
+  -- Vendor billed more than was received against the PO; the difference lands
+  -- here so it is visible rather than silently absorbed.
+  ('5150', 'Purchase Price Variance', 'expense',  'other_expense', 'debit'),
   ('6000', 'Rent',                  'expense',   'other_expense', 'debit'),
   ('6010', 'Utilities',             'expense',   'other_expense', 'debit'),
   ('6020', 'Software',              'expense',   'other_expense', 'debit'),
