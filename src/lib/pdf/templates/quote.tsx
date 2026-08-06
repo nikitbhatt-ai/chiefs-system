@@ -68,7 +68,18 @@ function KindTables({ lines, showTitles }: { lines: QuoteLine[]; showTitles: boo
                   <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
                     {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
+                  {disc > 0 ? (
+                    // Show the pre-discount price struck through above the
+                    // discounted price so the customer sees the saving per line.
+                    <View style={{ width: "10%", paddingVertical: 6, paddingHorizontal: 8 }}>
+                      <Text style={{ fontSize: 8, textAlign: "right", color: "#888888", textDecoration: "line-through" }}>
+                        {money(gross)}
+                      </Text>
+                      <Text style={{ fontSize: 10, textAlign: "right" }}>{money(gross - disc)}</Text>
+                    </View>
+                  ) : (
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
+                  )}
                 </View>
               );
             })}

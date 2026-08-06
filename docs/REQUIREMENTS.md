@@ -908,6 +908,13 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Column titles on the line-items table.
 - [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
+- [x] **Original vs discounted price per line on the customer copy** (added
+      2026-08-06). So customers can see the discount being given, each discounted
+      item line now shows its pre-discount line total struck through above the
+      discounted line total, on both the HTML print view and the PDF (quote and
+      invoice variants). Undiscounted lines are unchanged (single total). The
+      existing Discount column still shows the amount/percent. This pairs with
+      the package bundle price, which populates those per-line discounts.
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
 - [ ] Print and Send-to-customer are separate (Print done; Send pending).
 - [ ] Per-customer discount calculator that pre-fills line discounts
