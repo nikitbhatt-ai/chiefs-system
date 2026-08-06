@@ -2651,7 +2651,7 @@ Receipt credits a clearing account; the bill relieves it.
 | Event | Entry |
 | --- | --- |
 | Receive parts | Dr Inventory 1200 / Cr **Accrued Purchases 2050** |
-| Bill **against a PO** | Dr **2050** (received value) + Dr **5150** (any excess) / Cr AP 2000 |
+| Bill **against a PO** | Dr **2050** (received value) + Dr **5900** (any excess) / Cr AP 2000 |
 | Bill **not** against a PO | Dr chosen expense/asset accounts / Cr AP 2000 *(unchanged)* |
 | Pay vendor | Dr AP 2000 / Cr Cash 1000 *(unchanged)* |
 
@@ -2660,7 +2660,7 @@ running balance is a useful figure on its own: **goods received but not yet
 invoiced**.
 
 - [x] `docs/sql/accounting_phase10.sql` adds `2050 Accrued Purchases (GRNI)` and
-  `5150 Purchase Price Variance`; both are also in the phase-1 seed so a fresh
+  `5900 Purchase Price Variance`; both are also in the phase-1 seed so a fresh
   environment gets them without running phase 10.
 - [x] `src/lib/inventoryLedger.ts` — `postInventoryReceipt` credits 2050.
 - [x] `src/lib/ap.ts` — `createBill` with a `purchaseOrderId` relieves the

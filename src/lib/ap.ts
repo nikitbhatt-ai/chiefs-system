@@ -6,7 +6,7 @@
 //   Create bill, NOT against a PO:       Dr <expense/asset account>  per line
 //                                          Cr Accounts Payable         total
 //   Create bill AGAINST a PO:            Dr Accrued Purchases 2050   received
-//                                        Dr Price Variance 5150      any excess
+//                                        Dr Price Variance 5900      any excess
 //                                          Cr Accounts Payable         total
 //   Record payment (cash out):           Dr Accounts Payable         amount
 //                                          Cr Cash                     amount
@@ -36,7 +36,7 @@ const ACCOUNT_CODES = {
   ap: "2000", // Accounts Payable
   cash: "1000", // Cash
   accrued: "2050", // Accrued Purchases (goods received, not yet invoiced)
-  variance: "5150", // Purchase Price Variance
+  variance: "5900", // Purchase Price Variance
 } as const;
 
 // AP uses the same net-terms vocabulary as AR.

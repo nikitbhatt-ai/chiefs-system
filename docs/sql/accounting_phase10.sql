@@ -17,7 +17,7 @@
 --
 --   Receive parts   Dr Inventory 1200        / Cr Accrued Purchases 2050
 --   Vendor bill     Dr Accrued Purchases 2050 / Cr Accounts Payable 2000
---                   Dr Purchase Price Variance 5150  (only if the bill exceeds
+--                   Dr Purchase Price Variance 5900  (only if the bill exceeds
 --                                                     what was received)
 --   Pay vendor      Dr Accounts Payable 2000 / Cr Cash 1000   (unchanged)
 --
@@ -37,9 +37,9 @@ INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
   ('2050', 'Accrued Purchases (GRNI)', 'liability', 'none',          'credit'),
   -- Where a vendor billing more than was received lands, so the difference is
   -- visible on the P&L instead of being silently absorbed.
-  ('5150', 'Purchase Price Variance',  'expense',   'other_expense', 'debit')
+  ('5900', 'Purchase Price Variance',  'expense',   'other_expense', 'debit')
 ON CONFLICT (code) DO NOTHING;
 
 -- Confirm both exist (expect two rows):
 --   SELECT code, name, type, normal_balance FROM gl_accounts
---    WHERE code IN ('2050','5150') ORDER BY code;
+--    WHERE code IN ('2050','5900') ORDER BY code;

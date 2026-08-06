@@ -192,7 +192,7 @@ INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
   ('5100', 'Cost of Goods Sold',    'expense',   'other_expense', 'debit'),
   -- Vendor billed more than was received against the PO; the difference lands
   -- here so it is visible rather than silently absorbed.
-  ('5150', 'Purchase Price Variance', 'expense',  'other_expense', 'debit'),
+  ('5900', 'Purchase Price Variance', 'expense',  'other_expense', 'debit'),
   ('6000', 'Rent',                  'expense',   'other_expense', 'debit'),
   ('6010', 'Utilities',             'expense',   'other_expense', 'debit'),
   ('6020', 'Software',              'expense',   'other_expense', 'debit'),
