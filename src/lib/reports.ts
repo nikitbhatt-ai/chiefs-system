@@ -29,10 +29,24 @@ export type PnlDeptRow = { departmentId: string | null; departmentName: string; 
 export type PnlSegment = {
   revenue: PnlRow[];
   revenueTotal: number;
+  /** COGS — parts & materials, by account. */
+  cogsParts: PnlRow[];
+  cogsPartsTotal: number;
+  /** COGS — direct labor, by account. */
+  cogsLabor: PnlRow[];
+  cogsLaborTotal: number;
+  /** COGS — variances and adjustments (e.g. 5900 Purchase Price Variance). */
+  cogsOther: PnlRow[];
+  cogsOtherTotal: number;
+  cogsTotal: number;
+  /** Revenue less COGS. The figure the accountant actually manages by. */
+  grossProfitCents: number;
+  /** Operating payroll & benefits, broken out by department. */
   laborByDept: PnlDeptRow[];
   laborTotal: number;
   otherExpense: PnlRow[];
   otherExpenseTotal: number;
+  operatingTotal: number;
   netCents: number;
 };
 
@@ -61,18 +75,50 @@ export async function pnlSegment(from: Date, to: Date): Promise<PnlSegment> {
     .orderBy(asc(glAccounts.code));
 
   const revenue: PnlRow[] = [];
+  const cogsParts: PnlRow[] = [];
+  const cogsLabor: PnlRow[] = [];
+  const cogsOther: PnlRow[] = [];
   const otherExpense: PnlRow[] = [];
   let revenueTotal = 0;
+  let cogsPartsTotal = 0;
+  let cogsLaborTotal = 0;
+  let cogsOtherTotal = 0;
   let otherExpenseTotal = 0;
   for (const r of rows) {
-    if (r.reportGroup === "revenue") {
-      const amt = r.credit - r.debit;
-      if (amt !== 0) revenue.push({ code: r.code, name: r.name, amountCents: amt });
-      revenueTotal += amt;
-    } else if (r.reportGroup === "other_expense") {
-      const amt = r.debit - r.credit;
-      if (amt !== 0) otherExpense.push({ code: r.code, name: r.name, amountCents: amt });
-      otherExpenseTotal += amt;
+    const credited = r.credit - r.debit;
+    const debited = r.debit - r.credit;
+    const push = (list: PnlRow[], amt: number) => {
+      if (amt !== 0) list.push({ code: r.code, name: r.name, amountCents: amt });
+    };
+    switch (r.reportGroup) {
+      case "revenue":
+        push(revenue, credited);
+        revenueTotal += credited;
+        break;
+      case "cogs_parts":
+        push(cogsParts, debited);
+        cogsPartsTotal += debited;
+        break;
+      case "cogs_labor":
+        push(cogsLabor, debited);
+        cogsLaborTotal += debited;
+        break;
+      case "cogs_other":
+        push(cogsOther, debited);
+        cogsOtherTotal += debited;
+        break;
+      case "operating_expense":
+      // `other_expense` is the pre-Phase-11 group. Nothing is assigned to it any
+      // more, but historical accounts still carry it and their balances must
+      // keep appearing rather than silently vanishing from the P&L.
+      case "other_expense":
+        push(otherExpense, debited);
+        otherExpenseTotal += debited;
+        break;
+      default:
+        // "none" (balance sheet) and the labor groups, which are handled by the
+        // department roll-up below.
+        break;
     }
   }
 
@@ -88,7 +134,9 @@ export async function pnlSegment(from: Date, to: Date): Promise<PnlSegment> {
     .innerJoin(glAccounts, eq(glAccounts.id, journalLines.accountId))
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.journalEntryId))
     .leftJoin(departments, eq(departments.id, journalLines.departmentId))
-    .where(and(inRange, sql`${glAccounts.reportGroup} = 'labor'`))
+    // admin_labor is the current group; 'labor' is the pre-Phase-11 value that
+    // historical rows still carry.
+    .where(and(inRange, sql`${glAccounts.reportGroup} IN ('admin_labor', 'labor')`))
     .groupBy(journalLines.departmentId, departments.name)
     .orderBy(asc(departments.name));
 
@@ -100,14 +148,27 @@ export async function pnlSegment(from: Date, to: Date): Promise<PnlSegment> {
     laborTotal += amt;
   }
 
+  const cogsTotal = cogsPartsTotal + cogsLaborTotal + cogsOtherTotal;
+  const grossProfitCents = revenueTotal - cogsTotal;
+  const operatingTotal = laborTotal + otherExpenseTotal;
+
   return {
     revenue,
     revenueTotal,
+    cogsParts,
+    cogsPartsTotal,
+    cogsLabor,
+    cogsLaborTotal,
+    cogsOther,
+    cogsOtherTotal,
+    cogsTotal,
+    grossProfitCents,
     laborByDept,
     laborTotal,
     otherExpense,
     otherExpenseTotal,
-    netCents: revenueTotal - laborTotal - otherExpenseTotal,
+    operatingTotal,
+    netCents: grossProfitCents - operatingTotal,
   };
 }
 
@@ -272,7 +333,9 @@ export async function balanceSheet(asOf: Date = new Date()): Promise<BalanceShee
       equityTotal += amt;
     } else if (r.type === "revenue") {
       netIncomeCents += r.credit - r.debit;
-    } else if (r.type === "expense") {
+    } else if (r.type === "expense" || r.type === "cogs") {
+      // `cogs` is a distinct type as of Phase 11. Omitting it here would drop
+      // Cost of Goods Sold out of retained earnings and unbalance the sheet.
       netIncomeCents -= r.debit - r.credit;
     }
   }

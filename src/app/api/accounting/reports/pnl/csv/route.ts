@@ -27,10 +27,23 @@ export async function GET(req: Request) {
 
   for (const r of pl.current.revenue) rows.push(["Revenue", `${r.code} ${r.name}`, centsToDollars(r.amountCents), centsToDollars(priorRev.get(r.code) ?? 0)]);
   rows.push(["Revenue", "Total revenue", centsToDollars(pl.current.revenueTotal), centsToDollars(pl.prior.revenueTotal)]);
+  const priorCogsParts = new Map(pl.prior.cogsParts.map((r) => [r.code, r.amountCents]));
+  const priorCogsLabor = new Map(pl.prior.cogsLabor.map((r) => [r.code, r.amountCents]));
+  for (const r of pl.current.cogsParts) rows.push(["COGS parts", `${r.code} ${r.name}`, centsToDollars(r.amountCents), centsToDollars(priorCogsParts.get(r.code) ?? 0)]);
+  rows.push(["COGS parts", "Total parts & materials", centsToDollars(pl.current.cogsPartsTotal), centsToDollars(pl.prior.cogsPartsTotal)]);
+  for (const r of pl.current.cogsLabor) rows.push(["COGS labor", `${r.code} ${r.name}`, centsToDollars(r.amountCents), centsToDollars(priorCogsLabor.get(r.code) ?? 0)]);
+  rows.push(["COGS labor", "Total direct labor", centsToDollars(pl.current.cogsLaborTotal), centsToDollars(pl.prior.cogsLaborTotal)]);
+  const priorCogsOther = new Map(pl.prior.cogsOther.map((r) => [r.code, r.amountCents]));
+  for (const r of pl.current.cogsOther) rows.push(["COGS other", `${r.code} ${r.name}`, centsToDollars(r.amountCents), centsToDollars(priorCogsOther.get(r.code) ?? 0)]);
+  if (pl.current.cogsOther.length > 0 || pl.current.cogsOtherTotal !== 0)
+    rows.push(["COGS other", "Total variances & adjustments", centsToDollars(pl.current.cogsOtherTotal), centsToDollars(pl.prior.cogsOtherTotal)]);
+  rows.push(["COGS", "Total cost of goods sold", centsToDollars(pl.current.cogsTotal), centsToDollars(pl.prior.cogsTotal)]);
+  rows.push(["Gross profit", "Gross profit", centsToDollars(pl.current.grossProfitCents), centsToDollars(pl.prior.grossProfitCents)]);
   for (const r of pl.current.laborByDept) rows.push(["Labor", r.departmentName, centsToDollars(r.amountCents), centsToDollars(priorLabor.get(r.departmentName) ?? 0)]);
   rows.push(["Labor", "Total labor", centsToDollars(pl.current.laborTotal), centsToDollars(pl.prior.laborTotal)]);
   for (const r of pl.current.otherExpense) rows.push(["Other expenses", `${r.code} ${r.name}`, centsToDollars(r.amountCents), centsToDollars(priorOther.get(r.code) ?? 0)]);
-  rows.push(["Other expenses", "Total other expenses", centsToDollars(pl.current.otherExpenseTotal), centsToDollars(pl.prior.otherExpenseTotal)]);
+  rows.push(["Other expenses", "Total other operating", centsToDollars(pl.current.otherExpenseTotal), centsToDollars(pl.prior.otherExpenseTotal)]);
+  rows.push(["Operating", "Total operating expenses", centsToDollars(pl.current.operatingTotal), centsToDollars(pl.prior.operatingTotal)]);
   rows.push(["Net", "Net income", centsToDollars(pl.current.netCents), centsToDollars(pl.prior.netCents)]);
 
   const csv = rows.map((r) => r.map(csvCell).join(",")).join("\n");

@@ -2718,6 +2718,172 @@ automatically, on purpose.
 A fresh environment cannot be built from the SQL in version control; the table
 has to be created by hand first. Worth adding a phase file for it.
 
+## Chart of accounts restructure (accountant's request, 2026-08-06)
+
+The accountant asked for a chart that shows where profit comes from and where
+cost goes, rather than a single Materials line and a single Wages line.
+
+### What was asked for
+
+1. **Cost of Goods Sold becomes its own account type**, not an expense
+   subgroup, so it gets its own P&L section above gross profit.
+2. **COGS split into the components installed on police vehicles** — wire &
+   cable, emergency lights, sirens, consoles, partitions, gun locks, mounting
+   brackets, radios, cameras, graphics/decals, freight in, shop supplies used on
+   jobs.
+3. **Contractor labor moves under COGS.**
+4. **Direct labor separated from administrative payroll.**
+5. **Operating expenses expanded** across 6xxx.
+6. **Nobody may choose Normal Balance.** Quoting the request: *"It prevents
+   someone from accidentally creating an expense account with a credit balance or
+   a liability with a debit balance."*
+
+### The chart
+
+```
+4000  Revenue
+5000  COST OF GOODS SOLD                     (type `cogs`, above gross profit)
+  5100  Vehicle Parts — Uncategorized        ← where unmapped material lands
+  5110  Wire & Cable          5170  Mounting Brackets
+  5120  Emergency Lights      5180  Radios
+  5130  Sirens & Speakers     5190  Cameras
+  5140  Consoles              5200  Graphics & Decals
+  5150  Partitions            5210  Freight In
+  5160  Gun Locks             5220  Shop Supplies Used on Jobs
+  5300  Direct Labor — Installers
+  5310  Direct Labor — Payroll Taxes
+  5320  Contractor Labor
+  5900  Purchase Price Variance              (group `cogs_other`)
+6000  OPERATING EXPENSES
+  6010  Payroll — Administrative    6150  Fuel
+  6020  Payroll Taxes — Admin       6160  Vehicle Expense
+  6030  Benefits                    6170  Shop Supplies (non-job)
+  6100  Office Rent                 6180  Advertising
+  6110  Utilities                   6190  Training
+  6120  Software Subscriptions      6200  Repairs & Maintenance
+  6130  Insurance                   6210  Depreciation
+  6140  Office Supplies
+```
+
+### Normal balance is derived, in three places
+
+`src/lib/chartOfAccounts.ts` is the single source: asset/expense/COGS → debit,
+liability/equity/revenue → credit.
+
+- The form has **no normal-balance input** — it shows the derived value
+  read-only (`src/components/accounting/AccountTypeFields.tsx`).
+- The API **ignores** any `normalBalance` in the request body and derives it
+  (`src/app/api/accounting/accounts/route.ts`).
+- A CHECK constraint enforces it for direct SQL
+  (`gl_accounts_normal_balance_matches_type`).
+
+A second CHECK (`gl_accounts_report_group_matches_type`) blocks the other way to
+create an account that reports nowhere: a P&L account with `report_group =
+'none'` appears on **no statement at all**, and a balance-sheet account carrying
+a P&L group would be double-counted. Which group beyond that is left to app code,
+because historical rows still carry the pre-restructure `labor` /
+`other_expense` values and must stay valid.
+
+The report group is also filtered by type in the form, so a COGS account cannot
+be filed under operating expenses and end up below gross profit.
+
+### COGS actually splits itself — by part category
+
+Twelve accounts are worthless if nothing posts to them. Material reaches COGS in
+exactly one place — the WIP→COGS settlement when a job closes — and that used to
+post the whole job as one line to 5100.
+
+- `part_category_accounts` maps `parts.category` (free text) → GL account,
+  case-insensitively.
+- On settle, `src/lib/cogsCategories.ts :: cogsSplitForWorkOrder` reads the
+  job's `inventory_issue` rows, groups their cost by the part's category, folds
+  those into accounts via the mapping, and apportions the **WIP balance** across
+  them.
+- The issue rows are **weights, not amounts**: their `unit_cost` is the FIFO
+  layer cost while WIP may have been charged at weighted average, so the totals
+  differ. Apportioning by weight with largest-remainder rounding means the split
+  always sums to the WIP balance to the cent.
+- Unmapped categories (and jobs with no issue detail) land on **5100
+  Uncategorized**. A settlement never fails because the mapping is incomplete.
+- `/accounting/cogs-categories` edits the mapping and lists what is still
+  unmapped; the accounting home shows that count. The job-costing detail page
+  previews exactly which accounts a settle would debit, before posting.
+- A category can only map to a `cogs_parts` account — enforced in
+  `setCategoryAccount`, so the server action and the API can't disagree.
+
+Changing a mapping affects **future** settlements only. Posted entries are never
+rewritten.
+
+### Direct vs administrative payroll is entered, not inferred
+
+The QuickBooks payroll import used to post everything to `5000 Wages`. Each
+department line now carries a Direct / Administrative choice: direct → `5300`
+(COGS, above gross profit), administrative → `6010` (overhead). Lines default to
+administrative, because overstating gross profit is the more misleading error.
+Only whoever runs payroll knows which departments turn wrenches.
+
+### What was done with the old accounts
+
+Journal lines reference account **ids**, so renaming and renumbering are safe —
+history follows the row.
+
+- `6000/6010/6020/6040` (Rent, Utilities, Software, Insurance) → renumbered to
+  `6100/6110/6120/6130`. Same rows, new codes, history intact.
+- `6030 Supplies` and `6050 Office Expense` do **not** map cleanly — the new
+  chart separates office supplies (6140) from non-job shop supplies (6170), and
+  nothing in the data says which those lumps were. Moved to `6230/6240`, renamed
+  "— legacy (pre-split)" and deactivated rather than relabelled on a guess. If
+  you know what they held, reactivate and rename one.
+- `5000/5010/5020` (Wages, Payroll Taxes, Benefits) → retired inactive, history
+  left in operating expenses. Splitting past payroll between COGS and overhead
+  after the fact would restate prior-period gross margin on a guess.
+- `5030 Contractor Labor` → retired inactive but regrouped to `cogs_labor`. That
+  **is** a reclassification of prior periods, and it is the correction that was
+  asked for.
+- `5100 Cost of Goods Sold` → retyped `cogs`, renamed `Vehicle Parts —
+  Uncategorized`. It held material cost while sitting under `other_expense`,
+  which was the "COGS mixed in with expenses" problem itself.
+
+### SQL to run in Neon
+
+`docs/sql/accounting_phase11.sql`, **after** `accounting_phase10.sql`. Safe to
+re-run. Two things about it are not cosmetic:
+
+- **Order matters.** The renumbering in step 2 must run before step 5 inserts
+  new accounts at `6010/6020/6030`, or past utility bills end up labelled Payroll
+  and the new Benefits account silently isn't created.
+- **Every renumber is guarded** with `AND NOT EXISTS (… destination code …)`.
+  That guard is what makes a second run safe: on re-run, `6010` is the *new*
+  Payroll account, and an unguarded rename would collide with Utilities or move
+  Payroll into it. Verified idempotent over three consecutive runs.
+
+Step 8 seeds the category mapping by keyword-matching the categories already on
+parts — **once, in a file you can read**, not silently at posting time. Anything
+it doesn't match is left unmapped and visible in the UI.
+
+### Verified against a real Postgres
+
+`scripts/verify-cogs-split.ts` and `scripts/verify-pnl-cogs.ts` (throwaway
+database only — they post entries). They check that the split sums to the WIP
+balance exactly at awkward totals, that unmapped categories collect on 5100,
+that the settle entry balances and zeroes the job out of WIP, that the rollup
+still sees material after a split settle, that a second settle is refused and
+reopen restores WIP, that variance stays out of `cogs_parts`, and that the
+balance sheet still balances now that `cogs` is its own type. Both pass.
+
+`scripts/scratch-schema-drift.ts` lists columns `schema.ts` declares that a
+database lacks — needed because `drizzle/0000_initial.sql` is behind the schema
+(see the `part_receipts` gap above).
+
+### Still open
+
+- Direct labor from the **time clock** is not posted to the GL. Clocked hours ×
+  cost rate drives the job-cost rollup (see the labor-cost section above), but
+  `5300` is fed only by the payroll import. Wiring the clock to the ledger would
+  mean deciding how to avoid double-booking it against payroll.
+- `5310 Direct Labor — Payroll Taxes` and `5320 Contractor Labor` exist but
+  nothing posts to them automatically yet.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { fmtCents } from "@/lib/accounting";
 import { inventoryReconciliation } from "@/lib/inventoryValuation";
 import { listJobCosts } from "@/lib/jobCosting";
+import { listCategoryMappings } from "@/lib/cogsCategories";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +44,20 @@ export default async function AccountingHomePage() {
     db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(payments),
   ]);
 
-  const [recon, jobs] = await Promise.all([inventoryReconciliation(), listJobCosts()]);
+  const [recon, jobs, categoryMappings] = await Promise.all([
+    inventoryReconciliation(),
+    listJobCosts(),
+    listCategoryMappings(),
+  ]);
   const openWip = jobs.reduce((s, j) => s + j.wipBalanceCents, 0);
+  // An unmapped category isn't an error — its material settles to 5100
+  // Uncategorized — but it is the reason a component COGS account looks empty.
+  const unmappedCategories = categoryMappings.filter((c) => !c.accountId).length;
   const ties = bal.debit === bal.credit;
 
   const cards = [
     { href: "/accounting/accounts", title: "Chart of Accounts", desc: "View and add ledger accounts", stat: `${acct.n} accounts` },
+    { href: "/accounting/cogs-categories", title: "COGS by part category", desc: "Which COGS account each part category settles into", stat: unmappedCategories === 0 ? "All categories mapped" : `${unmappedCategories} unmapped` },
     { href: "/accounting/journal", title: "Journal", desc: "Create and review journal entries", stat: `${entryCounts.posted} posted · ${entryCounts.draft} draft` },
     { href: "/accounting/invoices", title: "Invoices (AR)", desc: "Bill quotes; posts to Accounts Receivable", stat: `${ar.openCount} open · ${fmtCents(ar.openTotal)} billed` },
     { href: "/accounting/receipts", title: "Receipts", desc: "Record cash received against AR", stat: `${receiptAgg.n} recorded` },

@@ -966,9 +966,26 @@ export const upfitConfigs = pgTable("upfit_configs", {
 // docs/sql/accounting_phase1.sql), not just app code.
 // ───────────────────────────────────────────────────────────────────────────
 
-export const glAccountType = pgEnum("gl_account_type", ["asset", "liability", "equity", "revenue", "expense"]);
+// `cogs` is a first-class type, not an expense subgroup, so Cost of Goods Sold
+// gets its own P&L section above Gross Profit. Anything switching on this type
+// must handle `cogs` — notably the balance sheet in src/lib/reports.ts, where
+// missing it would drop COGS out of net income and unbalance the sheet.
+export const glAccountType = pgEnum("gl_account_type", ["asset", "liability", "equity", "revenue", "expense", "cogs"]);
 // Drives how the P&L (Phase 6) groups each account. Balance-sheet accounts use "none".
-export const glReportGroup = pgEnum("gl_report_group", ["revenue", "labor", "other_expense", "none"]);
+// Drives how the P&L groups each account. Balance-sheet accounts use "none".
+// `labor` and `other_expense` are the pre-Phase-11 values, kept because
+// Postgres cannot drop enum values; nothing is assigned to them any more.
+export const glReportGroup = pgEnum("gl_report_group", [
+  "revenue",
+  "cogs_parts",
+  "cogs_labor",
+  "cogs_other",
+  "admin_labor",
+  "operating_expense",
+  "none",
+  "labor",
+  "other_expense",
+]);
 export const glNormalBalance = pgEnum("gl_normal_balance", ["debit", "credit"]);
 export const journalSource = pgEnum("journal_source", ["manual", "ar", "ap", "system"]);
 export const journalStatus = pgEnum("journal_status", ["draft", "posted", "void"]);
@@ -997,6 +1014,23 @@ export const glAccounts = pgTable("gl_accounts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("gl_accounts_type_idx").on(t.type)]);
+
+// Part category → COGS account. This is what makes the split COGS accounts
+// (5110 Wire & Cable, 5120 Emergency Lights, …) actually fill in: when a job's
+// WIP settles to COGS, the material is apportioned across accounts by the
+// category of the parts that were issued instead of landing in one lump.
+//
+// Matched case-insensitively on `parts.category` (free text), so "Emergency
+// Lights" and "emergency lights" are one mapping. A category with no row here
+// falls to 5100 Vehicle Parts — Uncategorized; /accounting/cogs-categories
+// lists those so they don't stay uncategorized by accident.
+export const partCategoryAccounts = pgTable("part_category_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  category: text("category").notNull(),
+  accountId: uuid("account_id").notNull().references(() => glAccounts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("part_category_accounts_category_uidx").on(sql`lower(${t.category})`)]);
 
 export const journalEntries = pgTable("journal_entries", {
   id: uuid("id").defaultRandom().primaryKey(),

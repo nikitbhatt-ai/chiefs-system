@@ -7,12 +7,18 @@
 //   • Labor — hours from the existing `time_entries` valued at an hourly cost
 //     rate (`labor_rates`: per-user, falling back to the shop default).
 //
-// Closing a job settles its WIP to COGS:  Dr COGS (5100) / Cr WIP (1300) for the
-// job's current WIP balance. That zeroes the job out of WIP and lands the
-// material cost in COGS. Labor is treated as a period expense via payroll (not
-// double-booked here); it still shows in the rollup for management.
+// Closing a job settles its WIP to COGS:  Dr COGS / Cr WIP (1300) for the job's
+// current WIP balance. That zeroes the job out of WIP and lands the material cost
+// in COGS. Labor is treated as a period expense via payroll (not double-booked
+// here); it still shows in the rollup for management.
+//
+// The COGS debit is SPLIT across the component accounts (5110 Wire & Cable, 5120
+// Emergency Lights, …) in proportion to the categories of the parts actually
+// issued to the job — see src/lib/cogsCategories.ts. Material whose category has
+// no mapping lands on 5100 Vehicle Parts — Uncategorized, which is also the
+// single-line fallback for jobs with no issue detail to split by.
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
 import {
   workOrders,
@@ -29,9 +35,12 @@ import {
   loadLaborRates,
   rateForUser,
 } from "@/lib/laborRates";
+import { cogsSplitForWorkOrder, UNCATEGORIZED_COGS_CODE } from "@/lib/cogsCategories";
 
 const WIP_CODE = "1300";
-const COGS_CODE = "5100";
+
+/** Accounts that receive material settled out of WIP. */
+const SETTLED_COGS_FILTER = sql`${glAccounts.reportGroup} = 'cogs_parts'`;
 
 // ── Labor rates ───────────────────────────────────────────────────────────────
 // Rate resolution lives in src/lib/laborRates.ts so the time clock and these
@@ -158,7 +167,13 @@ export async function jobCostRollup(workOrderId: string): Promise<JobCost | null
   };
 }
 
-/** Material already moved to COGS for a job (debits on 5100 tagged to the WO), in cents. */
+/**
+ * Material already moved to COGS for a job, in cents.
+ *
+ * Sums every `cogs_parts` account rather than just 5100, because the settlement
+ * now splits across the component accounts. Keying this off 5100 alone would make
+ * a split job look unsettled and double-count it as still-in-WIP material.
+ */
 async function settledCogsForWorkOrder(workOrderId: string): Promise<number> {
   const [row] = await db
     .select({
@@ -171,7 +186,7 @@ async function settledCogsForWorkOrder(workOrderId: string): Promise<number> {
       and(
         eq(journalLines.workOrderId, workOrderId),
         eq(journalEntries.status, "posted"),
-        sql`${glAccounts.code} = ${COGS_CODE}`,
+        SETTLED_COGS_FILTER,
       ),
     );
   return row?.cents ?? 0;
@@ -185,8 +200,8 @@ async function settledCogsForWorkOrder(workOrderId: string): Promise<number> {
 export async function listJobCosts(): Promise<JobCost[]> {
   const [wos, wipRows, cogsRows, laborRows, rates] = await Promise.all([
     db.select({ id: workOrders.id, woNumber: workOrders.woNumber, status: workOrders.status, cogsJournalEntryId: workOrders.cogsJournalEntryId }).from(workOrders),
-    ledgerByWorkOrder(WIP_CODE),
-    ledgerByWorkOrder(COGS_CODE),
+    ledgerByWorkOrder(sql`${glAccounts.code} = ${WIP_CODE}`),
+    ledgerByWorkOrder(SETTLED_COGS_FILTER),
     db
       .select({
         workOrderId: timeEntries.workOrderId,
@@ -238,8 +253,8 @@ export async function listJobCosts(): Promise<JobCost[]> {
   return out;
 }
 
-/** Posted (debit − credit) by work_order_id for a given account code. */
-async function ledgerByWorkOrder(code: string): Promise<Map<string, number>> {
+/** Posted (debit − credit) by work_order_id for the accounts matching `filter`. */
+async function ledgerByWorkOrder(filter: SQL): Promise<Map<string, number>> {
   const rows = await db
     .select({
       workOrderId: journalLines.workOrderId,
@@ -248,7 +263,7 @@ async function ledgerByWorkOrder(code: string): Promise<Map<string, number>> {
     .from(journalLines)
     .innerJoin(glAccounts, eq(glAccounts.id, journalLines.accountId))
     .innerJoin(journalEntries, eq(journalEntries.id, journalLines.journalEntryId))
-    .where(and(eq(journalEntries.status, "posted"), sql`${glAccounts.code} = ${code}`))
+    .where(and(eq(journalEntries.status, "posted"), filter))
     .groupBy(journalLines.workOrderId);
   const map = new Map<string, number>();
   for (const r of rows) if (r.workOrderId) map.set(r.workOrderId, r.cents);
@@ -270,14 +285,27 @@ export async function settleJobToCogs(workOrderId: string, createdBy?: string | 
   const wipCents = await wipBalanceForWorkOrder(workOrderId);
   if (wipCents <= 0) throw new LedgerError("Nothing in WIP to settle for this job.");
 
-  const [wipId, cogsId] = await Promise.all([accountId(WIP_CODE), accountId(COGS_CODE)]);
+  const wipId = await accountId(WIP_CODE);
+  const split = await cogsSplitForWorkOrder(db, workOrderId, wipCents);
+  if (split.length === 0) {
+    throw new LedgerError(
+      `Chart of accounts is missing COGS account ${UNCATEGORIZED_COGS_CODE}. Run docs/sql/accounting_phase11.sql in Neon.`,
+    );
+  }
 
   const entry = await postJournalEntry({
     memo: `Job ${wo.woNumber ?? workOrderId} — WIP settled to COGS`,
     source: "system",
     createdBy: createdBy ?? null,
     lines: [
-      { accountId: cogsId, debitCents: wipCents, workOrderId, memo: "Cost of goods sold" },
+      ...split.map((s) => ({
+        accountId: s.accountId,
+        debitCents: s.cents,
+        workOrderId,
+        // Name the categories folded into the line so the ledger drill-down
+        // explains why this account got this amount.
+        memo: s.categories.length > 0 ? `${s.name} — ${s.categories.join(", ")}` : s.name,
+      })),
       { accountId: wipId, creditCents: wipCents, workOrderId, memo: "Work in progress" },
     ],
   });

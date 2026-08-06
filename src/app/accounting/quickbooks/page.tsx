@@ -14,6 +14,7 @@ import {
   setEnvironment,
   importPayrollLabor,
   departmentsForPayroll,
+  type PayrollKind,
 } from "@/lib/qbo";
 
 export const dynamic = "force-dynamic";
@@ -59,7 +60,13 @@ export default async function QuickBooksPage({ searchParams }: { searchParams: P
     "use server";
     const session = await auth();
     const periodLabel = String(formData.get("period") ?? "").trim() || "payroll period";
-    const lines = depts.map((d) => ({ departmentId: d.id, amountCents: dollarsToCents(String(formData.get(`amt_${d.id}`) ?? "")) }));
+    const lines = depts.map((d) => ({
+      departmentId: d.id,
+      amountCents: dollarsToCents(String(formData.get(`amt_${d.id}`) ?? "")),
+      // Anything not explicitly marked direct is treated as overhead — see
+      // importPayrollLabor on why that's the safe default.
+      kind: (String(formData.get(`kind_${d.id}`) ?? "admin") === "direct" ? "direct" : "admin") as PayrollKind,
+    }));
     try {
       await importPayrollLabor({ periodLabel, lines, createdBy: session?.user?.id ?? null });
     } catch (e) {
@@ -136,8 +143,10 @@ export default async function QuickBooksPage({ searchParams }: { searchParams: P
       <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Import payroll labor</h3>
         <p className="text-[11px] text-zinc-500 font-body">
-          Enter labor totals per department from your payroll report to reconcile the P&amp;L labor section. Posts Dr Wages
-          per department / Cr Cash. Once a live QuickBooks connection is in place these totals can be pulled automatically.
+          Enter labor totals per department from your payroll report to reconcile the P&amp;L labor section. Mark each
+          department direct or administrative: direct labor posts to 5300 (above gross profit, a cost of the build),
+          administrative to 6010 (overhead). Cr Cash for the total. Once a live QuickBooks connection is in place these
+          totals can be pulled automatically.
         </p>
         <form action={importPayroll} className="space-y-3">
           <div>
@@ -149,6 +158,15 @@ export default async function QuickBooksPage({ searchParams }: { searchParams: P
               <div key={d.id}>
                 <label className="block text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-1">{d.name} ($)</label>
                 <input name={`amt_${d.id}`} inputMode="decimal" placeholder="0.00" className="bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white w-full text-right" />
+                <select
+                  name={`kind_${d.id}`}
+                  defaultValue="admin"
+                  aria-label={`${d.name} labor type`}
+                  className="mt-1 bg-black/40 border border-white/10 rounded-md px-2 py-1 text-xs text-zinc-300 w-full"
+                >
+                  <option value="admin">Administrative (6010)</option>
+                  <option value="direct">Direct labor (5300)</option>
+                </select>
               </div>
             ))}
           </div>

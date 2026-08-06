@@ -31,6 +31,9 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
 
   // Match prior-period rows to current by code/department for the comparison column.
   const priorRevByCode = new Map(pl.prior.revenue.map((r) => [r.code, r.amountCents]));
+  const priorCogsPartsByCode = new Map(pl.prior.cogsParts.map((r) => [r.code, r.amountCents]));
+  const priorCogsLaborByCode = new Map(pl.prior.cogsLabor.map((r) => [r.code, r.amountCents]));
+  const priorCogsOtherByCode = new Map(pl.prior.cogsOther.map((r) => [r.code, r.amountCents]));
   const priorOtherByCode = new Map(pl.prior.otherExpense.map((r) => [r.code, r.amountCents]));
   const priorLaborByDept = new Map(pl.prior.laborByDept.map((r) => [r.departmentName, r.amountCents]));
 
@@ -82,8 +85,73 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
             ))}
             <TotalRow label="Total revenue" cur={pl.current.revenueTotal} prior={pl.prior.revenueTotal} />
 
-            {/* Labor by department */}
-            <SectionHeader label="Labor (by department)" />
+            {/* Cost of Goods Sold — its own section above gross profit, split
+                into the components installed on vehicles and direct labor. */}
+            <SectionHeader label="Cost of Goods Sold — parts & materials" />
+            {pl.current.cogsParts.map((r) => (
+              <tr key={r.code} className="border-t border-white/5 hover:bg-white/5">
+                <td className="px-4 py-2 text-xs pl-8">
+                  <Link href={`/accounting/reports/ledger/${r.code}?from=${iso(from)}&to=${iso(to)}`} className="hover:text-amber-300">
+                    <span className="font-mono text-zinc-400">{r.code}</span> {r.name}
+                  </Link>
+                </td>
+                {amountCell(r.amountCents)}
+                {priorCell(priorCogsPartsByCode.get(r.code) ?? 0)}
+                {deltaCell(delta(r.amountCents, priorCogsPartsByCode.get(r.code) ?? 0))}
+              </tr>
+            ))}
+            <TotalRow label="Total parts & materials" cur={pl.current.cogsPartsTotal} prior={pl.prior.cogsPartsTotal} />
+
+            <SectionHeader label="Cost of Goods Sold — direct labor" />
+            {pl.current.cogsLabor.map((r) => (
+              <tr key={r.code} className="border-t border-white/5 hover:bg-white/5">
+                <td className="px-4 py-2 text-xs pl-8">
+                  <Link href={`/accounting/reports/ledger/${r.code}?from=${iso(from)}&to=${iso(to)}`} className="hover:text-amber-300">
+                    <span className="font-mono text-zinc-400">{r.code}</span> {r.name}
+                  </Link>
+                </td>
+                {amountCell(r.amountCents)}
+                {priorCell(priorCogsLaborByCode.get(r.code) ?? 0)}
+                {deltaCell(delta(r.amountCents, priorCogsLaborByCode.get(r.code) ?? 0))}
+              </tr>
+            ))}
+            <TotalRow label="Total direct labor" cur={pl.current.cogsLaborTotal} prior={pl.prior.cogsLaborTotal} />
+
+            {/* Variances and adjustments. Only shown when there are any — an
+                always-visible empty section makes the report harder to read. */}
+            {(pl.current.cogsOther.length > 0 || pl.current.cogsOtherTotal !== 0) && (
+              <>
+                <SectionHeader label="Cost of Goods Sold — variances & adjustments" />
+                {pl.current.cogsOther.map((r) => (
+                  <tr key={r.code} className="border-t border-white/5 hover:bg-white/5">
+                    <td className="px-4 py-2 text-xs pl-8">
+                      <Link href={`/accounting/reports/ledger/${r.code}?from=${iso(from)}&to=${iso(to)}`} className="hover:text-amber-300">
+                        <span className="font-mono text-zinc-400">{r.code}</span> {r.name}
+                      </Link>
+                    </td>
+                    {amountCell(r.amountCents)}
+                    {priorCell(priorCogsOtherByCode.get(r.code) ?? 0)}
+                    {deltaCell(delta(r.amountCents, priorCogsOtherByCode.get(r.code) ?? 0))}
+                  </tr>
+                ))}
+                <TotalRow label="Total variances & adjustments" cur={pl.current.cogsOtherTotal} prior={pl.prior.cogsOtherTotal} />
+              </>
+            )}
+
+            <TotalRow label="Total cost of goods sold" cur={pl.current.cogsTotal} prior={pl.prior.cogsTotal} />
+
+            {/* Gross profit — the figure the shop is actually managed by. */}
+            <tr className="border-t-2 border-amber-500/30 bg-amber-500/5 font-semibold">
+              <td className="px-4 py-3 text-sm text-white">Gross profit</td>
+              <td className={`px-4 py-3 text-right font-mono ${pl.current.grossProfitCents >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                {fmtCents(pl.current.grossProfitCents)}
+              </td>
+              <td className="px-4 py-3 text-right font-mono text-zinc-500">{fmtCents(pl.prior.grossProfitCents)}</td>
+              {deltaCell(delta(pl.current.grossProfitCents, pl.prior.grossProfitCents))}
+            </tr>
+
+            {/* Operating payroll by department */}
+            <SectionHeader label="Operating payroll & benefits (by department)" />
             {pl.current.laborByDept.map((r) => (
               <tr key={r.departmentName} className="border-t border-white/5">
                 <td className="px-4 py-2 text-xs pl-8">{r.departmentName}</td>
@@ -92,10 +160,10 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
                 {deltaCell(delta(r.amountCents, priorLaborByDept.get(r.departmentName) ?? 0))}
               </tr>
             ))}
-            <TotalRow label="Total labor" cur={pl.current.laborTotal} prior={pl.prior.laborTotal} />
+            <TotalRow label="Total payroll & benefits" cur={pl.current.laborTotal} prior={pl.prior.laborTotal} />
 
-            {/* Other expenses */}
-            <SectionHeader label="Other expenses" />
+            {/* Other operating expenses */}
+            <SectionHeader label="Other operating expenses" />
             {pl.current.otherExpense.map((r) => (
               <tr key={r.code} className="border-t border-white/5 hover:bg-white/5">
                 <td className="px-4 py-2 text-xs">
@@ -108,7 +176,8 @@ export default async function PnlPage({ searchParams }: { searchParams: Promise<
                 {deltaCell(delta(r.amountCents, priorOtherByCode.get(r.code) ?? 0))}
               </tr>
             ))}
-            <TotalRow label="Total other expenses" cur={pl.current.otherExpenseTotal} prior={pl.prior.otherExpenseTotal} />
+            <TotalRow label="Total other operating" cur={pl.current.otherExpenseTotal} prior={pl.prior.otherExpenseTotal} />
+            <TotalRow label="Total operating expenses" cur={pl.current.operatingTotal} prior={pl.prior.operatingTotal} />
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-white/20 font-body font-bold text-white">
