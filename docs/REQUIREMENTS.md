@@ -2625,6 +2625,99 @@ allocated unit costs (no two parts share a price).
 - Multi-sheet `.xlsx` upload (today: one CSV sheet per import; export each
   tab, or paste it).
 
+## AP: PO receipt / vendor bill double-count (fixed)
+
+**Requirement (user, this session):** fix the P0 from
+`audits/audit-2026-08-03.md` where receiving a PO and entering its vendor bill
+both credited Accounts Payable.
+
+### What was wrong
+
+Receiving goods and being billed for them are two events against **one**
+liability, but both credited AP (2000):
+
+| Event | Old entry |
+| --- | --- |
+| Receive parts | Dr Inventory 1200 / **Cr AP 2000** |
+| Vendor bill | Dr *hand-picked expense* / **Cr AP 2000** |
+
+A $10,000 PO received **and** billed therefore showed **$20,000** owed, and the
+cost was booked twice — once as an Inventory asset, once as an expense.
+
+### What is true now
+
+Receipt credits a clearing account; the bill relieves it.
+
+| Event | Entry |
+| --- | --- |
+| Receive parts | Dr Inventory 1200 / Cr **Accrued Purchases 2050** |
+| Bill **against a PO** | Dr **2050** (received value) + Dr **5900** (any excess) / Cr AP 2000 |
+| Bill **not** against a PO | Dr chosen expense/asset accounts / Cr AP 2000 *(unchanged)* |
+| Pay vendor | Dr AP 2000 / Cr Cash 1000 *(unchanged)* |
+
+Over a full cycle Inventory rises, Cash falls, and 2050 returns to zero. Its
+running balance is a useful figure on its own: **goods received but not yet
+invoiced**.
+
+- [x] `docs/sql/accounting_phase10.sql` adds `2050 Accrued Purchases (GRNI)` and
+  `5900 Purchase Price Variance`; both are also in the phase-1 seed so a fresh
+  environment gets them without running phase 10.
+- [x] `src/lib/inventoryLedger.ts` — `postInventoryReceipt` credits 2050.
+- [x] `src/lib/ap.ts` — `createBill` with a `purchaseOrderId` relieves the
+  accrual and routes any excess to variance. **The caller's line accounts are
+  overridden on purpose**: the goods are already capitalised in Inventory, so
+  debiting an expense here is precisely the double-count being removed. Line
+  descriptions/amounts are still kept as bill detail.
+- [x] `accruedRemainingForPo()` is the three-way match. "Received" comes from
+  `part_receipts` (append-only, priced at arrival) rather than the PO's
+  **editable** line items, so a later price edit cannot rewrite history.
+  "Already relieved" is prior bills' 2050 debits, not their totals — a bill that
+  ran over only relieved part of itself.
+- [x] `BillForm` gained the PO picker. Before this, `purchaseOrderId` was never
+  sent by any UI, so **no bill was linked to a PO at all** and there would have
+  been nothing to trigger the new path. Selecting a PO hides the per-line
+  Account/Department pickers (the GL side is determined) and warns when the bill
+  exceeds the received value.
+
+**A partial bill is not a variance.** Billing less than was received leaves the
+remainder accrued, because another invoice is normally still coming. Only the
+*excess* over received value becomes variance. The consequence: if a vendor
+permanently under-bills, that residue sits in 2050 until someone clears it —
+there is no PO-close to detect "no more invoices are coming" (see the audit's
+D-8).
+
+### ⚠️ Sizing what is already posted
+
+Fixing the code stops new double-counts. It does **not** correct entries already
+in the ledger. Run this to size the existing overstatement:
+
+```sql
+SELECT COUNT(*) AS receipt_entries,
+       (SUM(jl.credit_cents)/100.0)::numeric(14,2) AS overstated_dollars,
+       MIN(je.entry_date)::date AS first_seen,
+       MAX(je.entry_date)::date AS last_seen
+FROM journal_lines jl
+JOIN journal_entries je ON je.id = jl.journal_entry_id
+JOIN gl_accounts    g  ON g.id  = jl.account_id
+WHERE g.code = '2000'
+  AND je.status = 'posted'
+  AND je.source = 'system'
+  AND je.memo LIKE 'Inventory received%'
+  AND jl.credit_cents > 0;
+```
+
+Correcting it is one journal entry reclassifying those credits from 2000 to
+2050 — **but whether to reclassify or reverse depends on which of those POs were
+also billed**, which is a call for whoever signs off on the books. Not posted
+automatically, on purpose.
+
+### Unrelated gap found while testing
+
+`part_receipts` has **no `CREATE TABLE` anywhere in the repo** —
+`promo_phase2.sql` calls it "the existing FIFO layer table" and only ALTERs it.
+A fresh environment cannot be built from the SQL in version control; the table
+has to be created by hand first. Worth adding a phase file for it.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

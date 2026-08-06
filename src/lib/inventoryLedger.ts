@@ -16,10 +16,11 @@
 //     Inventory GL account reconciled to the FIFO subledger (rule #6).
 //
 // GL codes (seeded by accounting_phase1.sql):
-//   1200 Inventory · 1300 Work in Progress · 2000 Accounts Payable
+//   1200 Inventory · 1300 Work in Progress · 2050 Accrued Purchases (GRNI)
 //
 // Postings:
-//   Receive parts:  Dr Inventory / Cr Accounts Payable
+//   Receive parts:  Dr Inventory / Cr Accrued Purchases   (NOT Accounts Payable —
+//                   the vendor bill credits AP when it relieves this accrual)
 //   Issue to build: Dr Work in Progress / Cr Inventory   (tagged work_order_id)
 //   Restore build:  Dr Inventory / Cr Work in Progress   (reverses an issue)
 
@@ -28,9 +29,19 @@ import { resolveAccountId, postJournalEntryTx } from "@/lib/accounting";
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-const CODES = { inventory: "1200", wip: "1300", ap: "2000" } as const;
+const CODES = { inventory: "1200", wip: "1300", accrued: "2050" } as const;
 
-/** Dr Inventory / Cr Accounts Payable for goods received. No-op if <= 0 or unseeded. */
+/**
+ * Dr Inventory / Cr Accrued Purchases for goods received. No-op if <= 0 or the
+ * chart of accounts isn't seeded.
+ *
+ * Credits the ACCRUAL (2050), not Accounts Payable. Receiving goods and being
+ * billed for them are two events against one liability; this used to credit
+ * 2000 and so did the vendor bill, which meant a $10,000 PO received and billed
+ * showed $20,000 owed and booked the cost twice — once as an Inventory asset,
+ * once as an expense. The bill now relieves 2050 and credits 2000 instead (see
+ * `createBill` in src/lib/ap.ts), so over the full cycle 2050 returns to zero.
+ */
 export async function postInventoryReceipt(
   tx: Tx,
   opts: { totalCents: number; poNumber?: string | null; createdBy?: string | null },
@@ -38,8 +49,8 @@ export async function postInventoryReceipt(
   const totalCents = Math.round(opts.totalCents);
   if (totalCents <= 0) return;
   const inventoryId = await resolveAccountId(tx, CODES.inventory);
-  const apId = await resolveAccountId(tx, CODES.ap);
-  if (!inventoryId || !apId) return; // accounting not set up — skip silently
+  const accruedId = await resolveAccountId(tx, CODES.accrued);
+  if (!inventoryId || !accruedId) return; // accounting not set up — skip silently
 
   await postJournalEntryTx(tx, {
     memo: `Inventory received${opts.poNumber ? ` (PO ${opts.poNumber})` : ""}`,
@@ -47,7 +58,7 @@ export async function postInventoryReceipt(
     createdBy: opts.createdBy ?? null,
     lines: [
       { accountId: inventoryId, debitCents: totalCents, memo: "Inventory" },
-      { accountId: apId, creditCents: totalCents, memo: "Accounts payable" },
+      { accountId: accruedId, creditCents: totalCents, memo: "Accrued purchases (not yet invoiced)" },
     ],
   });
 }
