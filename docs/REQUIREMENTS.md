@@ -2441,12 +2441,17 @@ DELETE FROM labor_rates
 CREATE UNIQUE INDEX IF NOT EXISTS labor_rates_single_default_uidx
   ON labor_rates ((user_id IS NULL)) WHERE user_id IS NULL;
 
--- Shop-wide default hourly COST rate: $95.00/h, matching the old
--- hardcoded constant so nothing shifts on day one. Adjust as needed —
--- or set it from /accounting/labor-rates instead.
-UPDATE labor_rates SET rate_cents = 9500, updated_at = now() WHERE user_id IS NULL;
+-- Shop-wide default hourly COST rate. Written in DOLLARS in one place;
+-- rate_cents is integer cents, so it is converted here rather than making
+-- you do the arithmetic. $95.00 matches the old hardcoded constant, so
+-- nothing shifts on day one. Or just set it at /accounting/labor-rates.
+WITH rate AS (SELECT ROUND(95.00 * 100)::bigint AS cents)
+UPDATE labor_rates SET rate_cents = (SELECT cents FROM rate), updated_at = now()
+ WHERE user_id IS NULL;
+
+WITH rate AS (SELECT ROUND(95.00 * 100)::bigint AS cents)
 INSERT INTO labor_rates (user_id, rate_cents)
-SELECT NULL, 9500
+SELECT NULL, (SELECT cents FROM rate)
  WHERE NOT EXISTS (SELECT 1 FROM labor_rates WHERE user_id IS NULL);
 ```
 
@@ -2462,7 +2467,24 @@ background with black/navy fonts.
 
 Selected by `data-theme` on `<html>`; all values live in
 `src/app/globals.css`. `src/lib/theme.ts` holds the theme list and the
-bootstrap script; `src/components/ThemeToggle.tsx` is the header picker.
+bootstrap script; `src/components/ThemeToggle.tsx` is the header control.
+
+### The header control (user, this session)
+
+A single **sun/moon icon button**, top-right next to the notification bell —
+requested in place of the original three-way Dark/Black/Day segmented
+control. The icon shows what you'll *get*, not where you are: a sun means
+"click for day".
+
+There are three themes but only one moon, so **the night side resolves to
+whichever dark theme was last used** (`chiefs-theme-night` in
+localStorage, default `dark`). Someone on Black who flips to day and back
+returns to Black rather than being silently moved to Dark. Black therefore
+has no UI to reach it from Day — switching a browser's night side to Black
+means setting `chiefs-theme` to `black` once (dev tools, or
+`localStorage.setItem('chiefs-theme','black')`), after which the toggle
+remembers it. If Black needs to be pickable again, that is a third state on
+this button or a small picker elsewhere.
 
 ### How it re-skins 106 files with no component edits
 
@@ -2496,6 +2518,27 @@ ratios, so they follow automatically. 584 literal `text-[Npx]` usages span
 only five distinct values, so five unlayered rules scale them all.
 `--font-weight-*` is set per theme: Day lightest, Dark middle, Black
 heaviest (dark ink on cream already reads heavy; 700+ there turns muddy).
+
+### Display font weight is capped — do not remove this
+
+**Syne is a variable font with a 400–800 weight axis, and its glyphs widen
+sharply along it.** Measured at one size, weight 780 renders **~35% wider**
+than 700 — "Chiefs Pursuit Surplus" at 332px vs 246px. So the app-wide weight
+bump, which is correct for DM Sans, stretched every heading and made figures
+like `PO-4640938 · $13,531.25` hard to read.
+
+`.font-display` therefore redefines `--font-weight-*` locally (bold 650,
+semibold 600) plus `letter-spacing: -0.02em`. This works because a custom
+property resolves from the element it is used on, so the `font-bold` utility
+on a `.font-display` element picks up the local value rather than `:root`'s.
+Result is 228px — narrower than even the original 700 — while keeping Syne's
+character.
+
+Display weight is deliberately **theme-independent**: letting it vary per
+theme would reintroduce width differences between themes. If the headings
+ever need adjusting, change those three numbers rather than the `:root`
+weights, or the stretching comes back. No `.font-display` element uses a
+`tracking-*` utility, which is what makes setting letter-spacing there safe.
 
 ### Contrast
 
