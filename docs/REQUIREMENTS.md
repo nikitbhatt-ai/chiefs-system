@@ -1082,10 +1082,36 @@ CREATE INDEX IF NOT EXISTS packages_name_idx ON packages (name);
 CREATE INDEX IF NOT EXISTS packages_tags_gin ON packages USING gin (tags);
 ```
 
+**Bundle/deal price (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN package_price numeric(12,2);
+```
+
+- [x] **Sell-side bundle/deal price on a package** (added 2026-08-06). Fixes
+      "adding a promo package to a quote doesn't discount/allocate anything":
+      sales `packages` stored only à la carte line prices, and by design
+      (`PROMO_PACKAGES.md §0`) the purchase-side `vendor_promo` allocation must
+      not bleed onto customer quotes. So packages gained an optional
+      `package_price` — the customer's deal price for the package's PART lines.
+      When set, dropping the package on a quote allocates it across the part
+      lines as per-line `$ off` discounts so their line totals sum to it exactly
+      (labor/fees quote separately); when blank, behavior is unchanged (à la
+      carte). Reuses the Phase-3 allocation engine (`allocatePromo`) on the sell
+      basis via `expandPackageWithBundlePrice()` in `src/lib/packages.ts`;
+      refuses a price above the à la carte parts value (adds the lines
+      undiscounted and tells the rep why). Settable on the package builder (live
+      saving preview) and via the import column
+      `package_price`/`promo_price`/`bundle_price` (package-level, first row that
+      supplies it wins). Surfaced on the `/packages` list under the total price.
+      This supersedes the deferred item below for the itemized case.
+
 ### Deferred (post Packages v1)
 
 - **Fixed-price bundle option** (single-line package price) as an alternative
-  to the itemized roll-up, chosen per package.
+  to the itemized roll-up, chosen per package. (Partly addressed 2026-08-06 by
+  the sell-side bundle price above, which keeps the itemized lines but allocates
+  a deal price across them; a single-collapsed-line variant is still open.)
 - **Package on the PDF/print view** as a labeled group header rather than a
   flat list of lines.
 - **Package profitability report** (Shop Monkey surfaces most-used / highest-

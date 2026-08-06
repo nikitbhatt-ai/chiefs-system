@@ -85,10 +85,14 @@ export function ImportClient() {
           <code>label</code>/<code>part_description</code>, <code>quantity</code>/
           <code>qty</code>, <code>unit_price</code>/<code>sell_price</code>,{" "}
           <code>hours</code>, <code>rate</code>, <code>amount</code>,{" "}
-          <code>package_category</code>, <code>package_description</code>. A part
-          SKU that isn&apos;t in inventory yet still imports (linked by SKU, with
-          its price snapshotted). A bad row is dropped and reported; the rest of
-          its package still imports. Existing packages (by name) are replaced.
+          <code>package_category</code>, <code>package_description</code>,{" "}
+          <code>package_price</code>/<code>promo_price</code>/
+          <code>bundle_price</code> (a package-level deal price — set it on any
+          one row of the package; on a quote it&apos;s allocated across the part
+          lines as discounts). A part SKU that isn&apos;t in inventory yet still
+          imports (linked by SKU, with its price snapshotted). A bad row is
+          dropped and reported; the rest of its package still imports. Existing
+          packages (by name) are replaced.
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">

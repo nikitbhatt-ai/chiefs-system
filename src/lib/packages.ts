@@ -11,6 +11,7 @@
 // both server actions and client components. Only the *type* comes from the
 // schema, and `import type` is erased at build time.
 import type { PackageComponent } from "@/db/schema";
+import { allocatePromo } from "@/lib/promoAllocation";
 
 // The quote editor's line shape. Mirrors QuoteLine in
 // src/app/quotes/[id]/QuoteEditor.tsx. Components become lines with a
@@ -53,6 +54,67 @@ export function componentsToQuoteLines(components: PackageComponent[]): Expanded
 // (hours × rate) + fees. Shown as a reference figure in the builder and
 // package list; the real total is recomputed on the quote after discounts
 // and tax.
+/**
+ * Expand a package onto quote lines, applying its sell-side bundle price (if
+ * set) as per-line discounts on the PART lines so their line totals sum exactly
+ * to the bundle price. Labor/fees are left at full price — a bundle/promo price
+ * covers the parts. Reuses the promo allocation engine (integer cents, ties to
+ * target exactly, refuses a price above the à la carte parts value).
+ *
+ * Returns the (possibly discounted) lines plus a status the editor can surface:
+ * `allocated` true when a discount was applied, `error` when a bundle price was
+ * set but couldn't be allocated (no parts, or price > à la carte) — in which
+ * case the lines come back undiscounted so the rep still gets the bundle.
+ */
+export function expandPackageWithBundlePrice(
+  components: PackageComponent[],
+  packagePrice: number | string | null | undefined,
+): { lines: ExpandedQuoteLine[]; allocated: boolean; error: string | null; saving: number | null } {
+  const lines = componentsToQuoteLines(components);
+
+  const raw = packagePrice == null ? "" : String(packagePrice).trim();
+  const price = raw === "" ? null : Number(raw);
+  if (price == null || !Number.isFinite(price) || price <= 0) {
+    return { lines, allocated: false, error: null, saving: null };
+  }
+
+  // Basis = each part line's extended sell value; allocate the bundle price
+  // across only the item lines, remembering their positions.
+  const itemIdx: number[] = [];
+  const allocInput: { sku: string; quantity: number; alacarteCostCents: number }[] = [];
+  lines.forEach((l, i) => {
+    if (l.kind === "item") {
+      itemIdx.push(i);
+      allocInput.push({
+        sku: l.description || `line ${i + 1}`,
+        quantity: l.quantity || 0,
+        alacarteCostCents: Math.round((l.unitPrice || 0) * 100),
+      });
+    }
+  });
+  if (allocInput.length === 0) {
+    return { lines, allocated: false, error: "This package has no part lines to apply a bundle price to.", saving: null };
+  }
+
+  const result = allocatePromo(Math.round(price * 100), allocInput);
+  if (!result.ok) {
+    return { lines, allocated: false, error: result.error, saving: null };
+  }
+
+  const out: ExpandedQuoteLine[] = lines.map((l) => ({ ...l }));
+  result.lines.forEach((al, k) => {
+    const idx = itemIdx[k];
+    const line = out[idx];
+    if (line.kind === "item") {
+      const grossCents = Math.round((line.unitPrice || 0) * 100) * (line.quantity || 0);
+      const discCents = Math.max(0, grossCents - al.allocatedExtendedCents);
+      line.discount = Math.round(discCents) / 100;
+      line.discountKind = "amt";
+    }
+  });
+  return { lines: out, allocated: true, error: null, saving: result.savingCents / 100 };
+}
+
 export function packageValue(components: PackageComponent[]): number {
   let total = 0;
   for (const c of components ?? []) {

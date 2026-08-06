@@ -18,6 +18,7 @@ export function PackageBuilder({
   name,
   category,
   description,
+  packagePrice,
   initialComponents,
   action,
 }: {
@@ -25,10 +26,12 @@ export function PackageBuilder({
   name: string;
   category: string;
   description: string;
+  packagePrice: string;
   initialComponents: BuilderComponent[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [components, setComponents] = useState<BuilderComponent[]>(initialComponents);
+  const [bundlePrice, setBundlePrice] = useState<string>(packagePrice ?? "");
 
   const value = useMemo(() => {
     let parts = 0;
@@ -308,7 +311,7 @@ export function PackageBuilder({
       </div>
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
-        <div className="flex flex-wrap gap-4 text-zinc-400">
+        <div className="flex flex-wrap gap-4 text-zinc-400 items-center">
           <span>Parts <span className="text-white">{fmt(value.parts)}</span></span>
           <span>Labor <span className="text-white">{fmt(value.labor)}</span></span>
           <span>Fees <span className="text-white">{fmt(value.fees)}</span></span>
@@ -323,6 +326,58 @@ export function PackageBuilder({
           </button>
         </div>
       </div>
+
+      {(() => {
+        const bp = bundlePrice.trim() === "" ? null : Number(bundlePrice);
+        const valid = bp != null && Number.isFinite(bp) && bp > 0;
+        const tooHigh = valid && bp > value.parts + 0.005;
+        const saving = valid && !tooHigh ? value.parts - bp : null;
+        return (
+          <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-xs font-body font-semibold text-white uppercase tracking-wider">
+                Bundle / promo price
+              </label>
+              <div className="relative">
+                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">$</span>
+                <input
+                  name="packagePrice"
+                  value={bundlePrice}
+                  onChange={(e) => setBundlePrice(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="e.g. 12500.00"
+                  className="bg-black/40 border border-white/10 rounded-md pl-5 pr-3 py-1.5 text-sm text-white w-40"
+                />
+              </div>
+              {bundlePrice.trim() !== "" ? (
+                <button
+                  type="button"
+                  onClick={() => setBundlePrice("")}
+                  className="text-[11px] text-zinc-500 hover:text-white"
+                >
+                  Clear
+                </button>
+              ) : null}
+              {saving != null ? (
+                <span className="text-[11px] text-emerald-300">
+                  Customer saves {fmt(saving)} vs à la carte parts ({fmt(value.parts)}) — spread across the part lines on a quote.
+                </span>
+              ) : null}
+              {tooHigh ? (
+                <span className="text-[11px] text-red-400">
+                  Bundle price is above the à la carte parts total ({fmt(value.parts)}); it can&apos;t allocate. Lower it or leave blank.
+                </span>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-zinc-500">
+              Optional. Leave blank to quote at à la carte line prices. When set, dropping this package on a quote allocates
+              this total across the <em>part</em> lines as per-line discounts so their totals sum to it (labor/fees quote
+              separately). Sell-side only — this is the customer&apos;s deal price, not a vendor cost.
+            </p>
+          </div>
+        );
+      })()}
+
       <p className="text-[11px] text-zinc-500 font-body">
         Package value is a reference figure (undiscounted). On a quote, each component becomes its own editable line, so discounts and tax are applied there.
       </p>

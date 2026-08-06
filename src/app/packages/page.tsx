@@ -207,7 +207,14 @@ export default async function PackagesPage({
                       {c.labor ? ` · ${c.labor} labor` : ""}
                       {c.fees ? ` · ${c.fees} fee${c.fees === 1 ? "" : "s"}` : ""}
                     </td>
-                    <td className="px-3 py-2 text-xs text-right text-white">{fmtMoney(price)}</td>
+                    <td className="px-3 py-2 text-xs text-right text-white">
+                      {fmtMoney(price)}
+                      {p.packagePrice != null ? (
+                        <div className="text-[10px] text-amber-300/90" title="Sell-side bundle/deal price — allocated across the part lines when added to a quote">
+                          bundle {fmtMoney(Number(p.packagePrice))}
+                        </div>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-xs text-right text-zinc-300">
                       {fmtMoney(cc.cost)}
                       {cc.missing > 0 ? (

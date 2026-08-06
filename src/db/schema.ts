@@ -554,6 +554,13 @@ export const packages = pgTable("packages", {
   category: text("category"),
   description: text("description"),
   components: jsonb("components").$type<PackageComponent[]>().notNull().default([]),
+  // Optional sell-side bundle/deal price for the PARTS in this package (e.g. a
+  // manufacturer promo the customer is quoted at). Null = no deal price; the
+  // package quotes at à la carte line prices. When set, dropping the package on
+  // a quote allocates this total across the part lines as per-line discounts so
+  // the line totals sum to it. Sell-side only — distinct from vendor_promo,
+  // which is the purchase-side allocation (PROMO_PACKAGES.md §0: keep separate).
+  packagePrice: numeric("package_price", { precision: 12, scale: 2 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("packages_name_idx").on(t.name)]);

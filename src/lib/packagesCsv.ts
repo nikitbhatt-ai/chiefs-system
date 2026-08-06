@@ -41,6 +41,9 @@ export type ParsedPackage = {
   name: string;
   category: string | null;
   description: string | null;
+  // Optional sell-side bundle/deal price for the whole package's parts. Package-
+  // level, so it's read from whichever row in the block supplies it first.
+  packagePrice: number | null;
   rows: RawComponentRow[];
 };
 
@@ -54,6 +57,13 @@ const HEADER_ALIASES: Record<string, string> = {
   package_category: "packageCategory",
   category: "packageCategory",
   package_description: "packageDescription",
+  // Sell-side bundle/deal price for the package (a promo the customer is quoted
+  // at). Package-level column; allocated across the part lines on a quote.
+  package_price: "packagePrice",
+  bundle_price: "packagePrice",
+  promo_price: "packagePrice",
+  deal_price: "packagePrice",
+  net_price: "packagePrice",
   component_type: "componentType",
   type: "componentType",
   kind: "componentType",
@@ -198,6 +208,12 @@ export function parsePackageCsv(text: string): {
       warnings,
     };
 
+    // Package-level bundle price — read from whichever row supplies it first.
+    const priceRaw = get("packagePrice");
+    const priceNum = priceRaw ? Number(priceRaw.replace(/[$,]/g, "")) : null;
+    const bundlePrice = priceNum != null && Number.isFinite(priceNum) && priceNum > 0 ? priceNum : null;
+    if (priceRaw && bundlePrice == null) warnings.push(`package_price not a positive number (${priceRaw}) — ignored`);
+
     const key = packageName || `__row_${rowNumber}__`;
     let pkg = byName.get(key.toLowerCase());
     if (!pkg) {
@@ -205,14 +221,16 @@ export function parsePackageCsv(text: string): {
         name: packageName,
         category: get("packageCategory") || null,
         description: get("packageDescription") || null,
+        packagePrice: bundlePrice,
         rows: [],
       };
       byName.set(key.toLowerCase(), pkg);
       order.push(key.toLowerCase());
     } else {
-      // Fill category/description from the first row that supplies them.
+      // Fill category/description/bundle price from the first row that supplies them.
       if (!pkg.category) pkg.category = get("packageCategory") || null;
       if (!pkg.description) pkg.description = get("packageDescription") || null;
+      if (pkg.packagePrice == null) pkg.packagePrice = bundlePrice;
     }
     pkg.rows.push(row);
   }

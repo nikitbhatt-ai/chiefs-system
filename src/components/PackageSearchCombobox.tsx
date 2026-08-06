@@ -11,6 +11,7 @@ export type PackageHit = {
   category: string | null;
   description: string | null;
   components: PackageComponent[];
+  packagePrice: string | null;
 };
 
 // Server-backed package picker for the quote editor's "+ Add package" control.
