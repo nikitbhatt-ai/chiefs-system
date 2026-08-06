@@ -8,6 +8,7 @@ import { workOrders } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtCents } from "@/lib/accounting";
 import { jobCostRollup, laborForWorkOrder, settleJobToCogs, reopenJob } from "@/lib/jobCosting";
+import { cogsSplitForWorkOrder } from "@/lib/cogsCategories";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,14 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
 
   const [rollup, labor] = await Promise.all([jobCostRollup(id), laborForWorkOrder(id)]);
   if (!rollup) notFound();
+
+  // What the settle button would actually post, account by account. Shown before
+  // the fact because "which COGS accounts does this hit" is the question the split
+  // exists to answer, and it's much cheaper to check here than in the journal.
+  const split =
+    rollup.wipBalanceCents > 0 && !rollup.settled
+      ? await cogsSplitForWorkOrder(db, id, rollup.wipBalanceCents)
+      : [];
 
   async function settle() {
     "use server";
@@ -112,6 +121,43 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
         </table>
       </div>
 
+      {split.length > 0 && (
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 bg-white/5 text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Settling would debit
+          </div>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+                <th className="px-4 py-2">COGS account</th>
+                <th className="px-4 py-2">From categories</th>
+                <th className="px-4 py-2 text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="font-body text-zinc-200">
+              {split.map((s) => (
+                <tr key={s.accountId} className="border-t border-white/5">
+                  <td className="px-4 py-2 text-xs text-white">
+                    <span className="font-mono text-zinc-400">{s.code}</span> {s.name}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-zinc-400">
+                    {s.categories.length > 0 ? s.categories.join(", ") : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono text-xs">{fmtCents(s.cents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="px-4 py-2 border-t border-white/5 text-[11px] text-zinc-500 font-body">
+            Split by the categories of the parts issued to this job.{" "}
+            <Link href="/accounting/cogs-categories" className="text-amber-400 hover:text-amber-300">
+              Change which account a category maps to
+            </Link>
+            .
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-end gap-2">
         {!rollup.settled && rollup.wipBalanceCents > 0 && (
           <form action={settle}>
@@ -131,8 +177,9 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
 
       <p className="text-[11px] text-zinc-500 font-body">
         Settling posts Dr Cost of Goods Sold / Cr Work in Progress for the amount still in WIP, moving this job&apos;s
-        material cost out of inventory and into COGS. Labor is expensed through payroll and shown here for the full job
-        cost picture, not posted again.
+        material cost out of inventory and into COGS — split across the component COGS accounts by part category, so
+        the P&amp;L shows lights, wire and consoles separately instead of one Materials line. Labor is expensed through
+        payroll and shown here for the full job cost picture, not posted again.
       </p>
     </AppShell>
   );

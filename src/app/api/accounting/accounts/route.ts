@@ -5,9 +5,12 @@ import { requireRole } from "@/lib/rbac";
 import { db } from "@/db";
 import { glAccounts } from "@/db/schema";
 
-const TYPES = ["asset", "liability", "equity", "revenue", "expense"] as const;
-const GROUPS = ["revenue", "labor", "other_expense", "none"] as const;
-const BALANCES = ["debit", "credit"] as const;
+import {
+  defaultReportGroupFor,
+  isAccountType,
+  isReportGroupValidFor,
+  normalBalanceFor,
+} from "@/lib/chartOfAccounts";
 
 export async function GET() {
   const session = await auth();
@@ -26,11 +29,17 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "code is required" }, { status: 400 });
   if (typeof body.name !== "string" || !body.name.trim())
     return NextResponse.json({ error: "name is required" }, { status: 400 });
-  if (!TYPES.includes(body.type))
+  if (!isAccountType(body.type))
     return NextResponse.json({ error: "invalid type" }, { status: 400 });
-  if (!BALANCES.includes(body.normalBalance))
-    return NextResponse.json({ error: "invalid normal_balance" }, { status: 400 });
-  const reportGroup = GROUPS.includes(body.reportGroup) ? body.reportGroup : "none";
+  // Normal balance is derived, never accepted from the caller: an expense with a
+  // credit balance (or a liability with a debit one) inverts every report built
+  // on it. Any `normalBalance` in the body is ignored on purpose.
+  const normalBalance = normalBalanceFor(body.type);
+  // The group must belong to the type, so a COGS account can't be filed under
+  // operating expenses and end up below gross profit.
+  const reportGroup = isReportGroupValidFor(body.type, body.reportGroup)
+    ? body.reportGroup
+    : defaultReportGroupFor(body.type);
 
   const [row] = await db
     .insert(glAccounts)
@@ -39,7 +48,7 @@ export async function POST(req: Request) {
       name: body.name.trim(),
       type: body.type,
       reportGroup,
-      normalBalance: body.normalBalance,
+      normalBalance,
       isActive: body.isActive ?? true,
     })
     .returning();

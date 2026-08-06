@@ -153,15 +153,30 @@ export async function setAccountMapping(glAccountId: string, qboAccountId: strin
 
 // ── Payroll labor import (for P&L reconciliation) ─────────────────────────────
 
+/** Whether a department's payroll is a cost of the build or overhead. */
+export type PayrollKind = "direct" | "admin";
+
+/** Direct labor is a cost of goods sold; administrative payroll is overhead. */
+export const PAYROLL_ACCOUNT_BY_KIND: Record<PayrollKind, string> = {
+  direct: "5300", // Direct Labor — Installers (COGS, above gross profit)
+  admin: "6010", // Payroll — Administrative (operating expense)
+};
+
 /**
  * Bring payroll labor totals into the ledger so the P&L labor section
- * reconciles with payroll. Posts Dr Wages (5000) per department / Cr Cash (1000)
- * for the total. When a live QBO connection exists these totals would be pulled
- * automatically; today they're entered from the payroll report.
+ * reconciles with payroll. Cr Cash (1000) for the total; the debit goes to
+ * 5300 Direct Labor or 6010 Payroll — Administrative per line.
+ *
+ * The split is entered, not inferred: only whoever runs payroll knows which
+ * departments turn wrenches on jobs, and putting overhead above gross profit (or
+ * direct labor below it) misstates the margin the shop is managed by. This used
+ * to post everything to 5000 Wages, which Phase 11 retired for exactly that
+ * reason. Lines default to `admin` — the conservative side, since overstating
+ * gross profit is the more misleading error.
  */
 export async function importPayrollLabor(opts: {
   periodLabel: string;
-  lines: { departmentId: string | null; amountCents: number }[];
+  lines: { departmentId: string | null; amountCents: number; kind?: PayrollKind }[];
   entryDate?: Date;
   createdBy?: string | null;
 }) {
@@ -169,14 +184,30 @@ export async function importPayrollLabor(opts: {
   if (lines.length === 0) throw new LedgerError("Enter at least one department labor total greater than zero.");
   const total = lines.reduce((s, l) => s + Math.round(l.amountCents), 0);
 
-  const [wagesId, cashId] = await Promise.all([accountId("5000"), accountId("1000")]);
+  // Resolve only the accounts this import actually needs, so a shop that never
+  // marks anything direct isn't blocked on 5300 existing.
+  const kinds = new Set<PayrollKind>(lines.map((l) => l.kind ?? "admin"));
+  const [cashId, ...kindIds] = await Promise.all([
+    accountId("1000"),
+    ...[...kinds].map((k) => payrollAccountId(k)),
+  ]);
+  const accountByKind = new Map([...kinds].map((k, i) => [k, kindIds[i]]));
+
   const entry = await postJournalEntry({
     entryDate: opts.entryDate ?? new Date(),
     memo: `Payroll labor — ${opts.periodLabel}`,
     source: "system",
     createdBy: opts.createdBy ?? null,
     lines: [
-      ...lines.map((l) => ({ accountId: wagesId, debitCents: Math.round(l.amountCents), departmentId: l.departmentId ?? null, memo: "Payroll wages" })),
+      ...lines.map((l) => {
+        const kind = l.kind ?? "admin";
+        return {
+          accountId: accountByKind.get(kind)!,
+          debitCents: Math.round(l.amountCents),
+          departmentId: l.departmentId ?? null,
+          memo: kind === "direct" ? "Direct labor — payroll" : "Administrative payroll",
+        };
+      }),
       { accountId: cashId, creditCents: total, memo: "Payroll paid" },
     ],
   });
@@ -196,6 +227,17 @@ export async function logSync(action: string, direction: string | null, status: 
 
 export async function listSyncLog() {
   return db.select().from(qboSyncLog).orderBy(desc(qboSyncLog.createdAt)).limit(100);
+}
+
+/** Payroll target account, with an error that names the SQL that creates it. */
+async function payrollAccountId(kind: PayrollKind): Promise<string> {
+  const code = PAYROLL_ACCOUNT_BY_KIND[kind];
+  const [row] = await db.select({ id: glAccounts.id }).from(glAccounts).where(eq(glAccounts.code, code)).limit(1);
+  if (!row)
+    throw new LedgerError(
+      `Chart of accounts is missing account ${code}. Run docs/sql/accounting_phase11.sql in Neon to split direct labor from administrative payroll.`,
+    );
+  return row.id;
 }
 
 async function accountId(code: string): Promise<string> {
