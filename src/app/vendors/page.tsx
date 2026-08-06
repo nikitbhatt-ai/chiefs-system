@@ -5,6 +5,12 @@ import { vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 
+// This page reads the live DB and has no dynamic input (no searchParams /
+// params / auth() at render), so Next would otherwise try to statically
+// prerender it at build time — which fails because there's no database during
+// the build. Render per-request instead, matching the other data pages.
+export const dynamic = "force-dynamic";
+
 async function createVendor(formData: FormData) {
   "use server";
   const name = String(formData.get("name") ?? "").trim();
