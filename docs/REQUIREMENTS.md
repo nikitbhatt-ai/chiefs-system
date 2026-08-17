@@ -1186,6 +1186,20 @@ ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
       a build.
 - [ ] Intake checklist with photo upload + generate external PDF.
 
+## Part # column + discounted-price margin/markup (added 2026-08-06)
+
+- [x] **Part number is its own column** (not under the description) on the PO
+      editor line grid and the package builder parts grid — an editable Part #
+      input per line (so a number can be typed manually), with a header label.
+      The PO PDF already carried a Part # column.
+- [x] **Margin/markup reflect cost → retail → discounted price.** The package
+      builder summary now shows **Cost (we pay)**, **Retail (list)**, and the
+      **Discounted price** (the bundle/promo price when set, else retail, with
+      the $ off retail), then **Margin** = discounted − cost (over the discounted
+      sell, %) and **Markup** = (discounted − cost)/cost. The `/packages` list
+      margin likewise uses the discounted bundle price when one is set, else the
+      retail sell.
+
 ## Purchase-order status workflow (added 2026-08-06)
 
 Statuses the user set: **Pending** (needs to be placed) → **Ordered** (placed

@@ -173,7 +173,8 @@ export function PackageBuilder({
             ) : (
               <>
                 <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
-                  <span className="col-span-5">Description</span>
+                  <span className="col-span-2">Part #</span>
+                  <span className="col-span-3">Description</span>
                   <span className="col-span-1 text-right">Qty</span>
                   <span className="col-span-2 text-right">Cost</span>
                   <span className="col-span-2 text-right">Sell</span>
@@ -185,7 +186,13 @@ export function PackageBuilder({
                     if (c.kind !== "item") return null;
                     return (
                       <div key={i} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body">
-                        <div className="col-span-5">
+                        <input
+                          value={c.sku ?? ""}
+                          onChange={(e) => update(i, { sku: e.target.value })}
+                          placeholder="Part #"
+                          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white"
+                        />
+                        <div className="col-span-3">
                           <PartSearchCombobox
                             mode="inline"
                             value={c.description}
@@ -200,7 +207,6 @@ export function PackageBuilder({
                               })
                             }
                           />
-                          {c.sku ? <div className="text-[10px] text-zinc-500 mt-0.5">Part #: {c.sku}</div> : null}
                         </div>
                         <input
                           type="number"
@@ -348,30 +354,57 @@ export function PackageBuilder({
         )}
       </div>
 
-      <div className="bg-surface border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
-        <div className="flex flex-wrap gap-4 text-zinc-400 items-center">
-          <span>Parts cost <span className="text-white">{fmt(value.cost)}</span></span>
-          <span>Parts sell <span className="text-white">{fmt(value.parts)}</span></span>
-          <span>
-            Margin{" "}
-            <span className={value.margin >= 0 ? "text-emerald-300" : "text-red-400"}>
-              {fmt(value.margin)}
-              {value.marginPct != null ? ` (${value.marginPct.toFixed(1)}%)` : ""}
-            </span>
-          </span>
-          <span>Labor <span className="text-white">{fmt(value.labor)}</span></span>
-          <span>Fees <span className="text-white">{fmt(value.fees)}</span></span>
-          <span className="text-zinc-300">Package value <span className="text-white font-bold text-sm">{fmt(value.total)}</span></span>
-        </div>
-        <div className="flex gap-2">
-          <a href="/packages" className="text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors">
-            Back
-          </a>
-          <button type="submit" className="font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
-            Save package
-          </button>
-        </div>
-      </div>
+      {(() => {
+        // Profitability reflects what we PAY (cost) against what the customer
+        // actually pays — the discounted package price when one is set, else the
+        // retail (list) sell. Margin % is over the sell; markup % is over cost.
+        const bpNum = bundlePrice.trim() === "" ? null : Number(bundlePrice);
+        const hasBundle = bpNum != null && Number.isFinite(bpNum) && bpNum > 0;
+        const discounted = hasBundle ? (bpNum as number) : value.parts; // parts-only sell
+        const marginD = discounted - value.cost;
+        const marginPct = discounted > 0 ? (marginD / discounted) * 100 : null;
+        const markupPct = value.cost > 0 ? (marginD / value.cost) * 100 : null;
+        const discountOffRetail = hasBundle ? value.parts - (bpNum as number) : 0;
+        return (
+          <div className="bg-surface border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
+            <div className="flex flex-wrap gap-4 text-zinc-400 items-center">
+              <span>Cost (we pay) <span className="text-white">{fmt(value.cost)}</span></span>
+              <span>Retail (list) <span className="text-white">{fmt(value.parts)}</span></span>
+              <span>
+                {hasBundle ? "Discounted price" : "Sell price"}{" "}
+                <span className="text-white font-semibold">{fmt(discounted)}</span>
+                {hasBundle ? <span className="text-amber-300/80"> (−{fmt(discountOffRetail)} off retail)</span> : null}
+              </span>
+              <span>
+                Margin{" "}
+                <span className={marginD >= 0 ? "text-emerald-300" : "text-red-400"}>
+                  {fmt(marginD)}
+                  {marginPct != null ? ` (${marginPct.toFixed(1)}%)` : ""}
+                </span>
+              </span>
+              <span>
+                Markup{" "}
+                <span className={marginD >= 0 ? "text-emerald-300" : "text-red-400"}>
+                  {markupPct != null ? `${markupPct.toFixed(1)}%` : "—"}
+                </span>
+              </span>
+              {value.labor || value.fees ? (
+                <span className="text-zinc-500">
+                  + Labor {fmt(value.labor)} · Fees {fmt(value.fees)}
+                </span>
+              ) : null}
+            </div>
+            <div className="flex gap-2">
+              <a href="/packages" className="text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors">
+                Back
+              </a>
+              <button type="submit" className="font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
+                Save package
+              </button>
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
         <div className="flex flex-wrap items-center gap-3">
