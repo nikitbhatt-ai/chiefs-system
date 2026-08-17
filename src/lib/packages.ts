@@ -11,6 +11,7 @@
 // both server actions and client components. Only the *type* comes from the
 // schema, and `import type` is erased at build time.
 import type { PackageComponent } from "@/db/schema";
+import { allocatePromo } from "@/lib/promoAllocation";
 
 // The quote editor's line shape. Mirrors QuoteLine in
 // src/app/quotes/[id]/QuoteEditor.tsx. Components become lines with a
@@ -25,6 +26,11 @@ export type ExpandedQuoteLine =
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
+      // Internal cost carried from the package (e.g. promo cost). When set,
+      // `costLocked` tells the quote save path not to re-snapshot it from the
+      // part's average cost, so the promo cost survives on the quote.
+      cost?: number;
+      costLocked?: boolean;
     }
   | { kind: "fee"; description: string; amount: number; fixed: boolean }
   | { kind: "labor"; description: string; hours: number; rate: number };
@@ -45,6 +51,9 @@ export function componentsToQuoteLines(components: PackageComponent[]): Expanded
       discount: 0,
       discountKind: "pct",
       partId: c.partId ?? undefined,
+      // Carry the package's internal cost onto the line and lock it, so quote
+      // save doesn't overwrite the promo cost with the part's average cost.
+      ...(c.cost != null ? { cost: c.cost, costLocked: true } : {}),
     };
   });
 }
@@ -53,6 +62,71 @@ export function componentsToQuoteLines(components: PackageComponent[]): Expanded
 // (hours × rate) + fees. Shown as a reference figure in the builder and
 // package list; the real total is recomputed on the quote after discounts
 // and tax.
+/**
+ * Expand a package onto quote lines, applying its sell-side bundle price (if
+ * set) as per-line discounts on the PART lines so their line totals sum exactly
+ * to the bundle price. Labor/fees are left at full price — a bundle/promo price
+ * covers the parts. Reuses the promo allocation engine (integer cents, ties to
+ * target exactly, refuses a price above the à la carte parts value).
+ *
+ * Returns the (possibly discounted) lines plus a status the editor can surface:
+ * `allocated` true when a discount was applied, `error` when a bundle price was
+ * set but couldn't be allocated (no parts, or price > à la carte) — in which
+ * case the lines come back undiscounted so the rep still gets the bundle.
+ */
+export function expandPackageWithBundlePrice(
+  components: PackageComponent[],
+  packagePrice: number | string | null | undefined,
+): { lines: ExpandedQuoteLine[]; allocated: boolean; error: string | null; saving: number | null } {
+  const lines = componentsToQuoteLines(components);
+
+  const raw = packagePrice == null ? "" : String(packagePrice).trim();
+  const price = raw === "" ? null : Number(raw);
+  if (price == null || !Number.isFinite(price) || price <= 0) {
+    return { lines, allocated: false, error: null, saving: null };
+  }
+
+  // Basis = each part line's extended sell value; allocate the bundle price
+  // across only the item lines (in dollars), remembering their positions.
+  const itemIdx: number[] = [];
+  const allocInput: { sku: string; quantity: number; alacarteCostSnap: number }[] = [];
+  lines.forEach((l, i) => {
+    if (l.kind === "item") {
+      itemIdx.push(i);
+      allocInput.push({
+        sku: l.description || `line ${i + 1}`,
+        quantity: l.quantity || 0,
+        alacarteCostSnap: l.unitPrice || 0,
+      });
+    }
+  });
+  if (allocInput.length === 0) {
+    return { lines, allocated: false, error: "This package has no part lines to apply a bundle price to.", saving: null };
+  }
+
+  // Reuse the promo allocation engine on the SELL basis. It throws when the
+  // bundle price exceeds the à la carte value of the parts.
+  let result;
+  try {
+    result = allocatePromo({ packagePrice: price, lines: allocInput });
+  } catch (e) {
+    return { lines, allocated: false, error: e instanceof Error ? e.message : "Could not allocate bundle price.", saving: null };
+  }
+
+  const out: ExpandedQuoteLine[] = lines.map((l) => ({ ...l }));
+  result.lines.forEach((al, k) => {
+    const idx = itemIdx[k];
+    const line = out[idx];
+    if (line.kind === "item") {
+      const gross = (line.unitPrice || 0) * (line.quantity || 0);
+      const disc = Math.max(0, gross - al.allocatedExtended);
+      line.discount = Math.round(disc * 100) / 100;
+      line.discountKind = "amt";
+    }
+  });
+  return { lines: out, allocated: true, error: null, saving: result.saving };
+}
+
 export function packageValue(components: PackageComponent[]): number {
   let total = 0;
   for (const c of components ?? []) {
@@ -61,6 +135,47 @@ export function packageValue(components: PackageComponent[]): number {
     else total += c.amount || 0;
   }
   return total;
+}
+
+/** Distinct part ids referenced by a package's item components. */
+export function packagePartIds(components: PackageComponent[]): string[] {
+  const ids = new Set<string>();
+  for (const c of components ?? []) {
+    if (c.kind === "item" && c.partId) ids.add(c.partId);
+  }
+  return [...ids];
+}
+
+/**
+ * Internal cost of a package's parts: Σ (item qty × part cost), using the cost
+ * resolved per part id (weighted-average, from the caller). Only item lines
+ * with a resolvable cost count toward `cost`; `costedValue` is the sell value
+ * of just those lines, so margin isn't understated when some parts have no cost
+ * yet. Labor/fees are excluded from cost (they're not inventory).
+ */
+export function packageCost(
+  components: PackageComponent[],
+  costByPartId: Map<string, number>,
+): { cost: number; costedValue: number; itemValue: number; missing: number } {
+  let cost = 0;
+  let costedValue = 0;
+  let itemValue = 0;
+  let missing = 0;
+  for (const c of components ?? []) {
+    if (c.kind !== "item") continue;
+    const qty = c.quantity || 0;
+    itemValue += qty * (c.unitPrice || 0);
+    // Prefer the component's own internal cost (e.g. promo cost); fall back to
+    // the part's average cost resolved by the caller.
+    const unit = c.cost != null ? c.cost : c.partId ? costByPartId.get(c.partId) : undefined;
+    if (unit != null) {
+      cost += qty * unit;
+      costedValue += qty * (c.unitPrice || 0);
+    } else {
+      missing += 1;
+    }
+  }
+  return { cost, costedValue, itemValue, missing };
 }
 
 // Coerce an arbitrary components payload (from a form, API body, or CSV) into
@@ -98,6 +213,8 @@ export function sanitizeComponents(input: unknown): PackageComponent[] {
         description: String(c.description ?? ""),
         quantity: Math.max(0, Math.trunc(num(c.quantity))),
         unitPrice: num(c.unitPrice),
+        // Preserve the internal cost when present (blank/invalid → null).
+        cost: c.cost == null || c.cost === "" ? null : num(c.cost),
         partId: c.partId ? String(c.partId) : null,
         sku: c.sku ? String(c.sku) : null,
       });

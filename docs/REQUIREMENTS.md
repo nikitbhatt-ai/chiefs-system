@@ -908,6 +908,22 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Column titles on the line-items table.
 - [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
+- [x] **Original vs discounted price per line on the customer copy** (added
+      2026-08-06). So customers can see the discount being given, each discounted
+      item line now shows its pre-discount line total struck through above the
+      discounted line total, on both the HTML print view and the PDF (quote and
+      invoice variants). Undiscounted lines are unchanged (single total). The
+      existing Discount column still shows the amount/percent. This pairs with
+      the package bundle price, which populates those per-line discounts.
+- [x] **Add a new part (with part #) inline from a quote/PO line + duplicate
+      guard** (2026-08-06). The shared `PartSearchCombobox` (used by quote and PO
+      line editors) now offers "＋ Add new part … to inventory" when typing. It
+      opens an inline form (Part # / name / cost / sell), POSTs to `/api/parts`
+      to create the part, and adds it to the line. `POST /api/parts` now rejects
+      a duplicate SKU with HTTP 409 and the message **"duplicate part number
+      detected, add appropriate part number"**, which the combobox shows as a
+      popup (`window.alert`) and inline — so a clashing part number can't be
+      silently created. Gated by an `allowCreate` prop (default on).
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
 - [ ] Print and Send-to-customer are separate (Print done; Send pending).
 - [ ] Per-customer discount calculator that pre-fills line discounts
@@ -1082,10 +1098,69 @@ CREATE INDEX IF NOT EXISTS packages_name_idx ON packages (name);
 CREATE INDEX IF NOT EXISTS packages_tags_gin ON packages USING gin (tags);
 ```
 
+**Bundle/deal price (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN package_price numeric(12,2);
+```
+
+**Promo→package link (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN source_promo_id uuid REFERENCES vendor_promo(id) ON DELETE SET NULL;
+```
+
+**Package markup / cost model (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
+```
+
+- [x] **Cost + markup → sell on packages** (user requirement 2026-08-06;
+      terminology: *cost* = internal cost, *sell price* = retail). Package item
+      components now carry an internal **cost** per unit (in the `components`
+      jsonb — no DDL) distinct from the part's normal average cost, because the
+      **promo cost differs**. A package-level **markup %** (`packages.markup_pct`,
+      the "vendor margin", default 40% on promo sync) derives each line's sell:
+      `sell = cost × (1 + markup)`. The builder shows editable Cost + Sell
+      columns, a Markup field with "Apply to sell prices", and a live
+      cost/sell/margin summary. On a quote the sell prices are used and the promo
+      cost is carried onto the line for margin/reporting; sales still add
+      case-by-case discounts on the quote (existing mechanics).
+- [x] **"Add to Packages" from a vendor promo** (added 2026-08-06). Vendor promos
+      (buy side) weren't searchable/quotable; only sales packages are. An
+      "Add to Packages" action on `/vendor-promos` materializes a sellable
+      package via `syncPromoToPackage()` in `src/lib/promos.ts`: each line's
+      internal **cost** = the promo's allocated unit cost (à la carte when the
+      promo isn't priced), **sell** = cost × (1 + markup) at the package markup
+      (default 40%). Linked via `packages.source_promo_id` (idempotent re-sync),
+      opens in the builder to tune markup/sell, and shows a "promo" badge on the
+      `/packages` list. Keeps buy/sell separate (PROMO_PACKAGES.md §0).
+
+- [x] **Sell-side bundle/deal price on a package** (added 2026-08-06). Fixes
+      "adding a promo package to a quote doesn't discount/allocate anything":
+      sales `packages` stored only à la carte line prices, and by design
+      (`PROMO_PACKAGES.md §0`) the purchase-side `vendor_promo` allocation must
+      not bleed onto customer quotes. So packages gained an optional
+      `package_price` — the customer's deal price for the package's PART lines.
+      When set, dropping the package on a quote allocates it across the part
+      lines as per-line `$ off` discounts so their line totals sum to it exactly
+      (labor/fees quote separately); when blank, behavior is unchanged (à la
+      carte). Reuses the Phase-3 allocation engine (`allocatePromo`) on the sell
+      basis via `expandPackageWithBundlePrice()` in `src/lib/packages.ts`;
+      refuses a price above the à la carte parts value (adds the lines
+      undiscounted and tells the rep why). Settable on the package builder (live
+      saving preview) and via the import column
+      `package_price`/`promo_price`/`bundle_price` (package-level, first row that
+      supplies it wins). Surfaced on the `/packages` list under the total price.
+      This supersedes the deferred item below for the itemized case.
+
 ### Deferred (post Packages v1)
 
 - **Fixed-price bundle option** (single-line package price) as an alternative
-  to the itemized roll-up, chosen per package.
+  to the itemized roll-up, chosen per package. (Partly addressed 2026-08-06 by
+  the sell-side bundle price above, which keeps the itemized lines but allocates
+  a deal price across them; a single-collapsed-line variant is still open.)
 - **Package on the PDF/print view** as a labeled group header rather than a
   flat list of lines.
 - **Package profitability report** (Shop Monkey surfaces most-used / highest-

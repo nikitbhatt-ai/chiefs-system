@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { asc } from "drizzle-orm";
 import { db } from "@/db";
 import { vendors } from "@/db/schema";
@@ -12,6 +13,7 @@ import {
   allocationInputFor,
   setPromoStatus,
   deletePromo,
+  syncPromoToPackage,
 } from "@/lib/promos";
 import { allocatePromo } from "@/lib/promoAllocation";
 import { PromoBuilder } from "./PromoBuilder";
@@ -63,6 +65,16 @@ export default async function VendorPromosPage() {
     if (!session?.user) return;
     await setPromoStatus(String(formData.get("id")), "active");
     revalidatePath("/vendor-promos");
+  }
+  async function addToPackages(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const res = await syncPromoToPackage(String(formData.get("id")));
+    if (!res.ok) return;
+    revalidatePath("/packages");
+    // Drop into the builder so the team can adjust the markup / sell prices.
+    redirect(`/packages/${res.packageId}/edit`);
   }
   async function remove(formData: FormData) {
     "use server";
@@ -132,6 +144,15 @@ export default async function VendorPromosPage() {
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
+                    <form action={addToPackages} className="inline">
+                      <input type="hidden" name="id" value={p.id} />
+                      <button
+                        title="Create/refresh a sellable package from this promo (cost from the promo, sell at the package markup) and open it in the builder"
+                        className="text-[11px] text-emerald-300 hover:text-emerald-200 px-1.5"
+                      >
+                        Add to Packages
+                      </button>
+                    </form>
                     {p.status === "active" ? (
                       <form action={retire} className="inline">
                         <input type="hidden" name="id" value={p.id} />

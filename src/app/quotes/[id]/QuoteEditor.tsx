@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
-import { componentsToQuoteLines } from "@/lib/packages";
+import { expandPackageWithBundlePrice } from "@/lib/packages";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -20,6 +20,10 @@ export type QuoteLine =
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
+      // Internal unit cost carried from a package (e.g. the promo cost). Stored
+      // on the line for margin/reporting; costLocked marks it authoritative.
+      cost?: number;
+      costLocked?: boolean;
     } & LineGroup)
   | ({
       kind: "fee";
@@ -206,10 +210,15 @@ export function QuoteEditor({
   }
   function addPackage(pkg: PackageHit) {
     // Itemized roll-up: expand the package's components into individual,
-    // editable quote lines (parts / labor / fees). The bundle is appended
-    // verbatim — a package can intentionally repeat a part — and the rep
-    // tweaks quantities, prices, or discounts from there.
-    const expanded = componentsToQuoteLines(pkg.components ?? []) as QuoteLine[];
+    // editable quote lines (parts / labor / fees). When the package carries a
+    // sell-side bundle price, the expansion allocates that total across the part
+    // lines as per-line discounts so their totals sum to it (the promo deal);
+    // otherwise lines come in at à la carte with no discount. The rep tweaks
+    // from there. A package can intentionally repeat a part — appended verbatim.
+    const { lines: expanded, allocated, error, saving } = expandPackageWithBundlePrice(
+      pkg.components ?? [],
+      pkg.packagePrice,
+    );
     if (expanded.length === 0) {
       setPkgMsg({ tone: "err", text: `"${pkg.name}" has no components.` });
       return;
@@ -218,9 +227,22 @@ export function QuoteEditor({
     // together and prints under the package title. A fresh id per add
     // means the same package can be added twice as two distinct groups.
     const groupId = randomGroupId();
-    const grouped = expanded.map((l) => ({ ...l, groupId, groupTitle: pkg.name }));
+    const grouped = expanded.map((l) => ({ ...(l as QuoteLine), groupId, groupTitle: pkg.name }));
     setLines((prev) => [...prev, ...grouped]);
-    setPkgMsg({ tone: "ok", text: `Added package "${pkg.name}" (${expanded.length} line${expanded.length === 1 ? "" : "s"}).` });
+    const n = expanded.length;
+    if (allocated) {
+      setPkgMsg({
+        tone: "ok",
+        text:
+          `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}) — bundle price applied` +
+          (saving != null ? `, ${fmt(saving)} off à la carte spread across the parts.` : "."),
+      });
+    } else if (error) {
+      // A bundle price was set but couldn't allocate — lines added undiscounted.
+      setPkgMsg({ tone: "err", text: `Added "${pkg.name}" at à la carte — bundle price not applied: ${error}` });
+    } else {
+      setPkgMsg({ tone: "ok", text: `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}).` });
+    }
   }
 
   async function saveAsPackage() {

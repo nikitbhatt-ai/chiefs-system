@@ -14,6 +14,14 @@ async function savePackage(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   if (!name) return;
   const components = sanitizeComponents(JSON.parse(String(formData.get("components") ?? "[]")));
+  // Optional sell-side bundle/deal price. Blank clears it (back to à la carte).
+  const bundleRaw = String(formData.get("packagePrice") ?? "").trim();
+  const bundleNum = bundleRaw === "" ? null : Number(bundleRaw);
+  const packagePrice = bundleNum != null && Number.isFinite(bundleNum) && bundleNum > 0 ? bundleNum.toFixed(2) : null;
+  // Optional default markup (the "vendor margin"). Blank clears it.
+  const markupRaw = String(formData.get("markupPct") ?? "").trim();
+  const markupNum = markupRaw === "" ? null : Number(markupRaw);
+  const markupPct = markupNum != null && Number.isFinite(markupNum) && markupNum >= 0 ? markupNum.toFixed(2) : null;
   await db
     .update(packages)
     .set({
@@ -21,6 +29,8 @@ async function savePackage(formData: FormData) {
       category: String(formData.get("category") ?? "").trim() || null,
       description: String(formData.get("description") ?? "").trim() || null,
       components,
+      packagePrice,
+      markupPct,
       updatedAt: new Date(),
     })
     .where(eq(packages.id, id));
@@ -46,6 +56,8 @@ export default async function EditPackagePage({
         name={pkg.name}
         category={pkg.category ?? ""}
         description={pkg.description ?? ""}
+        packagePrice={pkg.packagePrice ?? ""}
+        markupPct={pkg.markupPct ?? ""}
         initialComponents={initial}
         action={savePackage}
       />

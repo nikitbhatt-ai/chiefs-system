@@ -71,7 +71,18 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
                     <td className="right">{l.quantity}</td>
                     <td className="right">{fmt(l.unitPrice)}</td>
                     <td className="right">{discLabel}</td>
-                    <td className="right">{fmt(gross - disc)}</td>
+                    <td className="right">
+                      {disc > 0 ? (
+                        <>
+                          <div style={{ textDecoration: "line-through", color: "#888", fontSize: "9pt" }}>
+                            {fmt(gross)}
+                          </div>
+                          <div style={{ fontWeight: "bold" }}>{fmt(gross - disc)}</div>
+                        </>
+                      ) : (
+                        fmt(gross - disc)
+                      )}
+                    </td>
                   </tr>
                 );
               })}

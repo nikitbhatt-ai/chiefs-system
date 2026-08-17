@@ -539,7 +539,11 @@ export type PackageComponent =
       kind: "item";
       description: string;
       quantity: number;
-      unitPrice: number;
+      unitPrice: number; // sell (retail) price per unit
+      // Internal cost per unit (e.g. the promo cost, which differs from the
+      // part's normal average cost). Drives margin and the markup→sell math.
+      // Optional: hand-built packages may leave it unset.
+      cost?: number | null;
       partId?: string | null;
       sku?: string | null;
     }
@@ -554,6 +558,22 @@ export const packages = pgTable("packages", {
   category: text("category"),
   description: text("description"),
   components: jsonb("components").$type<PackageComponent[]>().notNull().default([]),
+  // Optional sell-side bundle/deal price for the PARTS in this package (e.g. a
+  // manufacturer promo the customer is quoted at). Null = no deal price; the
+  // package quotes at à la carte line prices. When set, dropping the package on
+  // a quote allocates this total across the part lines as per-line discounts so
+  // the line totals sum to it. Sell-side only — distinct from vendor_promo,
+  // which is the purchase-side allocation (PROMO_PACKAGES.md §0: keep separate).
+  packagePrice: numeric("package_price", { precision: 12, scale: 2 }),
+  // Default markup applied to each line's internal cost to derive its sell price
+  // (the "vendor margin we set", e.g. 40 → sell = cost × 1.40). Stored so the
+  // builder can re-apply it; sells stay individually adjustable after. Null =
+  // no default markup configured.
+  markupPct: numeric("markup_pct", { precision: 5, scale: 2 }),
+  // Provenance: set when this sales package was generated from a vendor promo
+  // (buy side). Lets "Add to Packages" upsert in place on re-sync without
+  // clobbering a manually-set bundle price. Null for hand-built packages.
+  sourcePromoId: uuid("source_promo_id").references(() => vendorPromo.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("packages_name_idx").on(t.name)]);

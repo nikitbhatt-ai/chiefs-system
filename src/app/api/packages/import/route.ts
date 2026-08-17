@@ -137,6 +137,7 @@ export async function POST(req: Request) {
             category: pkg.category,
             description: pkg.description,
             components,
+            packagePrice: pkg.packagePrice != null ? pkg.packagePrice.toFixed(2) : null,
             updatedAt: new Date(),
           })
           .where(eq(packages.id, existingIds[0]));
@@ -145,7 +146,13 @@ export async function POST(req: Request) {
       } else {
         const [row] = await db
           .insert(packages)
-          .values({ name: pkg.name, category: pkg.category, description: pkg.description, components })
+          .values({
+            name: pkg.name,
+            category: pkg.category,
+            description: pkg.description,
+            components,
+            packagePrice: pkg.packagePrice != null ? pkg.packagePrice.toFixed(2) : null,
+          })
           .returning({ id: packages.id });
         // Track the new name so a duplicate later in the same file updates it
         // instead of creating a second row.
