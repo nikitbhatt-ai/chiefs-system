@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { quotes, customers } from "@/db/schema";
 import { PrintTrigger } from "./PrintTrigger";
+import { quoteTotals, lineNet, round2 } from "@/lib/quoteTotals";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
 type Line =
@@ -77,10 +78,10 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
                           <div style={{ textDecoration: "line-through", color: "#888", fontSize: "9pt" }}>
                             {fmt(gross)}
                           </div>
-                          <div style={{ fontWeight: "bold" }}>{fmt(gross - disc)}</div>
+                          <div style={{ fontWeight: "bold" }}>{fmt(lineNet(l))}</div>
                         </>
                       ) : (
-                        fmt(gross - disc)
+                        fmt(lineNet(l))
                       )}
                     </td>
                   </tr>
@@ -163,20 +164,14 @@ export default async function PrintQuotePage({
   const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
   const fees = lines.filter((l): l is Extract<Line, { kind: "fee" }> => l.kind === "fee");
 
-  let subtotal = 0;
-  let discountTotal = 0;
-  for (const l of items) {
-    const gross = (l.quantity || 0) * (l.unitPrice || 0);
-    const disc =
-      l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
-    subtotal += gross;
-    discountTotal += disc;
-  }
-  const laborTotal = labor.reduce((s, l) => s + (l.hours || 0) * (l.rate || 0), 0);
-  const feeTotal = fees.reduce((s, l) => s + (l.amount || 0), 0);
+  // Round each line before summing (shared helper) so the rows foot to grand.
+  const t = quoteTotals(lines, 0);
+  const subtotal = t.subtotal;
+  const discountTotal = t.discountTotal;
+  const laborTotal = t.laborTotal;
+  const feeTotal = t.feeTotal;
   const tax = Number(q.taxTotal) || 0;
-  const grand =
-    Number(q.grandTotal) || subtotal - discountTotal + laborTotal + feeTotal + tax;
+  const grand = round2(subtotal - discountTotal + laborTotal + feeTotal + tax);
 
   return (
     <div className="print-doc">

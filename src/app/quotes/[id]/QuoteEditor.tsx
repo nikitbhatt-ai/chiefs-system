@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
 import { expandPackageWithBundlePrice } from "@/lib/packages";
+import { quoteTotals, lineNet } from "@/lib/quoteTotals";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -120,29 +121,8 @@ export function QuoteEditor({
   const [savingPkg, setSavingPkg] = useState(false);
 
   const totals = useMemo(() => {
-    let subtotal = 0;
-    let discountTotal = 0;
-    let feeTotal = 0;
-    let laborTotal = 0;
-    for (const l of lines) {
-      if (l.kind === "item") {
-        const gross = (l.quantity || 0) * (l.unitPrice || 0);
-        const disc =
-          l.discountKind === "pct"
-            ? gross * ((l.discount || 0) / 100)
-            : l.discount || 0;
-        subtotal += gross;
-        discountTotal += disc;
-      } else if (l.kind === "labor") {
-        laborTotal += (l.hours || 0) * (l.rate || 0);
-      } else {
-        feeTotal += l.amount || 0;
-      }
-    }
-    const taxBase = subtotal - discountTotal + feeTotal + laborTotal;
-    const tax = taxBase * ((Number(taxRate) || 0) / 100);
-    const grand = taxBase + tax;
-    return { subtotal, discountTotal, feeTotal, laborTotal, tax, grand };
+    // Shared helper rounds each line before summing, so the rows foot to grand.
+    return quoteTotals(lines, Number(taxRate) || 0);
   }, [lines, taxRate]);
 
   function updateLine(i: number, patch: Partial<QuoteLine>) {
@@ -430,8 +410,6 @@ export function QuoteEditor({
   const renderItemRow = (i: number, reorder: { upTo: number | null; downTo: number | null } | null) => {
     const l = lines[i];
     if (l.kind !== "item") return null;
-    const gross = (l.quantity || 0) * (l.unitPrice || 0);
-    const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
     return (
       <div
         key={i}
@@ -499,7 +477,7 @@ export function QuoteEditor({
           Remove
         </button>
         <div className="col-span-12 text-right text-[11px] text-zinc-500">
-          {`Line total: ${fmt(gross - disc)}`}
+          {`Line total: ${fmt(lineNet(l))}`}
         </div>
       </div>
     );
