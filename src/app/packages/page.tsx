@@ -197,6 +197,14 @@ export default async function PackagesPage({
                       <a href={`/packages/${p.id}/edit`} className="hover:text-amber-300">
                         {p.name}
                       </a>
+                      {p.sourcePromoId ? (
+                        <span
+                          title="Generated from a vendor promo"
+                          className="ml-1.5 text-[9px] uppercase tracking-wider text-emerald-300/80 border border-emerald-500/30 rounded px-1 py-0.5 align-middle"
+                        >
+                          promo
+                        </span>
+                      ) : null}
                       {p.description ? (
                         <div className="text-[10px] text-zinc-500">{p.description}</div>
                       ) : null}

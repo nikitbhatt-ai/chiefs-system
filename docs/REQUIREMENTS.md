@@ -1127,6 +1127,15 @@ ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
       cost/sell/margin summary. On a quote the sell prices are used and the promo
       cost is carried onto the line for margin/reporting; sales still add
       case-by-case discounts on the quote (existing mechanics).
+- [x] **"Add to Packages" from a vendor promo** (added 2026-08-06). Vendor promos
+      (buy side) weren't searchable/quotable; only sales packages are. An
+      "Add to Packages" action on `/vendor-promos` materializes a sellable
+      package via `syncPromoToPackage()` in `src/lib/promos.ts`: each line's
+      internal **cost** = the promo's allocated unit cost (à la carte when the
+      promo isn't priced), **sell** = cost × (1 + markup) at the package markup
+      (default 40%). Linked via `packages.source_promo_id` (idempotent re-sync),
+      opens in the builder to tune markup/sell, and shows a "promo" badge on the
+      `/packages` list. Keeps buy/sell separate (PROMO_PACKAGES.md §0).
 
 - [x] **Sell-side bundle/deal price on a package** (added 2026-08-06). Fixes
       "adding a promo package to a quote doesn't discount/allocate anything":
