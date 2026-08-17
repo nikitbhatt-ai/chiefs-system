@@ -1,4 +1,4 @@
-import { desc, inArray, ne } from "drizzle-orm";
+import { desc, inArray, notInArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
@@ -84,7 +84,7 @@ export default async function PartsToOrderPage() {
     db
       .select({ status: purchaseOrders.status, lineItems: purchaseOrders.lineItems })
       .from(purchaseOrders)
-      .where(ne(purchaseOrders.status, "received")),
+      .where(notInArray(purchaseOrders.status, ["received", "fulfilled"])),
   ]);
 
   const partVendorIds = Array.from(new Set(partRows.map((p) => p.vendorId).filter(Boolean) as string[]));

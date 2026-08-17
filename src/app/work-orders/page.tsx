@@ -200,7 +200,7 @@ export default async function WorkOrdersPage({
   // Aggregate open PO line items by part_id for cross-WO subtraction.
   const openLines: { partId?: string | null; quantity: number }[] = [];
   for (const po of openPORows) {
-    if (po.status === "received") continue;
+    if (po.status === "received" || po.status === "fulfilled") continue;
     const lines = (po.lineItems as POLineItem[] | null | undefined) ?? [];
     for (const li of poLinesAsRefs(lines)) openLines.push(li);
   }

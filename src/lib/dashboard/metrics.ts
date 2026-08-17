@@ -4,7 +4,7 @@
 // to Phase 2 with charts and longer-running queries, wrap the heavier
 // ones in unstable_cache with sensible TTLs per the spec.
 
-import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sum } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, inArray, isNull, lt, lte, ne, notInArray, or, sum } from "drizzle-orm";
 import { unstable_cache } from "next/cache";
 import { db } from "@/db";
 import {
@@ -263,14 +263,14 @@ export async function operationsActionItems() {
     db
       .select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, expectedAt: purchaseOrders.expectedAt })
       .from(purchaseOrders)
-      .where(and(ne(purchaseOrders.status, "received"), lte(purchaseOrders.expectedAt, weekAhead)))
+      .where(and(notInArray(purchaseOrders.status, ["received", "fulfilled"]), lte(purchaseOrders.expectedAt, weekAhead)))
       .orderBy(asc(purchaseOrders.expectedAt))
       .limit(10),
     db.select({ id: workOrders.id, woNumber: workOrders.woNumber }).from(workOrders).where(eq(workOrders.status, "qc_check")).limit(10),
     db
       .select({ id: purchaseOrders.id, poNumber: purchaseOrders.poNumber, expectedAt: purchaseOrders.expectedAt })
       .from(purchaseOrders)
-      .where(and(ne(purchaseOrders.status, "received"), lt(purchaseOrders.expectedAt, now)))
+      .where(and(notInArray(purchaseOrders.status, ["received", "fulfilled"]), lt(purchaseOrders.expectedAt, now)))
       .orderBy(asc(purchaseOrders.expectedAt))
       .limit(10),
   ]);
@@ -299,7 +299,7 @@ async function adminKpisImpl() {
   const posReceivedThisMonth = await db
     .select({ total: purchaseOrders.total })
     .from(purchaseOrders)
-    .where(and(eq(purchaseOrders.status, "received"), gte(purchaseOrders.receivedAt, monthStart)));
+    .where(and(inArray(purchaseOrders.status, ["received", "fulfilled"]), gte(purchaseOrders.receivedAt, monthStart)));
   const monthlyExpenses = posReceivedThisMonth.reduce((s, p) => s + (Number(p.total ?? 0) || 0), 0);
 
   // Outstanding receivables PROXY: latest-quote grand_total for deals in

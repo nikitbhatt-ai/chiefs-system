@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { POLineItem } from "@/db/schema";
 import { PartSearchCombobox } from "@/components/PartSearchCombobox";
+import { PO_MANUAL_STATUSES, poStatusLabel } from "@/lib/poStatus";
 
 type PromoRef = { id: string; name: string; vendorId: string };
 
@@ -103,8 +104,12 @@ export function POEditor({
     }
   }
 
-  const fullyReceived = status === "received";
+  const fullyReceived = status === "fulfilled" || status === "received";
   const promosForVendor = promos.filter((p) => !vendorId || p.vendorId === vendorId);
+  // Status is user-picked (Pending/Ordered) only before any receiving; once
+  // parts land it's auto-managed (Received → Fulfilled).
+  const receivedStates = ["partially_received", "received", "fulfilled"];
+  const statusIsAuto = receivedStates.includes(status);
 
   return (
     <div className="space-y-4">
@@ -112,7 +117,7 @@ export function POEditor({
       <form action={saveDraft} className="space-y-3">
         <input type="hidden" name="id" value={id} />
         <input type="hidden" name="lines" value={JSON.stringify(lines)} />
-        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
           <select
             name="vendorId"
             value={vendorId}
@@ -134,6 +139,28 @@ export function POEditor({
             disabled={fullyReceived}
             className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           />
+          {statusIsAuto ? (
+            // Auto-managed once receiving starts — show it read-only, and keep
+            // the value on save via a hidden field.
+            <div className="flex items-center gap-2 text-sm">
+              <span className="text-zinc-500">Status:</span>
+              <span className="text-white font-medium">{poStatusLabel(status)}</span>
+              <input type="hidden" name="status" value={status} />
+            </div>
+          ) : (
+            <select
+              name="status"
+              defaultValue={status === "ordered" ? "ordered" : "pending"}
+              title="Received and Fulfilled are set automatically as parts are received"
+              className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            >
+              {PO_MANUAL_STATUSES.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          )}
           <div className="text-right text-sm font-body text-white">
             <span className="text-zinc-500 mr-2">Total:</span>
             <span className="font-bold">{fmt(total)}</span>

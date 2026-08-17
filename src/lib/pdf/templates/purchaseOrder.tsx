@@ -40,7 +40,9 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
   return (
     <Document title={`PURCHASE ORDER ${docNumber}`} author={BRANDING.companyName} creator={BRANDING.companyName}>
       <Page size="LETTER" style={styles.page}>
-        {data.status === "received" && <Text style={styles.watermark}>RECEIVED</Text>}
+        {(data.status === "fulfilled" || data.status === "received") && (
+          <Text style={styles.watermark}>RECEIVED</Text>
+        )}
 
         <View style={styles.header}>
           <View style={styles.brandBlock}>

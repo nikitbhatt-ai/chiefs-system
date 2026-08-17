@@ -281,8 +281,10 @@ export async function receivePurchaseOrder(
       updatedLines.push({ ...l, quantityReceived: newReceived });
     }
 
+    // All lines & quantities in → "fulfilled"; some in → "partially_received"
+    // (shown as "Received"); nothing this round → leave the status as-is.
     const nextStatus = allFullyReceived
-      ? ("received" as const)
+      ? ("fulfilled" as const)
       : anyReceivedThisRound
         ? ("partially_received" as const)
         : po.status;
