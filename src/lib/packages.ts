@@ -87,16 +87,16 @@ export function expandPackageWithBundlePrice(
   }
 
   // Basis = each part line's extended sell value; allocate the bundle price
-  // across only the item lines, remembering their positions.
+  // across only the item lines (in dollars), remembering their positions.
   const itemIdx: number[] = [];
-  const allocInput: { sku: string; quantity: number; alacarteCostCents: number }[] = [];
+  const allocInput: { sku: string; quantity: number; alacarteCostSnap: number }[] = [];
   lines.forEach((l, i) => {
     if (l.kind === "item") {
       itemIdx.push(i);
       allocInput.push({
         sku: l.description || `line ${i + 1}`,
         quantity: l.quantity || 0,
-        alacarteCostCents: Math.round((l.unitPrice || 0) * 100),
+        alacarteCostSnap: l.unitPrice || 0,
       });
     }
   });
@@ -104,9 +104,13 @@ export function expandPackageWithBundlePrice(
     return { lines, allocated: false, error: "This package has no part lines to apply a bundle price to.", saving: null };
   }
 
-  const result = allocatePromo(Math.round(price * 100), allocInput);
-  if (!result.ok) {
-    return { lines, allocated: false, error: result.error, saving: null };
+  // Reuse the promo allocation engine on the SELL basis. It throws when the
+  // bundle price exceeds the à la carte value of the parts.
+  let result;
+  try {
+    result = allocatePromo({ packagePrice: price, lines: allocInput });
+  } catch (e) {
+    return { lines, allocated: false, error: e instanceof Error ? e.message : "Could not allocate bundle price.", saving: null };
   }
 
   const out: ExpandedQuoteLine[] = lines.map((l) => ({ ...l }));
@@ -114,13 +118,13 @@ export function expandPackageWithBundlePrice(
     const idx = itemIdx[k];
     const line = out[idx];
     if (line.kind === "item") {
-      const grossCents = Math.round((line.unitPrice || 0) * 100) * (line.quantity || 0);
-      const discCents = Math.max(0, grossCents - al.allocatedExtendedCents);
-      line.discount = Math.round(discCents) / 100;
+      const gross = (line.unitPrice || 0) * (line.quantity || 0);
+      const disc = Math.max(0, gross - al.allocatedExtended);
+      line.discount = Math.round(disc * 100) / 100;
       line.discountKind = "amt";
     }
   });
-  return { lines: out, allocated: true, error: null, saving: result.savingCents / 100 };
+  return { lines: out, allocated: true, error: null, saving: result.saving };
 }
 
 export function packageValue(components: PackageComponent[]): number {
