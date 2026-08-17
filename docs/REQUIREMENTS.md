@@ -915,6 +915,15 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
       invoice variants). Undiscounted lines are unchanged (single total). The
       existing Discount column still shows the amount/percent. This pairs with
       the package bundle price, which populates those per-line discounts.
+- [x] **Add a new part (with part #) inline from a quote/PO line + duplicate
+      guard** (2026-08-06). The shared `PartSearchCombobox` (used by quote and PO
+      line editors) now offers "＋ Add new part … to inventory" when typing. It
+      opens an inline form (Part # / name / cost / sell), POSTs to `/api/parts`
+      to create the part, and adds it to the line. `POST /api/parts` now rejects
+      a duplicate SKU with HTTP 409 and the message **"duplicate part number
+      detected, add appropriate part number"**, which the combobox shows as a
+      popup (`window.alert`) and inline — so a clashing part number can't be
+      silently created. Gated by an `allowCreate` prop (default on).
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
 - [ ] Print and Send-to-customer are separate (Print done; Send pending).
 - [ ] Per-customer discount calculator that pre-fills line discounts
