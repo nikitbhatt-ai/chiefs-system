@@ -908,6 +908,7 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Column titles on the line-items table.
 - [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
+- [x] **Quote totals foot to the penny** (2026-08-06). Fixed a $0.01 gap where the grand total summed un-rounded per-line discounts (sum-then-round) while the displayed line totals were rounded (round-then-sum). New shared `src/lib/quoteTotals.ts` (`lineDiscount`/`lineNet`/`quoteTotals`) rounds each line before summing; used by the editor, save path, print view, and PDF so the rows always add up to the total. Print/PDF derive the grand from the rounded components + stored tax, so even un-re-saved quotes foot.
 - [x] **Original vs discounted price per line on the customer copy** (added
       2026-08-06). So customers can see the discount being given, each discounted
       item line now shows its pre-discount line total struck through above the
