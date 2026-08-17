@@ -190,24 +190,29 @@ export function POEditor({
               lines.map((l, i) => (
                 <div key={l.id ?? i} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body">
                   {fullyReceived || l.sourcePromoId ? (
-                    <div className="col-span-6 flex items-center gap-2">
-                      <input
-                        value={l.description ?? ""}
-                        disabled
-                        className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
-                      />
-                      {l.sourcePromoId ? (
-                        <span
-                          className="text-[9px] uppercase tracking-wider bg-amber-500/15 text-amber-300 rounded px-1.5 py-0.5"
-                          title={
-                            l.alacarteCostSnap != null
-                              ? `Allocated from package. À la carte ${fmt(Number(l.alacarteCostSnap))}`
-                              : "Allocated from package"
-                          }
-                        >
-                          pkg
-                        </span>
-                      ) : null}
+                    <div className="col-span-6">
+                      <div className="flex items-center gap-2">
+                        <input
+                          value={l.description ?? ""}
+                          disabled
+                          className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
+                        />
+                        {l.sourcePromoId ? (
+                          <span
+                            className="text-[9px] uppercase tracking-wider bg-amber-500/15 text-amber-300 rounded px-1.5 py-0.5"
+                            title={
+                              l.alacarteCostSnap != null
+                                ? `Allocated from package. À la carte ${fmt(Number(l.alacarteCostSnap))}`
+                                : "Allocated from package"
+                            }
+                          >
+                            pkg
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="text-[10px] text-zinc-400 mt-0.5">
+                        Part #: <span className="text-zinc-200 font-medium">{l.sku || "—"}</span>
+                      </div>
                     </div>
                   ) : (
                     <div className="col-span-6">
@@ -218,6 +223,9 @@ export function POEditor({
                         onPick={(p) => void pickPart(i, p)}
                         placeholder="Search part by SKU, name, or part #…"
                       />
+                      <div className="text-[10px] text-zinc-400 mt-0.5">
+                        Part #: <span className="text-zinc-200 font-medium">{l.sku || "—"}</span>
+                      </div>
                     </div>
                   )}
                   <input
@@ -308,6 +316,7 @@ export function POEditor({
                 return (
                   <div key={l.id ?? i} className="grid grid-cols-12 items-center text-xs font-body gap-2">
                     <span className="col-span-7 text-white truncate">
+                      <span className="text-zinc-500">[{l.sku || "no part #"}]</span>{" "}
                       {l.description || `Line ${i + 1}`} <span className="text-zinc-500">@ {fmt(Number(l.unitCost) || 0)}</span>
                     </span>
                     <span className="col-span-2 text-zinc-500 text-right">remaining {remaining}</span>
