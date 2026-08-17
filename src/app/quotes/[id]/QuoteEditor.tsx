@@ -20,6 +20,10 @@ export type QuoteLine =
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
+      // Internal unit cost carried from a package (e.g. the promo cost). Stored
+      // on the line for margin/reporting; costLocked marks it authoritative.
+      cost?: number;
+      costLocked?: boolean;
     } & LineGroup)
   | ({
       kind: "fee";

@@ -26,6 +26,11 @@ export type ExpandedQuoteLine =
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
+      // Internal cost carried from the package (e.g. promo cost). When set,
+      // `costLocked` tells the quote save path not to re-snapshot it from the
+      // part's average cost, so the promo cost survives on the quote.
+      cost?: number;
+      costLocked?: boolean;
     }
   | { kind: "fee"; description: string; amount: number; fixed: boolean }
   | { kind: "labor"; description: string; hours: number; rate: number };
@@ -46,6 +51,9 @@ export function componentsToQuoteLines(components: PackageComponent[]): Expanded
       discount: 0,
       discountKind: "pct",
       partId: c.partId ?? undefined,
+      // Carry the package's internal cost onto the line and lock it, so quote
+      // save doesn't overwrite the promo cost with the part's average cost.
+      ...(c.cost != null ? { cost: c.cost, costLocked: true } : {}),
     };
   });
 }
@@ -153,7 +161,9 @@ export function packageCost(
     if (c.kind !== "item") continue;
     const qty = c.quantity || 0;
     itemValue += qty * (c.unitPrice || 0);
-    const unit = c.partId ? costByPartId.get(c.partId) : undefined;
+    // Prefer the component's own internal cost (e.g. promo cost); fall back to
+    // the part's average cost resolved by the caller.
+    const unit = c.cost != null ? c.cost : c.partId ? costByPartId.get(c.partId) : undefined;
     if (unit != null) {
       cost += qty * unit;
       costedValue += qty * (c.unitPrice || 0);
@@ -199,6 +209,8 @@ export function sanitizeComponents(input: unknown): PackageComponent[] {
         description: String(c.description ?? ""),
         quantity: Math.max(0, Math.trunc(num(c.quantity))),
         unitPrice: num(c.unitPrice),
+        // Preserve the internal cost when present (blank/invalid → null).
+        cost: c.cost == null || c.cost === "" ? null : num(c.cost),
         partId: c.partId ? String(c.partId) : null,
         sku: c.sku ? String(c.sku) : null,
       });

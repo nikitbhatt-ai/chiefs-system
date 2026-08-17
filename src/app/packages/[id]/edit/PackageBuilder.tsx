@@ -5,7 +5,7 @@ import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobo
 
 // Mirrors PackageComponent in src/db/schema.ts.
 export type BuilderComponent =
-  | { kind: "item"; description: string; quantity: number; unitPrice: number; partId?: string | null; sku?: string | null }
+  | { kind: "item"; description: string; quantity: number; unitPrice: number; cost?: number | null; partId?: string | null; sku?: string | null }
   | { kind: "labor"; description: string; hours: number; rate: number }
   | { kind: "fee"; description: string; amount: number; fixed: boolean };
 
@@ -19,6 +19,7 @@ export function PackageBuilder({
   category,
   description,
   packagePrice,
+  markupPct,
   initialComponents,
   action,
 }: {
@@ -27,23 +28,44 @@ export function PackageBuilder({
   category: string;
   description: string;
   packagePrice: string;
+  markupPct: string;
   initialComponents: BuilderComponent[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [components, setComponents] = useState<BuilderComponent[]>(initialComponents);
   const [bundlePrice, setBundlePrice] = useState<string>(packagePrice ?? "");
+  const [markup, setMarkup] = useState<string>(markupPct ?? "");
 
   const value = useMemo(() => {
-    let parts = 0;
+    let parts = 0; // sell value of parts
+    let cost = 0; // internal cost of parts (lines that have a cost)
     let labor = 0;
     let fees = 0;
     for (const c of components) {
-      if (c.kind === "item") parts += (c.quantity || 0) * (c.unitPrice || 0);
-      else if (c.kind === "labor") labor += (c.hours || 0) * (c.rate || 0);
+      if (c.kind === "item") {
+        parts += (c.quantity || 0) * (c.unitPrice || 0);
+        if (c.cost != null) cost += (c.quantity || 0) * (c.cost || 0);
+      } else if (c.kind === "labor") labor += (c.hours || 0) * (c.rate || 0);
       else fees += c.amount || 0;
     }
-    return { parts, labor, fees, total: parts + labor + fees };
+    const margin = parts - cost;
+    const marginPct = parts > 0 ? (margin / parts) * 100 : null;
+    return { parts, cost, labor, fees, total: parts + labor + fees, margin, marginPct };
   }, [components]);
+
+  // Apply the markup to every part line: sell = cost × (1 + markup%). Lines
+  // without a cost are left alone (nothing to mark up).
+  function applyMarkup() {
+    const m = Number(markup);
+    if (!Number.isFinite(m) || m < 0) return;
+    setComponents((prev) =>
+      prev.map((c) =>
+        c.kind === "item" && c.cost != null
+          ? { ...c, unitPrice: Math.round((c.cost || 0) * (1 + m / 100) * 100) / 100 }
+          : c,
+      ),
+    );
+  }
 
   function update(i: number, patch: Partial<BuilderComponent>) {
     setComponents((prev) => prev.map((c, idx) => (idx === i ? ({ ...c, ...patch } as BuilderComponent) : c)));
@@ -67,6 +89,7 @@ export function PackageBuilder({
           description: `${part.sku} — ${part.name}`,
           quantity: 1,
           unitPrice: part.price ? Number(part.price) : 0,
+          cost: part.cost != null ? Number(part.cost) : null,
           partId: part.id,
           sku: part.sku,
         },
@@ -88,6 +111,7 @@ export function PackageBuilder({
     <form action={action} className="space-y-4">
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="components" value={JSON.stringify(components)} />
+      <input type="hidden" name="markupPct" value={markup} />
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         <input
@@ -149,9 +173,10 @@ export function PackageBuilder({
             ) : (
               <>
                 <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
-                  <span className="col-span-6">Description</span>
-                  <span className="col-span-2 text-right">Qty</span>
-                  <span className="col-span-2 text-right">Unit price</span>
+                  <span className="col-span-5">Description</span>
+                  <span className="col-span-1 text-right">Qty</span>
+                  <span className="col-span-2 text-right">Cost</span>
+                  <span className="col-span-2 text-right">Sell</span>
                   <span className="col-span-2 text-right">Line</span>
                 </div>
                 <div className="divide-y divide-white/5">
@@ -160,7 +185,7 @@ export function PackageBuilder({
                     if (c.kind !== "item") return null;
                     return (
                       <div key={i} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body">
-                        <div className="col-span-6">
+                        <div className="col-span-5">
                           <PartSearchCombobox
                             mode="inline"
                             value={c.description}
@@ -169,11 +194,13 @@ export function PackageBuilder({
                               update(i, {
                                 description: `${p.sku} — ${p.name}`,
                                 unitPrice: p.price ? Number(p.price) : 0,
+                                cost: p.cost != null ? Number(p.cost) : null,
                                 partId: p.id,
                                 sku: p.sku,
                               })
                             }
                           />
+                          {c.sku ? <div className="text-[10px] text-zinc-500 mt-0.5">Part #: {c.sku}</div> : null}
                         </div>
                         <input
                           type="number"
@@ -181,13 +208,24 @@ export function PackageBuilder({
                           step="1"
                           value={c.quantity}
                           onChange={(e) => update(i, { quantity: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
-                          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                          className="col-span-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+                        />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={c.cost ?? ""}
+                          placeholder="—"
+                          title="Internal cost per unit (e.g. promo cost)"
+                          onChange={(e) => update(i, { cost: e.target.value === "" ? null : Number(e.target.value) })}
+                          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-zinc-300 text-right"
                         />
                         <input
                           type="number"
                           min="0"
                           step="0.01"
                           value={c.unitPrice}
+                          title="Sell (retail) price per unit"
                           onChange={(e) => update(i, { unitPrice: Number(e.target.value) })}
                           className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
                         />
@@ -312,7 +350,15 @@ export function PackageBuilder({
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
         <div className="flex flex-wrap gap-4 text-zinc-400 items-center">
-          <span>Parts <span className="text-white">{fmt(value.parts)}</span></span>
+          <span>Parts cost <span className="text-white">{fmt(value.cost)}</span></span>
+          <span>Parts sell <span className="text-white">{fmt(value.parts)}</span></span>
+          <span>
+            Margin{" "}
+            <span className={value.margin >= 0 ? "text-emerald-300" : "text-red-400"}>
+              {fmt(value.margin)}
+              {value.marginPct != null ? ` (${value.marginPct.toFixed(1)}%)` : ""}
+            </span>
+          </span>
           <span>Labor <span className="text-white">{fmt(value.labor)}</span></span>
           <span>Fees <span className="text-white">{fmt(value.fees)}</span></span>
           <span className="text-zinc-300">Package value <span className="text-white font-bold text-sm">{fmt(value.total)}</span></span>
@@ -324,6 +370,34 @@ export function PackageBuilder({
           <button type="submit" className="font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
             Save package
           </button>
+        </div>
+      </div>
+
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs font-body font-semibold text-white uppercase tracking-wider">
+            Markup %
+          </label>
+          <div className="relative">
+            <input
+              value={markup}
+              onChange={(e) => setMarkup(e.target.value)}
+              inputMode="decimal"
+              placeholder="e.g. 40"
+              className="bg-black/40 border border-white/10 rounded-md px-3 py-1.5 text-sm text-white w-24"
+            />
+            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 text-sm">%</span>
+          </div>
+          <button
+            type="button"
+            onClick={applyMarkup}
+            className="text-[11px] font-body text-black bg-amber-500 hover:bg-amber-400 rounded px-3 py-1.5 font-semibold"
+          >
+            Apply to sell prices
+          </button>
+          <span className="text-[11px] text-zinc-500">
+            Sets each part&apos;s Sell = Cost × (1 + markup). The &quot;vendor margin&quot; — adjustable; edit any Sell after.
+          </span>
         </div>
       </div>
 

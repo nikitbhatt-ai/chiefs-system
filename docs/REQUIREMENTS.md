@@ -1095,6 +1095,30 @@ CREATE INDEX IF NOT EXISTS packages_tags_gin ON packages USING gin (tags);
 ALTER TABLE packages ADD COLUMN package_price numeric(12,2);
 ```
 
+**Promo→package link (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN source_promo_id uuid REFERENCES vendor_promo(id) ON DELETE SET NULL;
+```
+
+**Package markup / cost model (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
+```
+
+- [x] **Cost + markup → sell on packages** (user requirement 2026-08-06;
+      terminology: *cost* = internal cost, *sell price* = retail). Package item
+      components now carry an internal **cost** per unit (in the `components`
+      jsonb — no DDL) distinct from the part's normal average cost, because the
+      **promo cost differs**. A package-level **markup %** (`packages.markup_pct`,
+      the "vendor margin", default 40% on promo sync) derives each line's sell:
+      `sell = cost × (1 + markup)`. The builder shows editable Cost + Sell
+      columns, a Markup field with "Apply to sell prices", and a live
+      cost/sell/margin summary. On a quote the sell prices are used and the promo
+      cost is carried onto the line for margin/reporting; sales still add
+      case-by-case discounts on the quote (existing mechanics).
+
 - [x] **Sell-side bundle/deal price on a package** (added 2026-08-06). Fixes
       "adding a promo package to a quote doesn't discount/allocate anything":
       sales `packages` stored only à la carte line prices, and by design
