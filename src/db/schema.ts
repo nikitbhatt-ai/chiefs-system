@@ -22,7 +22,11 @@ export const customerType = pgEnum("customer_type", ["government","commercial","
 export const dealStage = pgEnum("deal_stage", ["prospect","quote_sent","po_received","in_production","delivered","lost","credential_verification","deposit_received"]);
 export const leadStatus = pgEnum("lead_status", ["new","contacted","converted","lost"]);
 export const quoteStatus = pgEnum("quote_status", ["draft","sent","approved","converted"]);
-export const purchaseOrderStatus = pgEnum("purchase_order_status", ["pending","pending_review","po_received","partially_received","received"]);
+// Workflow the user wants: pending (needs ordering) → ordered (placed) →
+// partially_received (some parts in, shown as "Received") → fulfilled (all parts
+// & quantities received). "ordered" and "fulfilled" are added additively; the
+// legacy values (pending_review, po_received, received) stay valid for old rows.
+export const purchaseOrderStatus = pgEnum("purchase_order_status", ["pending","pending_review","po_received","partially_received","received","ordered","fulfilled"]);
 export const vehicleStatus = pgEnum("vehicle_status", ["new","received","ready_for_pickup","delivered","sold"]);
 export const commType = pgEnum("comm_type", ["call","email","in_person","note"]);
 

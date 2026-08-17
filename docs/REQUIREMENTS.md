@@ -1186,6 +1186,37 @@ ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
       a build.
 - [ ] Intake checklist with photo upload + generate external PDF.
 
+## Purchase-order status workflow (added 2026-08-06)
+
+Statuses the user set: **Pending** (needs to be placed) → **Ordered** (placed
+with the vendor) → **Received** (some parts in) → **Fulfilled** (all parts &
+quantities received). Pending/Ordered are chosen by hand when creating or
+editing a PO; Received/Fulfilled are set **automatically** by receiving.
+
+**Schema (run in Neon's SQL Editor):**
+
+```sql
+ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'ordered';
+ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'fulfilled';
+```
+
+- [x] Added `ordered` + `fulfilled` to the `purchase_order_status` enum
+      (additive; legacy `pending_review`/`po_received`/`received` still render).
+- [x] Shared vocab in `src/lib/poStatus.ts` (labels, colors, the manual-choice
+      list) used by the list, detail, editor, and filter so they agree. Display:
+      `partially_received` → "Received", `fulfilled` → "Fulfilled".
+- [x] **Create** (`/purchase-orders`) and **edit** (`POEditor`) expose a status
+      picker limited to Pending/Ordered; once receiving starts the status is
+      shown read-only (auto-managed), and a plain save never downgrades a
+      received/fulfilled PO.
+- [x] **Receiving** (`receivePurchaseOrder` in `src/lib/inventory.ts`) sets
+      `partially_received` on a partial receipt and `fulfilled` when every line's
+      full quantity is in.
+- [x] Downstream gates updated for `fulfilled`: dashboard "arriving soon" /
+      "late vendor" / "received this month", procurement parts-to-order on-order
+      subtraction, work-order cross-PO stock math, and the PO PDF RECEIVED
+      watermark.
+
 ## Procurement / lead-time management (PR 19)
 
 Procurement plans use a per-part `lead_time_days` and a per-WO target

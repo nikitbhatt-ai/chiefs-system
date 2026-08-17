@@ -8,6 +8,7 @@ import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
 import { receivePurchaseOrder } from "@/lib/inventory";
 import { listPromos } from "@/lib/promos";
+import { poStatusLabel } from "@/lib/poStatus";
 
 async function saveDraft(formData: FormData) {
   "use server";
@@ -27,11 +28,24 @@ async function saveDraft(formData: FormData) {
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,
   );
+  // Manual status (Pending/Ordered) — but never override an auto received/
+  // fulfilled state from a plain save; those are driven by receiving.
+  const [cur] = await db
+    .select({ status: purchaseOrders.status })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, id));
+  const submitted = String(formData.get("status") ?? "");
+  const receivedStates = ["partially_received", "received", "fulfilled"];
+  const status =
+    (submitted === "pending" || submitted === "ordered") && !receivedStates.includes(cur?.status ?? "")
+      ? submitted
+      : cur?.status;
   await db
     .update(purchaseOrders)
     .set({
       vendorId,
       notes,
+      status: status as typeof purchaseOrders.$inferSelect.status,
       lineItems: lines as never,
       total: total.toFixed(2),
       expectedAt: expectedAt ? new Date(expectedAt) : null,
@@ -90,7 +104,7 @@ export default async function POPage({
   const initial = (po.lineItems as POLineItem[]) ?? [];
 
   return (
-    <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${po.status.replace(/_/g, " ")}`}>
+    <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${poStatusLabel(po.status)}`}>
       <div className="flex justify-end">
         <a
           href={`/api/pdf/purchase-orders/${po.id}`}
