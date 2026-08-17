@@ -189,8 +189,12 @@ export default async function PackagesPage({
                 const c = packageCounts(p.components ?? []);
                 const price = packageValue(p.components ?? []);
                 const cc = packageCost(p.components ?? [], costByPartId);
-                const marginD = cc.costedValue - cc.cost;
-                const marginP = cc.costedValue > 0 ? (marginD / cc.costedValue) * 100 : null;
+                // Margin reflects what the customer actually pays: the discounted
+                // bundle price when set, else the retail sell of the costed lines.
+                const bundle = p.packagePrice != null ? Number(p.packagePrice) : null;
+                const effectiveSell = bundle != null && bundle > 0 ? bundle : cc.costedValue;
+                const marginD = effectiveSell - cc.cost;
+                const marginP = effectiveSell > 0 ? (marginD / effectiveSell) * 100 : null;
                 return (
                   <tr key={p.id} className="border-t border-white/5">
                     <td className="px-3 py-2 text-xs text-white">

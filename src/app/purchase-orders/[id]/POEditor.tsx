@@ -210,39 +210,55 @@ export function POEditor({
               </button>
             ) : null}
           </div>
+          {lines.length > 0 ? (
+            <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
+              <span className="col-span-2">Part #</span>
+              <span className="col-span-4">Description</span>
+              <span className="col-span-1 text-right">Qty</span>
+              <span className="col-span-2 text-right">Unit cost</span>
+              <span className="col-span-2 text-right">Recv</span>
+              <span className="col-span-1" />
+            </div>
+          ) : null}
           <div className="divide-y divide-white/5">
             {lines.length === 0 ? (
               <div className="px-4 py-8 text-center text-xs text-zinc-500 font-body">No lines yet.</div>
             ) : (
-              lines.map((l, i) => (
+              lines.map((l, i) => {
+                const locked = fullyReceived || !!l.sourcePromoId;
+                return (
                 <div key={l.id ?? i} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body">
-                  {fullyReceived || l.sourcePromoId ? (
-                    <div className="col-span-6">
-                      <div className="flex items-center gap-2">
-                        <input
-                          value={l.description ?? ""}
-                          disabled
-                          className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
-                        />
-                        {l.sourcePromoId ? (
-                          <span
-                            className="text-[9px] uppercase tracking-wider bg-amber-500/15 text-amber-300 rounded px-1.5 py-0.5"
-                            title={
-                              l.alacarteCostSnap != null
-                                ? `Allocated from package. À la carte ${fmt(Number(l.alacarteCostSnap))}`
-                                : "Allocated from package"
-                            }
-                          >
-                            pkg
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="text-[10px] text-zinc-400 mt-0.5">
-                        Part #: <span className="text-zinc-200 font-medium">{l.sku || "—"}</span>
-                      </div>
+                  {/* Part # — its own column, editable for manual entry */}
+                  <input
+                    value={l.sku ?? ""}
+                    onChange={(e) => update(i, { sku: e.target.value })}
+                    disabled={locked}
+                    placeholder="Part #"
+                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
+                  />
+                  {/* Description */}
+                  {locked ? (
+                    <div className="col-span-4 flex items-center gap-2">
+                      <input
+                        value={l.description ?? ""}
+                        disabled
+                        className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
+                      />
+                      {l.sourcePromoId ? (
+                        <span
+                          className="text-[9px] uppercase tracking-wider bg-amber-500/15 text-amber-300 rounded px-1.5 py-0.5"
+                          title={
+                            l.alacarteCostSnap != null
+                              ? `Allocated from package. À la carte ${fmt(Number(l.alacarteCostSnap))}`
+                              : "Allocated from package"
+                          }
+                        >
+                          pkg
+                        </span>
+                      ) : null}
                     </div>
                   ) : (
-                    <div className="col-span-6">
+                    <div className="col-span-4">
                       <PartSearchCombobox
                         mode="inline"
                         value={l.description ?? ""}
@@ -250,9 +266,6 @@ export function POEditor({
                         onPick={(p) => void pickPart(i, p)}
                         placeholder="Search part by SKU, name, or part #…"
                       />
-                      <div className="text-[10px] text-zinc-400 mt-0.5">
-                        Part #: <span className="text-zinc-200 font-medium">{l.sku || "—"}</span>
-                      </div>
                     </div>
                   )}
                   <input
@@ -277,7 +290,7 @@ export function POEditor({
                     className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right disabled:opacity-60"
                   />
                   <span className="col-span-2 text-right text-zinc-400">
-                    Recv {l.quantityReceived || 0} / {l.quantity || 0}
+                    {l.quantityReceived || 0} / {l.quantity || 0}
                   </span>
                   {!fullyReceived ? (
                     <button
@@ -291,7 +304,8 @@ export function POEditor({
                     <span className="col-span-1" />
                   )}
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
