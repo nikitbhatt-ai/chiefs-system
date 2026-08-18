@@ -574,6 +574,9 @@ export const packages = pgTable("packages", {
   // builder can re-apply it; sells stay individually adjustable after. Null =
   // no default markup configured.
   markupPct: numeric("markup_pct", { precision: 5, scale: 2 }),
+  // How markupPct is interpreted: "markup" (% on cost, sell = cost × (1+p)) or
+  // "margin" (% off list / of sell, sell = cost ÷ (1−p)). Null = markup.
+  pricingMode: text("pricing_mode"),
   // Provenance: set when this sales package was generated from a vendor promo
   // (buy side). Lets "Add to Packages" upsert in place on re-sync without
   // clobbering a manually-set bundle price. Null for hand-built packages.

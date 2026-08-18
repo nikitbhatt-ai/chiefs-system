@@ -22,6 +22,7 @@ async function savePackage(formData: FormData) {
   const markupRaw = String(formData.get("markupPct") ?? "").trim();
   const markupNum = markupRaw === "" ? null : Number(markupRaw);
   const markupPct = markupNum != null && Number.isFinite(markupNum) && markupNum >= 0 ? markupNum.toFixed(2) : null;
+  const pricingMode = String(formData.get("pricingMode") ?? "") === "margin" ? "margin" : "markup";
   await db
     .update(packages)
     .set({
@@ -31,6 +32,7 @@ async function savePackage(formData: FormData) {
       components,
       packagePrice,
       markupPct,
+      pricingMode,
       updatedAt: new Date(),
     })
     .where(eq(packages.id, id));
@@ -58,6 +60,7 @@ export default async function EditPackagePage({
         description={pkg.description ?? ""}
         packagePrice={pkg.packagePrice ?? ""}
         markupPct={pkg.markupPct ?? ""}
+        pricingMode={pkg.pricingMode ?? ""}
         initialComponents={initial}
         action={savePackage}
       />

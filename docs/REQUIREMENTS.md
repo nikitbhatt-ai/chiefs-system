@@ -1117,6 +1117,7 @@ ALTER TABLE packages ADD COLUMN source_promo_id uuid REFERENCES vendor_promo(id)
 ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
 ```
 
+- [x] **Markup vs Margin pricing mode on packages** (2026-08-06). The builder's "Apply to sell prices" control now has a mode toggle: **Markup % (on cost)** `sell = cost × (1 + p)`, or **Margin % (off list)** `sell = cost ÷ (1 − p)` — so a "40% off list" dealer-discount price is entered as 40 in margin mode (cost $60 → sell $100 = list). Stored in `packages.pricing_mode` (null = markup). Run: `ALTER TABLE packages ADD COLUMN pricing_mode text;`
 - [x] **Cost + markup → sell on packages** (user requirement 2026-08-06;
       terminology: *cost* = internal cost, *sell price* = retail). Package item
       components now carry an internal **cost** per unit (in the `components`

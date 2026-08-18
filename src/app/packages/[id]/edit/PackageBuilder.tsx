@@ -20,6 +20,7 @@ export function PackageBuilder({
   description,
   packagePrice,
   markupPct,
+  pricingMode,
   initialComponents,
   action,
 }: {
@@ -29,12 +30,16 @@ export function PackageBuilder({
   description: string;
   packagePrice: string;
   markupPct: string;
+  pricingMode: string;
   initialComponents: BuilderComponent[];
   action: (formData: FormData) => Promise<void>;
 }) {
   const [components, setComponents] = useState<BuilderComponent[]>(initialComponents);
   const [bundlePrice, setBundlePrice] = useState<string>(packagePrice ?? "");
   const [markup, setMarkup] = useState<string>(markupPct ?? "");
+  // "markup" = % on cost (sell = cost × (1+p)); "margin" = % off list / of sell
+  // (sell = cost ÷ (1−p)) — how "40% off list" pricing works.
+  const [mode, setMode] = useState<"markup" | "margin">(pricingMode === "margin" ? "margin" : "markup");
 
   const value = useMemo(() => {
     let parts = 0; // sell value of parts
@@ -53,15 +58,18 @@ export function PackageBuilder({
     return { parts, cost, labor, fees, total: parts + labor + fees, margin, marginPct };
   }, [components]);
 
-  // Apply the markup to every part line: sell = cost × (1 + markup%). Lines
-  // without a cost are left alone (nothing to mark up).
+  // Apply pricing to every part line from its cost. Markup mode:
+  // sell = cost × (1 + p). Margin mode ("% off list"): sell = cost ÷ (1 − p),
+  // e.g. cost $60 at 40% margin → $100. Lines without a cost are left alone.
   function applyMarkup() {
     const m = Number(markup);
     if (!Number.isFinite(m) || m < 0) return;
+    if (mode === "margin" && m >= 100) return; // 100% margin is undefined
+    const factor = mode === "margin" ? 1 / (1 - m / 100) : 1 + m / 100;
     setComponents((prev) =>
       prev.map((c) =>
         c.kind === "item" && c.cost != null
-          ? { ...c, unitPrice: Math.round((c.cost || 0) * (1 + m / 100) * 100) / 100 }
+          ? { ...c, unitPrice: Math.round((c.cost || 0) * factor * 100) / 100 }
           : c,
       ),
     );
@@ -112,6 +120,7 @@ export function PackageBuilder({
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="components" value={JSON.stringify(components)} />
       <input type="hidden" name="markupPct" value={markup} />
+      <input type="hidden" name="pricingMode" value={mode} />
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         <input
@@ -408,9 +417,15 @@ export function PackageBuilder({
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
         <div className="flex flex-wrap items-center gap-3">
-          <label className="text-xs font-body font-semibold text-white uppercase tracking-wider">
-            Markup %
-          </label>
+          <select
+            value={mode}
+            onChange={(e) => setMode(e.target.value as "markup" | "margin")}
+            title="Markup = % on cost. Margin = % off list (what a dealer discount off list means)."
+            className="bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white uppercase tracking-wider font-body"
+          >
+            <option value="markup">Markup % (on cost)</option>
+            <option value="margin">Margin % (off list)</option>
+          </select>
           <div className="relative">
             <input
               value={markup}
@@ -429,7 +444,9 @@ export function PackageBuilder({
             Apply to sell prices
           </button>
           <span className="text-[11px] text-zinc-500">
-            Sets each part&apos;s Sell = Cost × (1 + markup). The &quot;vendor margin&quot; — adjustable; edit any Sell after.
+            {mode === "margin"
+              ? "Margin mode: Sell = Cost ÷ (1 − margin). A 40% dealer discount off list → enter 40 (cost $60 → sell $100)."
+              : "Markup mode: Sell = Cost × (1 + markup). Buy at 40% off list & sell at list = 66.67% markup."}
           </span>
         </div>
       </div>
