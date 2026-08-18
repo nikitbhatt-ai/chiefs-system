@@ -1,21 +1,29 @@
 // Scratch verification for button feedback. Not part of the app.
 //
-// Checks the three signals a button has to give — press, working, done — in a
-// real browser, because "the button feels dead" is not something a type check or
-// a unit test can see.
+// The thing being tested is perception, not implementation: after a click, is
+// there something on screen, for long enough to see? An earlier version of this
+// script asserted internals (does the button carry data-pending) and passed
+// while the feature was, in practice, invisible — the button was correct and
+// then destroyed by a re-render 80ms later. So the central check here samples
+// the whole PAGE every animation frame and asks how many milliseconds ANY
+// feedback was visible.
 //
 // Playwright is NOT a dependency of this project — install it where you run this
 // (`npm i -D playwright && npx playwright install chromium`) rather than adding a
 // browser download to everyone's install.
 //
-// Run against a THROWAWAY database with the dev server up:
-//   POSTGRES_URL=... npx next dev -p 3100
+// Run against a THROWAWAY database, ideally a PRODUCTION build (`npm run build
+// && npx next start -p 3100`), because dev-mode timings are not the ones users
+// get:
 //   BASE=http://localhost:3100 EMAIL=... PASSWORD=... node scripts/verify-button-feedback.mjs
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE ?? "http://localhost:3100";
 const EMAIL = process.env.EMAIL ?? "v@chiefspursuitsurplus.com";
 const PASSWORD = process.env.PASSWORD ?? "Verify123!";
+
+/** Below this, feedback is a flicker. Measured failures were 16–130ms. */
+const PERCEPTIBLE_MS = 450;
 
 let fails = 0;
 const check = (label, cond, detail = "") => {
@@ -35,6 +43,31 @@ await Promise.all([
 ]);
 await page.waitForTimeout(1500);
 
+/**
+ * Watch the whole page for feedback of any kind — the work bar, or any element
+ * marked busy — for `ms`, sampling every frame. Deliberately page-wide: the
+ * button that started the work is often gone before the work finishes.
+ */
+async function watchPage(ms = 3000) {
+  await page.evaluate(() => {
+    window.__w = [];
+    const tick = () => {
+      window.__w.push({
+        t: performance.now(),
+        visible: !!document.querySelector(".work-indicator, [data-pending]"),
+      });
+      if (window.__w.length < 400) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  return async () => {
+    await page.waitForTimeout(ms);
+    const w = await page.evaluate(() => window.__w);
+    const on = w.filter((x) => x.visible);
+    return { ms: on.length ? Math.round(on[on.length - 1].t - on[0].t) : 0, frames: on.length };
+  };
+}
+
 // ── 1. Press ────────────────────────────────────────────────────────────────
 console.log("\n1. press feedback");
 await page.goto(`${BASE}/accounting/accounts`, { waitUntil: "domcontentloaded" });
@@ -53,7 +86,7 @@ const held = await btn.evaluate((el) => ({
 }));
 await page.mouse.up();
 await page.waitForTimeout(300);
-check("held button scales down", held.transform.includes("0.97"), held.transform);
+check("held button scales down", held.transform.includes("0.94"), held.transform);
 check("held button darkens", held.filter.includes("brightness"), held.filter);
 check("cursor is a pointer", held.cursor === "pointer");
 check("returns to normal on release", (await btn.evaluate((el) => getComputedStyle(el).transform)) === "none");
@@ -73,84 +106,88 @@ await page.keyboard.press("Tab");
 const outline = await btn.evaluate((el) => `${getComputedStyle(el).outlineWidth} ${getComputedStyle(el).outlineStyle}`);
 check("focused button has a visible outline", outline.startsWith("2px solid"), outline);
 
-// ── 3. Working + done ───────────────────────────────────────────────────────
-// A server action on localhost finishes in ~50ms, far too fast to observe. The
-// delay only holds the in-flight state still long enough to measure; the state
-// itself is the real one.
-console.log("\n3. working + done, during a real server action");
-await page.route("**/accounting/accounts", async (route) => {
-  if (route.request().method() === "POST") await new Promise((r) => setTimeout(r, 2500));
-  await route.continue();
-});
-await page.goto(`${BASE}/accounting/accounts`, { waitUntil: "domcontentloaded" });
-await page.waitForTimeout(1200);
-
-const countAccounts = async () => (await (await page.request.get(`${BASE}/api/accounting/accounts`)).json()).length;
-const before = await countAccounts();
-
-await page.fill('input[name="code"]', `9${Math.floor(Math.random() * 900 + 100)}`);
+// ── 3. In-place save: visible, and honest about it ──────────────────────────
+console.log("\n3. in-place save — /accounting/accounts");
+const api = async () => (await (await page.request.get(`${BASE}/api/accounting/accounts`)).json());
+// Text codes, so use one that cannot collide with the real chart — a numeric
+// probe hit 3900 Retained Earnings and the insert failed, which looked like a
+// missing flash rather than a duplicate key.
+const code = `ZZ-PROBE-${Date.now()}`;
+const before = (await api()).length;
+await page.fill('input[name="code"]', code);
 await page.fill('input[name="name"]', "Feedback probe");
-const save = page.locator('button:has-text("Save account")').first();
-await save.click();
-await page.waitForTimeout(700);
+let stop = await watchPage(3000);
+await page.locator('button:has-text("Save account")').first().click();
 
-const working = await save.evaluate((el) => ({
-  disabled: el.disabled,
-  pending: el.hasAttribute("data-pending"),
-  ariaBusy: el.getAttribute("aria-busy"),
-  cursor: getComputedStyle(el).cursor,
-  spinner: !!el.querySelector(".btn-spinner"),
-  spin: el.querySelector(".btn-spinner") && getComputedStyle(el.querySelector(".btn-spinner")).animationName,
-}));
-check("disables while the action runs", working.disabled);
-check("data-pending is set", working.pending);
-check("aria-busy announced", working.ariaBusy === "true");
-check("cursor becomes wait", working.cursor === "wait");
-check("spinner rendered and animating", working.spinner && working.spin === "btn-spin", String(working.spin));
+// Poll for the completion flash, then ask the database immediately: the flash
+// must not claim success before the row exists.
+let flashAt = null;
+for (let i = 0; i < 120; i++) {
+  const seen = await page.evaluate(() => {
+    const el = [...document.querySelectorAll("button")].find((x) => x.textContent.includes("Save account"));
+    return el ? el.hasAttribute("data-saved") : false;
+  });
+  if (seen) { flashAt = i * 25; break; }
+  await page.waitForTimeout(25);
+}
+const rows = await api();
+check("feedback visible long enough to see", (await stop()).ms >= PERCEPTIBLE_MS);
+check("completion flash fires", flashAt !== null, `${flashAt}ms`);
+check("flash only claims success once the row exists", rows.some((r) => r.code === code));
+check("saved exactly once (no double submit)", rows.length === before + 1, `${before} -> ${rows.length}`);
 
-await save.click({ force: true }).catch(() => {}); // must not double-submit
+// ── 4. The button gets destroyed by its own refresh ─────────────────────────
+console.log("\n4. list row action — the button is removed by router.refresh()");
+await page.goto(`${BASE}/packages`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(1300);
+if (await page.locator('button:has-text("Archive")').first().count()) {
+  stop = await watchPage(3000);
+  await page.locator('button:has-text("Archive")').first().click();
+  const r = await stop();
+  check("feedback survives the row being replaced", r.ms >= PERCEPTIBLE_MS, `${r.ms}ms`);
+} else {
+  console.log("  skip  no archivable row in this data set");
+}
 
-await page
-  .waitForFunction(
-    () => {
-      const el = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Save account"));
-      return el && !el.hasAttribute("data-pending");
-    },
-    null,
-    { timeout: 15000 },
-  )
-  .catch(() => {});
-await page.waitForTimeout(150);
+// ── 5. Redirecting save ────────────────────────────────────────────────────
+console.log("\n5. redirecting save — the whole page is replaced");
+await page.goto(`${BASE}/packages`, { waitUntil: "domcontentloaded" });
+await page.waitForTimeout(1300);
+await page.fill('input[name="name"]', `Feedback probe ${Date.now()}`);
+stop = await watchPage(3000);
+await page.locator('button:has-text("Create & build")').first().click();
+const redirected = await stop();
+check("feedback survives the navigation", redirected.ms >= PERCEPTIBLE_MS, `${redirected.ms}ms`);
 
-const done = await page.evaluate(() => {
-  const el = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Save account"));
-  return el && { flash: el.hasAttribute("data-saved"), anim: getComputedStyle(el).animationName, disabled: el.disabled };
-});
-check("completion flash fires", done?.flash === true);
-check("flash animation runs", done?.anim === "btn-saved", String(done?.anim));
-check("button is usable again", done?.disabled === false);
-check("the record actually saved once", (await countAccounts()) === before + 1);
+// ── 6. Nothing gets stuck ──────────────────────────────────────────────────
+console.log("\n6. nothing left stuck");
+await page.waitForTimeout(2500);
+check("work bar is gone once idle", !(await page.evaluate(() => !!document.querySelector(".work-indicator"))));
+const stuck = await page.evaluate(() =>
+  [...document.querySelectorAll("button")].filter((b) => b.disabled).map((b) => b.textContent.trim().slice(0, 20)),
+);
+check("no button left disabled", stuck.length === 0, JSON.stringify(stuck));
 
-// ── 4. One form, several submit buttons ─────────────────────────────────────
+// ── 7. One form, several submit buttons ────────────────────────────────────
 // useFormStatus reports the FORM's status, so the trap is every button spinning
 // at once and implying the wrong action is running.
-console.log("\n4. one form, several submit buttons");
+console.log("\n7. one form, several submit buttons");
 await page.route("**/settings/sla", async (route) => {
-  if (route.request().method() === "POST") await new Promise((r) => setTimeout(r, 2500));
+  if (route.request().method() === "POST") await new Promise((r) => setTimeout(r, 2000));
   await route.continue();
 });
 await page.goto(`${BASE}/settings/sla`, { waitUntil: "domcontentloaded" });
 await page.waitForTimeout(1400);
 const form = page.locator('form:has(button:has-text("Reset to default"))').first();
 if ((await form.count()) === 0) {
-  console.log("  skip  no multi-button form on this data set (needs a stored SLA override)");
+  console.log("  skip  no multi-button form in this data set (needs a stored SLA override)");
 } else {
   await form.locator('button:has-text("Reset to default")').click();
-  await page.waitForTimeout(600);
+  await page.waitForTimeout(300);
   const buttons = await form.evaluate((f) =>
     [...f.querySelectorAll("button")].map((el) => ({
       label: el.textContent.trim().slice(0, 20),
-      spinner: !!el.querySelector(".btn-spinner"),
+      spinner: getComputedStyle(el, "::after").animationName === "btn-spin",
       disabled: el.disabled,
     })),
   );

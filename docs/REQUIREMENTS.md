@@ -3032,55 +3032,80 @@ button — and the natural response is to click it again.
 
 ### The three signals
 
-1. **Press** — global `:active` in `globals.css`: `scale(0.97)` +
-   `brightness(0.9)`, plus a `:focus-visible` outline (keyboard users had
+1. **Press** — global `:active` in `globals.css`: `scale(0.94) translateY(1px)` +
+   `brightness(0.82)`, plus a `:focus-visible` outline (keyboard users had
    nothing at all). Deliberately global rather than a utility class so it reaches
    every button — icon buttons in table rows, tabs, the theme toggle — not just
    the ones someone remembers to opt into.
-2. **Working** — `SubmitButton` (`src/components/SubmitButton.tsx`) reads
-   `useFormStatus()` and sets `disabled`, `aria-busy`, and `data-pending`, which
-   the CSS turns into a spinner, `cursor: wait`, and a dimmed label. The disable
-   is also the double-submit guard.
-3. **Done** — `data-saved` flashes an emerald ring for 1.2s when the action
-   finishes. This is the "you cannot tell if it worked" half.
+2. **Working** — a spinner, `cursor: wait`, and a disabled button (which is also
+   the double-submit guard).
+3. **Done** — an emerald ring flashes when the action finishes, and only once the
+   work has really landed.
 
-### Two things in the CSS that are load-bearing
+### ⚠️ The first attempt was correct and still invisible
 
-- The `transition` on `button` is **unlayered and restates the colour
-  properties**. Unlayered rules beat Tailwind's utility layer (the same
-  mechanism the theme system uses), which is what makes the press transform
-  win — but it also means that if it listed only `transform`, it would override
-  every `transition-colors` on a button and kill the hover fades.
-- `button:disabled` is the one rule inside `@layer base`, because 46 buttons
-  already carry a deliberate `disabled:opacity-40` / `-30` / `-60`. In `base` it
-  is a default for the buttons that never said anything, and an explicit utility
-  still wins. Verified: the QuickBooks connect button still computes 0.4.
+Everything above applied, and the buttons still read as dead. Measured against a
+**production build** — dev-mode timings are not the ones anybody gets:
 
-### One form, several buttons
+| what | measured |
+|---|---|
+| `Save account` pending state | **~128ms** — 8 frames out of 245 |
+| `Archive` on a list row | **~16ms**, then the button left the DOM at frame 5 |
+| `Create & build` | **78ms**, then unmounted (the action redirects) |
+| completion flash on `/packages` | **never fired** — the button no longer exists |
 
-`useFormStatus()` reports the status of the **form**, so a form with Save /
-Reset / Void would light up every button at once and imply the wrong action is
-running. `SubmitButton` tracks which button was actually pressed and shows the
-spinner only there; the others still disable. Verified on `/settings/sla`, which
-has Save and "Reset to default" in one form.
+Two separate causes, and neither is fixable by styling the button harder:
 
-### What is deliberately not covered
+- **The work is faster than perception.** A correct spinner shown for an eighth
+  of a second is a flicker. Hence `MIN_WORKING_MS` / `MIN_BUSY_MS` (550ms): the
+  working state is *held* past the end of the work.
+- **The button is destroyed before the work finishes.** `router.refresh()`
+  replaces the row; a redirect replaces the page. Holding state on a component
+  that is about to be unmounted cannot help.
 
-- The 10 `method="get"` filter forms ("Apply" on list pages) do a browser
-  navigation, which the browser indicates itself. They get the press state only.
-- Anchors styled as buttons ("Export CSV", "Import CSV") darken on `:active`
-  but do not scale — an inline text link that jumps on click looks broken.
-- The 79 `onClick` buttons: every one that does async work already had its own
-  `disabled` binding (checked mechanically). They gain the press state.
+So feedback also lives *above* the thing that re-renders:
+`src/components/WorkIndicator.tsx` is a page-level bar mounted in `AppShell`,
+driven by `beginWork()` from both `SubmitButton` and `useBusy`. Its minimum
+on-screen deadline is a **module-level timestamp, not React state** — a redirect
+remounts the component, and state would reset (measured: 99ms of bar, then the
+new page wiped it). With the deadline outside React the bar spans the navigation.
+
+### Three button families, not one
+
+The original audit said the 79 `onClick` buttons were fine because they "already
+had a `disabled` binding". That was the wrong test: it checked a pending binding
+*existed*, not that it lasted long enough to see. `ListRowControls` — Archive and
+tag-save, on **every list page** — is a client component doing `fetch` +
+`router.refresh()`, and its `busy` flag was on screen for ~30ms.
+
+- `<form action={…}>` submits → `SubmitButton` (`useFormStatus`)
+- client `fetch` + `router.refresh()` → `useBusy` (`src/lib/useBusy.ts`)
+- `method="get"` filter forms → browser navigation, press state only
+
+Both families set the same `data-pending` attribute, and the spinner is a CSS
+`::after` on it rather than an element, so there is one mechanism and nothing to
+remember when adding a button.
 
 ### Verified in a real browser
 
-`scripts/verify-button-feedback.mjs` (Playwright, against a throwaway database):
-computed `transform` is `matrix(0.97, …)` while the mouse is held and `none` on
-release; the focus ring appears on keyboard focus; during a real server action
-(POST delayed so the in-flight state is observable) the button is `disabled`,
-`aria-busy="true"`, `cursor: wait`, with an animating spinner; the completion
-flash fires and the button returns to normal; and the record actually saved.
+`scripts/verify-button-feedback.mjs` (Playwright, throwaway database, run
+against a **production build**). It tests perception, not internals — an earlier
+version asserted "does the button carry `data-pending`" and passed while the
+feature was invisible in practice. The central check samples the whole page every
+animation frame and asks how many milliseconds ANY feedback was on screen:
+
+- in-place save — **616ms** visible, flash fires, and the flash only appears once
+  the row really exists, created exactly once
+- list row action, where the button is removed by its own refresh — **614ms**
+- redirecting save, where the whole page is replaced — **616ms**
+- nothing stuck: no bar, no disabled button left behind
+- one form with several submit buttons: only the pressed one spins
+
+Caveat on method: holding the POST open with request interception showed
+`pending` dropping before the response, which would make the flash premature. It
+could not be reproduced without interception, and under real timings the flash
+lands after the row exists — so it is recorded as a likely artifact of the
+interception, not a verified property.
 
 ## Notes on building order
 

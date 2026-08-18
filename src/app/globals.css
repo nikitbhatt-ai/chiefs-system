@@ -269,8 +269,8 @@ body {
 button,
 [role="button"] {
   transition:
-    transform 90ms ease,
-    filter 90ms ease,
+    transform 190ms cubic-bezier(0.2, 0.9, 0.3, 1),
+    filter 190ms ease-out,
     opacity 120ms ease,
     color 150ms ease,
     background-color 150ms ease,
@@ -283,11 +283,19 @@ button:not(:disabled),
   cursor: pointer;
 }
 
-/* The press itself. Small enough not to reflow a table row, big enough to feel. */
+/* The press itself.
+   The asymmetric timing matters more than the numbers: a click can be 30ms, so
+   at a symmetric 90ms the button barely moved before it was back — measurably
+   applied, but not something you would notice. Going DOWN is near-instant and
+   coming back UP takes 190ms, so even the quickest click leaves a visible
+   settle. The `transition` here overrides the base one only while held. */
 button:not(:disabled):active,
 [role="button"]:not([aria-disabled="true"]):active {
-  transform: scale(0.97);
-  filter: brightness(0.9);
+  transform: scale(0.94) translateY(1px);
+  filter: brightness(0.82);
+  transition:
+    transform 40ms ease-out,
+    filter 40ms ease-out;
 }
 
 /* Plenty of controls are anchors wearing button clothes ("Export CSV", "Import
@@ -338,11 +346,16 @@ button[data-saved] {
   animation: btn-saved 1.2s ease-out;
 }
 
-.btn-spinner {
+/* The spinner is CSS, not an element, so ANY button marked `data-pending` gets
+   one — the form submits handled by SubmitButton and the client-side fetch
+   buttons handled by useBusy alike. One mechanism, no chance of the two drifting
+   apart, and nothing to remember when adding a button. */
+button[data-pending]::after {
+  content: "";
   display: inline-block;
-  width: 0.9em;
-  height: 0.9em;
-  margin-right: 0.45em;
+  width: 0.85em;
+  height: 0.85em;
+  margin-left: 0.45em;
   vertical-align: -0.1em;
   border: 2px solid currentColor;
   border-right-color: transparent;
@@ -365,14 +378,54 @@ button[data-saved] {
   button:not(:disabled):active,
   [role="button"]:not([aria-disabled="true"]):active {
     transform: none;
-    filter: brightness(0.85);
+    filter: brightness(0.8);
+    transition: filter 40ms ease-out;
   }
   button[data-saved] {
     animation: none;
     box-shadow: 0 0 0 2px var(--color-emerald-400);
   }
-  .btn-spinner {
+  button[data-pending]::after {
     animation-duration: 1.5s;
+  }
+}
+
+/* Page-level working bar (src/components/WorkIndicator.tsx). Fixed to the top of
+   the viewport so it is visible wherever you are scrolled, and above the header.
+   The inner span sweeps rather than showing real progress — the duration of a
+   server action is not knowable in advance, and a fake percentage would be a
+   worse lie than an honest "still going". */
+.work-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  background: color-mix(in oklab, var(--color-amber-400) 18%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+}
+.work-indicator > span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--color-amber-400);
+  animation: work-sweep 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes work-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-indicator > span {
+    width: 100%;
+    animation: none;
+    opacity: 0.85;
   }
 }
 
