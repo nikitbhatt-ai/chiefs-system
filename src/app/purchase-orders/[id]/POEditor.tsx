@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { POLineItem } from "@/db/schema";
 import { PartSearchCombobox } from "@/components/PartSearchCombobox";
 import { PO_MANUAL_STATUSES, poStatusLabel } from "@/lib/poStatus";
+import { SubmitButton } from "@/components/SubmitButton";
 
 type PromoRef = { id: string; name: string; vendorId: string };
 
@@ -329,12 +330,11 @@ export function POEditor({
             Back
           </a>
           {!fullyReceived ? (
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2"
             >
               Save draft
-            </button>
+            </SubmitButton>
           ) : null}
         </div>
       </form>
@@ -377,12 +377,11 @@ export function POEditor({
             )}
           </div>
           <div className="flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-green-500 hover:bg-green-400 text-black rounded-md px-4 py-2"
             >
               Receive
-            </button>
+            </SubmitButton>
           </div>
         </form>
       ) : null}

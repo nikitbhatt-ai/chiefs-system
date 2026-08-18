@@ -5,6 +5,7 @@ import { partners } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -51,7 +52,7 @@ export default async function PartnersPage() {
           <input name="phone" placeholder="Phone" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
           <textarea name="notes" rows={2} placeholder="Notes" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2" />
           <div className="md:col-span-2 flex justify-end">
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Save partner</button>
+            <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Save partner</SubmitButton>
           </div>
         </form>
       </div>
@@ -82,7 +83,7 @@ export default async function PartnersPage() {
                     <a href={`/partners/${p.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 mr-3">Open</a>
                     <form action={deletePartner} className="inline">
                       <input type="hidden" name="id" value={p.id} />
-                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button>
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                     </form>
                   </td>
                 </tr>

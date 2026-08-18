@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { AppShell } from "@/components/AppShell";
 import { LedgerError } from "@/lib/accounting";
 import { listTaxRates, addTaxRate, setTaxRateActive } from "@/lib/tax";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -49,7 +50,7 @@ export default async function TaxRatesPage({ searchParams }: { searchParams: Pro
           </div>
           <div className="md:col-span-2 flex gap-2">
             <input name="notes" placeholder="notes (optional)" className="bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white w-full" />
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</button>
+            <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</SubmitButton>
           </div>
         </form>
       </div>
@@ -83,9 +84,9 @@ export default async function TaxRatesPage({ searchParams }: { searchParams: Pro
                     <form action={toggle}>
                       <input type="hidden" name="id" value={r.id} />
                       <input type="hidden" name="active" value={r.isActive ? "false" : "true"} />
-                      <button type="submit" className="text-[11px] font-body text-zinc-400 hover:text-white bg-white/5 border border-white/10 rounded-md px-3 py-1">
+                      <SubmitButton className="text-[11px] font-body text-zinc-400 hover:text-white bg-white/5 border border-white/10 rounded-md px-3 py-1">
                         {r.isActive ? "Deactivate" : "Reactivate"}
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

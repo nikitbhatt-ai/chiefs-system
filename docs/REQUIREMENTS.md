@@ -3005,6 +3005,83 @@ database lacks — needed because `drizzle/0000_initial.sql` is behind the schem
 - `5310 Direct Labor — Payroll Taxes` and `5320 Contractor Labor` exist but
   nothing posts to them automatically yet.
 
+## Button feedback (user requirement, 2026-08-06)
+
+> "all of these buttons have no feedback when pressing the buttons. It works and
+> is functional to save but the button is still and hard and you cannot tell if
+> it worked or not. i need this to be audited throughout the whole system"
+
+### What the audit found
+
+Counted mechanically across all 135 `.tsx` files by `scripts/audit-buttons.mjs`,
+which is still runnable — it now doubles as a regression check and exits non-zero
+if a raw `<button type="submit">` reappears inside a `<form action={…}>`:
+
+| | count |
+|---|---|
+| `<button>` elements | 207 across 79 files |
+| …submit buttons | 128 |
+| …of those, inside a `<form action={…}>` server action | 113 across 53 files |
+| …non-submit (`onClick`) buttons | 79 |
+| **buttons with any `:active` / press styling** | **0** |
+| `<form>` elements | 126 (111 server action, 10 `method="get"`) |
+
+Zero press states app-wide is the whole complaint: nothing happened between the
+click and the page changing, so a slow server action looked identical to a dead
+button — and the natural response is to click it again.
+
+### The three signals
+
+1. **Press** — global `:active` in `globals.css`: `scale(0.97)` +
+   `brightness(0.9)`, plus a `:focus-visible` outline (keyboard users had
+   nothing at all). Deliberately global rather than a utility class so it reaches
+   every button — icon buttons in table rows, tabs, the theme toggle — not just
+   the ones someone remembers to opt into.
+2. **Working** — `SubmitButton` (`src/components/SubmitButton.tsx`) reads
+   `useFormStatus()` and sets `disabled`, `aria-busy`, and `data-pending`, which
+   the CSS turns into a spinner, `cursor: wait`, and a dimmed label. The disable
+   is also the double-submit guard.
+3. **Done** — `data-saved` flashes an emerald ring for 1.2s when the action
+   finishes. This is the "you cannot tell if it worked" half.
+
+### Two things in the CSS that are load-bearing
+
+- The `transition` on `button` is **unlayered and restates the colour
+  properties**. Unlayered rules beat Tailwind's utility layer (the same
+  mechanism the theme system uses), which is what makes the press transform
+  win — but it also means that if it listed only `transform`, it would override
+  every `transition-colors` on a button and kill the hover fades.
+- `button:disabled` is the one rule inside `@layer base`, because 46 buttons
+  already carry a deliberate `disabled:opacity-40` / `-30` / `-60`. In `base` it
+  is a default for the buttons that never said anything, and an explicit utility
+  still wins. Verified: the QuickBooks connect button still computes 0.4.
+
+### One form, several buttons
+
+`useFormStatus()` reports the status of the **form**, so a form with Save /
+Reset / Void would light up every button at once and imply the wrong action is
+running. `SubmitButton` tracks which button was actually pressed and shows the
+spinner only there; the others still disable. Verified on `/settings/sla`, which
+has Save and "Reset to default" in one form.
+
+### What is deliberately not covered
+
+- The 10 `method="get"` filter forms ("Apply" on list pages) do a browser
+  navigation, which the browser indicates itself. They get the press state only.
+- Anchors styled as buttons ("Export CSV", "Import CSV") darken on `:active`
+  but do not scale — an inline text link that jumps on click looks broken.
+- The 79 `onClick` buttons: every one that does async work already had its own
+  `disabled` binding (checked mechanically). They gain the press state.
+
+### Verified in a real browser
+
+`scripts/verify-button-feedback.mjs` (Playwright, against a throwaway database):
+computed `transform` is `matrix(0.97, …)` while the mouse is held and `none` on
+release; the focus ring appears on keyboard focus; during a real server action
+(POST delayed so the in-flight state is observable) the button is `disabled`,
+`aria-busy="true"`, `cursor: wait`, with an animating spinner; the completion
+flash fires and the button returns to normal; and the record actually saved.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

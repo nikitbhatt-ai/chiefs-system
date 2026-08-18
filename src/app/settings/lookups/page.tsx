@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { lookups } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +89,7 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
             </select>
           ) : (<input type="hidden" name="parentId" value="" />)}
           <input name="sortOrder" type="number" placeholder="Sort order" defaultValue="0" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</SubmitButton>
         </form>
       </div>
       <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
@@ -115,13 +116,13 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
                     <form action={toggleLookup} className="inline">
                       <input type="hidden" name="id" value={r.id} />
                       <input type="hidden" name="active" value={r.active ? "0" : "1"} />
-                      <button type="submit" className={`text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${r.active ? "bg-green-500/10 text-green-300 border-green-500/30" : "bg-zinc-500/10 text-zinc-500 border-zinc-500/30"}`}>{r.active ? "Active" : "Inactive"}</button>
+                      <SubmitButton className={`text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${r.active ? "bg-green-500/10 text-green-300 border-green-500/30" : "bg-zinc-500/10 text-zinc-500 border-zinc-500/30"}`}>{r.active ? "Active" : "Inactive"}</SubmitButton>
                     </form>
                   </td>
                   <td className="px-3 py-2 text-right">
                     <form action={deleteLookup} className="inline">
                       <input type="hidden" name="id" value={r.id} />
-                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button>
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                     </form>
                   </td>
                 </tr>

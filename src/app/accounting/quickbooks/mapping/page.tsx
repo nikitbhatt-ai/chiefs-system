@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { listAccountMappings, setAccountMapping } from "@/lib/qbo";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -53,7 +54,7 @@ export default async function QboMappingPage() {
                     <input type="hidden" name="glId" value={r.glId} />
                     <input name="qboName" defaultValue={r.qboAccountName ?? ""} placeholder="QBO account name" className="bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white w-full" />
                     <input name="qboId" defaultValue={r.qboAccountId ?? ""} placeholder="QBO id (optional)" className="bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white w-40" />
-                    <button type="submit" className="text-[11px] font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-3 py-1.5 whitespace-nowrap">Save</button>
+                    <SubmitButton className="text-[11px] font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-3 py-1.5 whitespace-nowrap">Save</SubmitButton>
                   </form>
                 </td>
                 <td className="px-4 py-2 text-center">

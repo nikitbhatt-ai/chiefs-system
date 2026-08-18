@@ -10,6 +10,7 @@ import { PaymentForm } from "@/components/accounting/PaymentForm";
 import { fmtCents } from "@/lib/accounting";
 import { paidCentsForBill, voidBill, AP_TERM_LABELS } from "@/lib/ap";
 import { fmtDate, fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -173,9 +174,9 @@ export default async function BillDetailPage({ params }: { params: Promise<{ id:
       {bill.status === "open" && billPayments.length === 0 && (
         <div className="flex justify-end">
           <form action={voidThis}>
-            <button type="submit" className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors">
+            <SubmitButton className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors">
               Void bill
-            </button>
+            </SubmitButton>
           </form>
         </div>
       )}

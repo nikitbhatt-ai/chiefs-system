@@ -16,6 +16,7 @@ import {
   departmentsForPayroll,
   type PayrollKind,
 } from "@/lib/qbo";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -108,13 +109,13 @@ export default async function QuickBooksPage({ searchParams }: { searchParams: P
         <div className="flex justify-end gap-2">
           {linked ? (
             <form action={disconnectQbo}>
-              <button type="submit" className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2">Disconnect</button>
+              <SubmitButton className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2">Disconnect</SubmitButton>
             </form>
           ) : (
             <form action={connect}>
-              <button type="submit" disabled={!configured} className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed">
+              <SubmitButton disabled={!configured} className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed">
                 Connect to QuickBooks
-              </button>
+              </SubmitButton>
             </form>
           )}
         </div>
@@ -135,7 +136,7 @@ export default async function QuickBooksPage({ searchParams }: { searchParams: P
           <label className="text-[11px] text-zinc-400 font-body flex items-center gap-1.5">
             <input type="checkbox" name="confirm" /> I confirm switching to a production company
           </label>
-          <button type="submit" className="text-xs font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-4 py-2">Apply</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-4 py-2">Apply</SubmitButton>
         </form>
       </div>
 
@@ -171,7 +172,7 @@ export default async function QuickBooksPage({ searchParams }: { searchParams: P
             ))}
           </div>
           <div className="flex justify-end">
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Import & post</button>
+            <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Import & post</SubmitButton>
           </div>
         </form>
       </div>

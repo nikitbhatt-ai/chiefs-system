@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { glAccounts } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { listCategoryMappings, setCategoryAccount, UNCATEGORIZED_COGS_CODE } from "@/lib/cogsCategories";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -125,12 +126,11 @@ export default async function CogsCategoriesPage() {
             </table>
             {rows.length > 0 && (
               <div className="flex justify-end px-4 py-3 border-t border-white/5">
-                <button
-                  type="submit"
+                <SubmitButton
                   className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
                 >
                   Save mappings
-                </button>
+                </SubmitButton>
               </div>
             )}
           </form>

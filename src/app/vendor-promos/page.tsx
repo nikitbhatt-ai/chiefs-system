@@ -17,6 +17,7 @@ import {
 } from "@/lib/promos";
 import { allocatePromo } from "@/lib/promoAllocation";
 import { PromoBuilder } from "./PromoBuilder";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -153,27 +154,27 @@ export default async function VendorPromosPage() {
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <form action={addToPackages} className="inline">
                       <input type="hidden" name="id" value={p.id} />
-                      <button
+                      <SubmitButton
                         title="Create/refresh a sellable package from this promo (cost from the promo, sell at the package markup) and open it in the builder"
                         className="text-[11px] text-emerald-300 hover:text-emerald-200 px-1.5"
                       >
                         Add to Packages
-                      </button>
+                      </SubmitButton>
                     </form>
                     {p.status === "active" ? (
                       <form action={retire} className="inline">
                         <input type="hidden" name="id" value={p.id} />
-                        <button className="text-[11px] text-zinc-400 hover:text-white px-1.5">Retire</button>
+                        <SubmitButton className="text-[11px] text-zinc-400 hover:text-white px-1.5">Retire</SubmitButton>
                       </form>
                     ) : (
                       <form action={activate} className="inline">
                         <input type="hidden" name="id" value={p.id} />
-                        <button className="text-[11px] text-amber-400 hover:text-amber-300 px-1.5">Activate</button>
+                        <SubmitButton className="text-[11px] text-amber-400 hover:text-amber-300 px-1.5">Activate</SubmitButton>
                       </form>
                     )}
                     <form action={remove} className="inline">
                       <input type="hidden" name="id" value={p.id} />
-                      <button className="text-[11px] text-zinc-500 hover:text-red-400 px-1.5">Delete</button>
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400 px-1.5">Delete</SubmitButton>
                     </form>
                   </td>
                 </tr>

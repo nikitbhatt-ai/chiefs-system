@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { RESTRICTION_CATEGORIES } from "@/lib/credentials";
 import { FormField } from "@/components/FormField";
+import { SubmitButton } from "@/components/SubmitButton";
 
 type Initial = {
   sku: string;
@@ -255,12 +256,11 @@ export function PartEditForm({
         >
           Cancel
         </a>
-        <button
-          type="submit"
+        <SubmitButton
           className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
         >
           Save changes
-        </button>
+        </SubmitButton>
       </div>
     </form>
   );

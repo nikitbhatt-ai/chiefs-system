@@ -7,6 +7,7 @@ import { FormField } from "@/components/FormField";
 import { auth } from "@/auth";
 import { canDelete } from "@/lib/rbac";
 import { setCurrentPrice } from "@/lib/vendorPricing";
+import { SubmitButton } from "@/components/SubmitButton";
 
 // The à la carte price list: what each part costs bought individually from a
 // vendor. This is the allocation basis for promo packages (Phase 3) and the
@@ -121,12 +122,11 @@ export default async function VendorPricingPage({
             />
           </FormField>
           <div className="md:col-span-2 flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
             >
               Save price
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>
@@ -184,12 +184,11 @@ export default async function VendorPricingPage({
                     <td className="px-4 py-2.5 text-right">
                       <form action={deletePrice} className="inline">
                         <input type="hidden" name="id" value={r.id} />
-                        <button
-                          type="submit"
+                        <SubmitButton
                           className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                         >
                           Delete
-                        </button>
+                        </SubmitButton>
                       </form>
                     </td>
                   </tr>

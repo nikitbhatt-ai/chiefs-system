@@ -8,6 +8,7 @@ import { agentDrafts, users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 import { approveDraft, rejectDraft, saveDraftEdit } from "@/lib/agents";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -86,9 +87,9 @@ export default async function AgentDraftPage({ params }: { params: Promise<{ id:
               className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
             />
             <div className="flex justify-end gap-2">
-              <button type="submit" formAction={saveEdits} className="text-xs font-body text-zinc-300 bg-white/5 border border-white/10 rounded-md px-4 py-2 hover:bg-white/10">Save edits</button>
-              <button type="submit" formAction={reject} className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2">Reject</button>
-              <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Approve</button>
+              <SubmitButton formAction={saveEdits} className="text-xs font-body text-zinc-300 bg-white/5 border border-white/10 rounded-md px-4 py-2 hover:bg-white/10">Save edits</SubmitButton>
+              <SubmitButton formAction={reject} className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2">Reject</SubmitButton>
+              <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Approve</SubmitButton>
             </div>
           </>
         )}

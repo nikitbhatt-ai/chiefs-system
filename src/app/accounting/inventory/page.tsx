@@ -9,6 +9,7 @@ import {
   postInventoryAdjustment,
 } from "@/lib/inventoryValuation";
 import { setCostingMethod, type CostingMethod } from "@/lib/costing";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -48,9 +49,8 @@ export default async function InventoryAccountingPage() {
         <span className="text-[11px] text-zinc-500 font-body ml-auto">Costing method:</span>
         <form action={switchMethod} className="flex items-center gap-1.5">
           {(["weighted_average", "fifo"] as const).map((m) => (
-            <button
+            <SubmitButton
               key={m}
-              type="submit"
               name="method"
               value={m}
               className={`text-[11px] font-body rounded-md px-2.5 py-1 border transition-colors ${
@@ -60,7 +60,7 @@ export default async function InventoryAccountingPage() {
               }`}
             >
               {METHOD_LABEL[m]}
-            </button>
+            </SubmitButton>
           ))}
         </form>
       </div>
@@ -110,12 +110,11 @@ export default async function InventoryAccountingPage() {
 
       {!recon.ties && (
         <form action={adjust}>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Post reconciliation adjustment ({fmtCents(recon.differenceCents)})
-          </button>
+          </SubmitButton>
         </form>
       )}
 

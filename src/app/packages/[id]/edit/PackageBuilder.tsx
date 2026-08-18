@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
+import { SubmitButton } from "@/components/SubmitButton";
 
 // Mirrors PackageComponent in src/db/schema.ts.
 export type BuilderComponent =
@@ -398,9 +399,9 @@ export function PackageBuilder({
               <a href="/packages" className="text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors">
                 Back
               </a>
-              <button type="submit" className="font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
+              <SubmitButton className="font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
                 Save package
-              </button>
+              </SubmitButton>
             </div>
           </div>
         );

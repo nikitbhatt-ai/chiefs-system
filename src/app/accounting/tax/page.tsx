@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { fmtCents, dollarsToCents, LedgerError } from "@/lib/accounting";
 import { fmtDate } from "@/lib/datetime";
 import { taxSummary, recordTaxRemittance, listTaxRates } from "@/lib/tax";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -107,7 +108,7 @@ export default async function TaxPage({ searchParams }: { searchParams: Promise<
           </div>
           <div className="flex gap-2">
             <input name="memo" placeholder="memo (optional)" className="bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-sm text-white w-full" />
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 whitespace-nowrap">Record</button>
+            <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 whitespace-nowrap">Record</SubmitButton>
           </div>
         </form>
         <p className="text-[10px] text-zinc-500 font-body">Posts Dr Sales Tax Payable / Cr Cash.</p>

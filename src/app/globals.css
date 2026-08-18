@@ -252,6 +252,130 @@ body {
   font-family: var(--font-body);
 }
 
+/* ── Button feedback ────────────────────────────────────────────────────────
+   Every button in this app (207 of them, across 79 files) had NO press state:
+   no :active, no focus ring, nothing between "I clicked" and the page changing.
+   The buttons felt dead even when the action worked.
+
+   This is deliberately global rather than a utility class, because it has to
+   reach every button — icon buttons in table rows, tabs, the theme toggle — not
+   just the ones anybody remembers to opt in. It is unlayered, so it wins over
+   Tailwind's utility layer; that is the point, but it also means the transition
+   below has to RESTATE the colour properties, otherwise it would override
+   `transition-colors` and kill the hover fades those buttons already had.
+
+   `filter: brightness()` rather than a hard-coded pressed colour: it works on
+   amber fills, ghost buttons and dark chrome alike, in all three themes. */
+button,
+[role="button"] {
+  transition:
+    transform 90ms ease,
+    filter 90ms ease,
+    opacity 120ms ease,
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+/* The press itself. Small enough not to reflow a table row, big enough to feel. */
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: scale(0.97);
+  filter: brightness(0.9);
+}
+
+/* Plenty of controls are anchors wearing button clothes ("Export CSV", "Import
+   CSV", the Reset on every filter bar). They can't scale — an inline text link
+   that jumps on click looks broken — but they can darken, which is the half of
+   the press feedback that reads on text. */
+a:active {
+  filter: brightness(0.88);
+}
+
+/* Keyboard users got nothing at all before this. */
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--color-amber-400);
+  outline-offset: 2px;
+}
+
+/* In `base`, not unlayered, unlike everything else here: 46 buttons already
+   carry a deliberate `disabled:opacity-40` / `-30` / `-60`, and an unlayered
+   rule would silently overrule every one of them. This is the default for the
+   buttons that never said anything; a utility still wins. */
+@layer base {
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+/* Working. `pointer-events: none` is the double-submit guard: `disabled` already
+   blocks the click, this stops the hover state flickering under a stuck cursor. */
+button[data-pending] {
+  cursor: wait;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+/* Done — the "did it work?" answer. A ring rather than a colour change, so it
+   reads the same on an amber fill as on a ghost button. */
+@keyframes btn-saved {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-emerald-400) 70%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+button[data-saved] {
+  animation: btn-saved 1.2s ease-out;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  margin-right: 0.45em;
+  vertical-align: -0.1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 9999px;
+  animation: btn-spin 0.6s linear infinite;
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Motion is feedback here, not decoration, so the press still registers — the
+   movement is what goes away. */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"] {
+    transition: filter 90ms ease, opacity 120ms ease;
+  }
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: none;
+    filter: brightness(0.85);
+  }
+  button[data-saved] {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-emerald-400);
+  }
+  .btn-spinner {
+    animation-duration: 1.5s;
+  }
+}
+
 /* The upfit diagram is a spec sheet that gets printed and handed to techs, so
    its canvas is white paper in every theme — never the themed ink colour. */
 .upfit-canvas {

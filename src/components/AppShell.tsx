@@ -7,6 +7,7 @@ import { TopNav } from "@/components/TopNav";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export async function AppShell({
   title,
@@ -73,12 +74,11 @@ export async function AppShell({
               await signOut({ redirectTo: "/signin" });
             }}
           >
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs text-zinc-400 hover:text-white font-body bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 transition-colors"
             >
               Sign out
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </header>

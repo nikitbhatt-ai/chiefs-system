@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -226,12 +227,11 @@ function FormBlock({
           />
         </div>
 
-        <button
-          type="submit"
+        <SubmitButton
           className="w-full bg-amber-500 text-black hover:bg-amber-400 font-body text-sm font-semibold h-10 rounded-lg transition-colors"
         >
           Create admin and continue
-        </button>
+        </SubmitButton>
       </form>
     </>
   );

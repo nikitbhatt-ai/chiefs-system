@@ -5,6 +5,7 @@ import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobo
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
 import { expandPackageWithBundlePrice } from "@/lib/packages";
 import { quoteTotals, lineNet } from "@/lib/quoteTotals";
+import { SubmitButton } from "@/components/SubmitButton";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -934,12 +935,11 @@ export function QuoteEditor({
           >
             Back
           </a>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save quote
-          </button>
+          </SubmitButton>
         </div>
       </div>
     </form>

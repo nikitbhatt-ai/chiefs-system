@@ -22,6 +22,7 @@ import {
   type PartRef,
   type QuoteLine,
 } from "@/lib/procurement";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -377,7 +378,7 @@ export default async function WorkOrdersPage({
                             className="bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-[11px] text-white w-14"
                           />
                           <span className="text-[10px] text-zinc-500">d buffer</span>
-                          <button type="submit" className="text-[10px] text-amber-400 hover:text-amber-300 ml-1">save</button>
+                          <SubmitButton className="text-[10px] text-amber-400 hover:text-amber-300 ml-1">save</SubmitButton>
                         </div>
                       </form>
                     </td>
@@ -413,12 +414,11 @@ export default async function WorkOrdersPage({
                       ) : null}
                       <form action={deleteWO} className="inline">
                         <input type="hidden" name="id" value={w.id} />
-                        <button
-                          type="submit"
+                        <SubmitButton
                           className="text-[11px] text-zinc-500 hover:text-red-400"
                         >
                           Delete
-                        </button>
+                        </SubmitButton>
                       </form>
                     </td>
                   </tr>

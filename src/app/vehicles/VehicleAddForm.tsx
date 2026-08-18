@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const LOT_LABELS: Record<string, string> = {
   "on-site": "On-site",
@@ -163,12 +164,11 @@ export function VehicleAddForm({
           className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3"
         />
         <div className="md:col-span-3 flex justify-end">
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save vehicle
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </div>
