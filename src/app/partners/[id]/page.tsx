@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { partners, partnerContacts } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -73,7 +74,7 @@ export default async function PartnerEntityPage({ params }: { params: Promise<{ 
         <input name="phone" defaultValue={p.phone ?? ""} placeholder="Phone" className={inputCls} />
         <textarea name="notes" defaultValue={p.notes ?? ""} rows={2} placeholder="Notes" className={`${inputCls} md:col-span-2`} />
         <label className="flex items-center gap-2 text-xs text-zinc-300 font-body"><input type="checkbox" name="active" defaultChecked={p.active} />Active (referrals can be attributed)</label>
-        <div className="flex justify-end"><button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Save changes</button></div>
+        <div className="flex justify-end"><SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Save changes</SubmitButton></div>
       </form>
       <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Add contact</h3>
@@ -83,7 +84,7 @@ export default async function PartnerEntityPage({ params }: { params: Promise<{ 
           <input name="location" placeholder="Location" className={inputCls} />
           <input name="email" type="email" placeholder="Email" className={inputCls} />
           <input name="phone" placeholder="Phone" className={inputCls} />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add contact</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add contact</SubmitButton>
         </form>
       </div>
       <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
@@ -107,7 +108,7 @@ export default async function PartnerEntityPage({ params }: { params: Promise<{ 
                   <td className="px-3 py-2 text-right">
                     <form action={deleteContact} className="inline">
                       <input type="hidden" name="cid" value={c.id} />
-                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button>
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                     </form>
                   </td>
                 </tr>

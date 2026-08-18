@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { deals, customers, users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { syncDealToWorkflow } from "@/lib/dealTriggers";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const STAGES = ["prospect", "quote_sent", "po_received", "in_production", "delivered", "lost"] as const;
 type Stage = (typeof STAGES)[number];
@@ -73,7 +74,7 @@ export default async function EditDealPage({ params }: { params: Promise<{ id: s
         <textarea name="notes" defaultValue={d.notes ?? ""} rows={4} placeholder="Internal notes" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3" />
         <div className="md:col-span-3 flex justify-end gap-2">
           <a href="/deals" className="text-xs font-body text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors">Cancel</a>
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save changes</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save changes</SubmitButton>
         </div>
       </form>
     </AppShell>

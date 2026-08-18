@@ -9,6 +9,7 @@ import { AppShell } from "@/components/AppShell";
 import { fmtCents } from "@/lib/accounting";
 import { jobCostRollup, laborForWorkOrder, settleJobToCogs, reopenJob } from "@/lib/jobCosting";
 import { cogsSplitForWorkOrder } from "@/lib/cogsCategories";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -161,16 +162,16 @@ export default async function JobCostDetailPage({ params }: { params: Promise<{ 
       <div className="flex justify-end gap-2">
         {!rollup.settled && rollup.wipBalanceCents > 0 && (
           <form action={settle}>
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
+            <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
               Settle {fmtCents(rollup.wipBalanceCents)} WIP → COGS
-            </button>
+            </SubmitButton>
           </form>
         )}
         {rollup.settled && (
           <form action={reopen}>
-            <button type="submit" className="text-xs font-body text-zinc-400 hover:text-amber-300 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors">
+            <SubmitButton className="text-xs font-body text-zinc-400 hover:text-amber-300 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors">
               Reopen job (reverse COGS)
-            </button>
+            </SubmitButton>
           </form>
         )}
       </div>

@@ -7,6 +7,8 @@ import { TopNav } from "@/components/TopNav";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { WorkIndicator } from "@/components/WorkIndicator";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export async function AppShell({
   title,
@@ -30,6 +32,9 @@ export async function AppShell({
 
   return (
     <main className="min-h-screen">
+      {/* Above everything that re-renders, so it outlives the button that
+          started the work — see WorkIndicator for why that matters. */}
+      <WorkIndicator />
       <header className="border-b border-white/5 px-4 sm:px-6 py-3 sm:py-4 flex flex-wrap items-center justify-between gap-3">
         <div className="shrink-0">
           <h1 className="text-base sm:text-lg font-display font-bold text-white">
@@ -73,12 +78,11 @@ export async function AppShell({
               await signOut({ redirectTo: "/signin" });
             }}
           >
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs text-zinc-400 hover:text-white font-body bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 transition-colors"
             >
               Sign out
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </header>

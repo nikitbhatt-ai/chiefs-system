@@ -8,6 +8,7 @@ import { Pagination } from "@/components/Pagination";
 import { ListRowControls } from "@/components/ListRowControls";
 import { parsePagination } from "@/lib/pagination";
 import { packageValue, packageCounts, packagePartIds, packageCost } from "@/lib/packages";
+import { SubmitButton } from "@/components/SubmitButton";
 
 async function createPackage(formData: FormData) {
   "use server";
@@ -118,12 +119,11 @@ export default async function PackagesPage({
             className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3"
           />
           <div className="md:col-span-3 flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
             >
               Create & build →
-            </button>
+            </SubmitButton>
           </div>
         </form>
         <p className="text-[11px] text-zinc-500 mt-2">
@@ -254,15 +254,15 @@ export default async function PackagesPage({
                       <form action={archivePackage} className="inline mr-3">
                         <input type="hidden" name="id" value={p.id} />
                         <input type="hidden" name="archive" value={p.archived ? "0" : "1"} />
-                        <button type="submit" className="text-[11px] text-zinc-500 hover:text-white">
+                        <SubmitButton className="text-[11px] text-zinc-500 hover:text-white">
                           {p.archived ? "Unarchive" : "Archive"}
-                        </button>
+                        </SubmitButton>
                       </form>
                       <form action={deletePackage} className="inline">
                         <input type="hidden" name="id" value={p.id} />
-                        <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">
+                        <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400">
                           Delete
-                        </button>
+                        </SubmitButton>
                       </form>
                     </td>
                   </tr>

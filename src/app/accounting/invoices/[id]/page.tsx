@@ -10,6 +10,7 @@ import { ReceiptForm } from "@/components/accounting/ReceiptForm";
 import { fmtCents } from "@/lib/accounting";
 import { paidCentsForInvoice, voidInvoice, AR_TERM_LABELS } from "@/lib/ar";
 import { fmtDate, fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -147,12 +148,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       {invoice.status === "open" && appliedReceipts.length === 0 && (
         <div className="flex justify-end">
           <form action={voidThis}>
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors"
             >
               Void invoice
-            </button>
+            </SubmitButton>
           </form>
         </div>
       )}

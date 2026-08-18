@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export default async function EditVendorPage({
   params,
@@ -98,12 +99,11 @@ export default async function EditVendorPage({
           >
             Cancel
           </a>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save changes
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </AppShell>

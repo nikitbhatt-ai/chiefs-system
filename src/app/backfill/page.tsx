@@ -11,6 +11,7 @@ import {
   setRequisitionStatus,
 } from "@/lib/backfill";
 import { BackfillControls } from "./BackfillControls";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -64,9 +65,9 @@ export default async function BackfillPage() {
         <Link href="/purchase-orders" className="text-xs text-amber-400 hover:text-amber-300 font-body">Purchase orders →</Link>
         <Link href="/inventory" className="text-xs text-amber-400 hover:text-amber-300 font-body">Inventory →</Link>
         <form action={scan} className="ml-auto">
-          <button className="text-[11px] font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5">
+          <SubmitButton className="text-[11px] font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5">
             Scan reorder points now
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -123,13 +124,13 @@ export default async function BackfillPage() {
                     {r.status === "open" ? (
                       <form action={makePO} className="inline">
                         <input type="hidden" name="id" value={r.id} />
-                        <button className="text-[11px] text-amber-400 hover:text-amber-300 px-1.5">Create PO</button>
+                        <SubmitButton className="text-[11px] text-amber-400 hover:text-amber-300 px-1.5">Create PO</SubmitButton>
                       </form>
                     ) : null}
                     {r.status === "ordered" ? (
                       <form action={markReceived} className="inline">
                         <input type="hidden" name="id" value={r.id} />
-                        <button className="text-[11px] text-zinc-400 hover:text-white px-1.5">Mark received</button>
+                        <SubmitButton className="text-[11px] text-zinc-400 hover:text-white px-1.5">Mark received</SubmitButton>
                       </form>
                     ) : null}
                   </td>

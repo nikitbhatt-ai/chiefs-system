@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const ROLES = ["admin", "manager", "sales", "warehouse", "tech", "accountant"] as const;
 type Role = (typeof ROLES)[number];
@@ -111,12 +112,11 @@ export default async function UsersPage() {
             User can change their password after signing in. Minimum 8 characters.
           </p>
           <div className="md:col-span-2 flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
             >
               Create user
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>
@@ -168,12 +168,11 @@ export default async function UsersPage() {
                     <form action={toggleActive} className="inline">
                       <input type="hidden" name="id" value={u.id} />
                       <input type="hidden" name="active" value={u.active ? "0" : "1"} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-white font-body"
                       >
                         {u.active ? "Disable" : "Enable"}
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

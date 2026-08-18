@@ -10,6 +10,7 @@ import { parsePagination } from "@/lib/pagination";
 import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 async function createCustomer(formData: FormData) {
   "use server";
@@ -92,7 +93,7 @@ export default async function CrmPage({
             Tax exempt
           </label>
           <div className="md:col-span-2 flex justify-end">
-            <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save customer</button>
+            <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save customer</SubmitButton>
           </div>
         </form>
       </div>
@@ -138,7 +139,7 @@ export default async function CrmPage({
                     <a href={`/crm/${c.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3">Edit</a>
                     <form action={deleteCustomer} className="inline">
                       <input type="hidden" name="id" value={c.id} />
-                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</button>
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</SubmitButton>
                     </form>
                   </td>
                 </tr>

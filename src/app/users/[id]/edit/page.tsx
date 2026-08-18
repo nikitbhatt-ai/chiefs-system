@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const ROLES = ["admin", "manager", "sales", "warehouse", "tech", "accountant"] as const;
 type Role = (typeof ROLES)[number];
@@ -99,12 +100,11 @@ export default async function EditUserPage({
           >
             Cancel
           </a>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save changes
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </AppShell>

@@ -3006,6 +3006,108 @@ database lacks — needed because `drizzle/0000_initial.sql` is behind the schem
 - `5310 Direct Labor — Payroll Taxes` and `5320 Contractor Labor` exist but
   nothing posts to them automatically yet.
 
+## Button feedback (user requirement, 2026-08-06)
+
+> "all of these buttons have no feedback when pressing the buttons. It works and
+> is functional to save but the button is still and hard and you cannot tell if
+> it worked or not. i need this to be audited throughout the whole system"
+
+### What the audit found
+
+Counted mechanically across all 135 `.tsx` files by `scripts/audit-buttons.mjs`,
+which is still runnable — it now doubles as a regression check and exits non-zero
+if a raw `<button type="submit">` reappears inside a `<form action={…}>`:
+
+| | count |
+|---|---|
+| `<button>` elements | 207 across 79 files |
+| …submit buttons | 128 |
+| …of those, inside a `<form action={…}>` server action | 113 across 53 files |
+| …non-submit (`onClick`) buttons | 79 |
+| **buttons with any `:active` / press styling** | **0** |
+| `<form>` elements | 126 (111 server action, 10 `method="get"`) |
+
+Zero press states app-wide is the whole complaint: nothing happened between the
+click and the page changing, so a slow server action looked identical to a dead
+button — and the natural response is to click it again.
+
+### The three signals
+
+1. **Press** — global `:active` in `globals.css`: `scale(0.94) translateY(1px)` +
+   `brightness(0.82)`, plus a `:focus-visible` outline (keyboard users had
+   nothing at all). Deliberately global rather than a utility class so it reaches
+   every button — icon buttons in table rows, tabs, the theme toggle — not just
+   the ones someone remembers to opt into.
+2. **Working** — a spinner, `cursor: wait`, and a disabled button (which is also
+   the double-submit guard).
+3. **Done** — an emerald ring flashes when the action finishes, and only once the
+   work has really landed.
+
+### ⚠️ The first attempt was correct and still invisible
+
+Everything above applied, and the buttons still read as dead. Measured against a
+**production build** — dev-mode timings are not the ones anybody gets:
+
+| what | measured |
+|---|---|
+| `Save account` pending state | **~128ms** — 8 frames out of 245 |
+| `Archive` on a list row | **~16ms**, then the button left the DOM at frame 5 |
+| `Create & build` | **78ms**, then unmounted (the action redirects) |
+| completion flash on `/packages` | **never fired** — the button no longer exists |
+
+Two separate causes, and neither is fixable by styling the button harder:
+
+- **The work is faster than perception.** A correct spinner shown for an eighth
+  of a second is a flicker. Hence `MIN_WORKING_MS` / `MIN_BUSY_MS` (550ms): the
+  working state is *held* past the end of the work.
+- **The button is destroyed before the work finishes.** `router.refresh()`
+  replaces the row; a redirect replaces the page. Holding state on a component
+  that is about to be unmounted cannot help.
+
+So feedback also lives *above* the thing that re-renders:
+`src/components/WorkIndicator.tsx` is a page-level bar mounted in `AppShell`,
+driven by `beginWork()` from both `SubmitButton` and `useBusy`. Its minimum
+on-screen deadline is a **module-level timestamp, not React state** — a redirect
+remounts the component, and state would reset (measured: 99ms of bar, then the
+new page wiped it). With the deadline outside React the bar spans the navigation.
+
+### Three button families, not one
+
+The original audit said the 79 `onClick` buttons were fine because they "already
+had a `disabled` binding". That was the wrong test: it checked a pending binding
+*existed*, not that it lasted long enough to see. `ListRowControls` — Archive and
+tag-save, on **every list page** — is a client component doing `fetch` +
+`router.refresh()`, and its `busy` flag was on screen for ~30ms.
+
+- `<form action={…}>` submits → `SubmitButton` (`useFormStatus`)
+- client `fetch` + `router.refresh()` → `useBusy` (`src/lib/useBusy.ts`)
+- `method="get"` filter forms → browser navigation, press state only
+
+Both families set the same `data-pending` attribute, and the spinner is a CSS
+`::after` on it rather than an element, so there is one mechanism and nothing to
+remember when adding a button.
+
+### Verified in a real browser
+
+`scripts/verify-button-feedback.mjs` (Playwright, throwaway database, run
+against a **production build**). It tests perception, not internals — an earlier
+version asserted "does the button carry `data-pending`" and passed while the
+feature was invisible in practice. The central check samples the whole page every
+animation frame and asks how many milliseconds ANY feedback was on screen:
+
+- in-place save — **616ms** visible, flash fires, and the flash only appears once
+  the row really exists, created exactly once
+- list row action, where the button is removed by its own refresh — **614ms**
+- redirecting save, where the whole page is replaced — **616ms**
+- nothing stuck: no bar, no disabled button left behind
+- one form with several submit buttons: only the pressed one spins
+
+Caveat on method: holding the POST open with request interception showed
+`pending` dropping before the response, which would make the flash premature. It
+could not be reproduced without interception, and under real timings the flash
+lands after the row exists — so it is recorded as a likely artifact of the
+interception, not a verified property.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

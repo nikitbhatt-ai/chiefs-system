@@ -11,6 +11,7 @@ import { resolveWorkOrderParts } from "@/lib/workOrderParts";
 import { laborByWorkOrder } from "@/lib/timeclock";
 import { blendedRateCents } from "@/lib/laborRates";
 import { fmtCents } from "@/lib/accounting";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -191,7 +192,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
                 </span>
               ) : null}
             </div>
-            <button type="submit" className="text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold">Save</button>
+            <SubmitButton className="text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold">Save</SubmitButton>
           </div>
         </form>
 
@@ -256,7 +257,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
           ))}
         </div>
         <div className="flex justify-end mt-3">
-          <button type="submit" className="text-[11px] bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold">Save QC</button>
+          <SubmitButton className="text-[11px] bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold">Save QC</SubmitButton>
         </div>
       </form>
     </AppShell>

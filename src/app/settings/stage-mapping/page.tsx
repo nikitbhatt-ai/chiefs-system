@@ -7,6 +7,7 @@ import { stageMapping } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { DEFAULT_MAPPING, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
 import { stageLabel } from "@/lib/pipelines";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -116,9 +117,9 @@ export default async function StageMappingPage() {
             ))}
           </tbody>
         </table>
-        <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">
+        <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">
           Save mapping
-        </button>
+        </SubmitButton>
       </form>
     </AppShell>
   );

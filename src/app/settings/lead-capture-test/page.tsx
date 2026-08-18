@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { leads } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -131,13 +132,12 @@ export default async function LeadCaptureTestPage({
           )}
         </div>
         <form action={action}>
-          <button
-            type="submit"
+          <SubmitButton
             disabled={!secretSet}
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black rounded-md px-4 py-2"
           >
             Send a test lead
-          </button>
+          </SubmitButton>
         </form>
 
         {lastResult && (

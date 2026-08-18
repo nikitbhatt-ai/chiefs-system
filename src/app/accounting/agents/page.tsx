@@ -13,6 +13,7 @@ import {
   listDrafts,
   overdueInvoicesNeedingReminder,
 } from "@/lib/agents";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -87,9 +88,9 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
                   </div>
                   <form action={generateReminder}>
                     <input type="hidden" name="invoiceId" value={inv.id} />
-                    <button type="submit" disabled={!configured} className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+                    <SubmitButton disabled={!configured} className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
                       Draft reminder
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
               ))}
@@ -104,9 +105,9 @@ export default async function AgentsPage({ searchParams }: { searchParams: Promi
             Analyze all open bills — flag anomalies and propose a prioritized payment schedule for you to review.
           </p>
           <form action={generateApSchedule}>
-            <button type="submit" disabled={!configured} className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed">
+            <SubmitButton disabled={!configured} className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 disabled:opacity-40 disabled:cursor-not-allowed">
               Analyze payables
-            </button>
+            </SubmitButton>
           </form>
         </div>
       </div>

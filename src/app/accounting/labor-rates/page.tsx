@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { fmtCents, dollarsToCents, centsToDollars } from "@/lib/accounting";
 import { defaultLaborRateCents, laborRateMap, setLaborRate } from "@/lib/laborRates";
 import { RateInput } from "@/components/accounting/RateInput";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export default async function LaborRatesPage() {
                     defaultValue={defaultCents ? centsToDollars(defaultCents) : ""}
                     placeholder="0.00"
                   />
-                  <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5">Save</button>
+                  <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5">Save</SubmitButton>
                 </form>
               </td>
             </tr>
@@ -87,7 +88,7 @@ export default async function LaborRatesPage() {
                         ariaLabel={`Hourly cost rate in dollars for ${u.displayName || u.name || "this person"}`}
                         defaultValue={cents != null ? centsToDollars(cents) : ""}
                       />
-                      <button type="submit" className="text-xs font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-3 py-1.5">Save</button>
+                      <SubmitButton className="text-xs font-body font-semibold bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-200 rounded-md px-3 py-1.5">Save</SubmitButton>
                     </form>
                   </td>
                 </tr>

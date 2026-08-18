@@ -12,6 +12,7 @@ import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
 import { fmtDateTime } from "@/lib/datetime";
 import { poStatusLabel, poStatusColor, PO_MANUAL_STATUSES } from "@/lib/poStatus";
+import { SubmitButton } from "@/components/SubmitButton";
 
 // Statuses offered in the list filter, in workflow order.
 const PO_STATUSES = ["pending", "ordered", "partially_received", "fulfilled"];
@@ -126,12 +127,11 @@ export default async function PurchaseOrdersPage({
               </option>
             ))}
           </select>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2"
           >
             Create draft
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -195,12 +195,11 @@ export default async function PurchaseOrdersPage({
                     </a>
                     <form action={deletePO} className="inline">
                       <input type="hidden" name="id" value={p.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                       >
                         Delete
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

@@ -13,6 +13,7 @@ import {
   normalBalanceFor,
   type AccountType,
 } from "@/lib/chartOfAccounts";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -70,12 +71,11 @@ export default async function ChartOfAccountsPage() {
           <input name="name" required placeholder="Name * (e.g. Marketing)" className={`${inputCls} md:col-span-2`} />
           <AccountTypeFields />
           <div className="md:col-span-3 flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
             >
               Save account
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>

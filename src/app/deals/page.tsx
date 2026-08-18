@@ -24,6 +24,7 @@ import {
   type DealStage,
   type PipelineSlug,
 } from "@/lib/pipelines";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -191,7 +192,7 @@ export default async function DealsPage({
           <input name="vehicleMake" placeholder="Make" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
           <input name="vehicleModel" placeholder="Model" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
           <textarea name="notes" rows={2} placeholder="Internal notes" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3" />
-          <div className="md:col-span-3 flex justify-end"><button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save deal</button></div>
+          <div className="md:col-span-3 flex justify-end"><SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save deal</SubmitButton></div>
         </form>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -252,7 +253,7 @@ export default async function DealsPage({
                           {validStages.map((s) => (<option key={s} value={s}>{stageLabel(s)}</option>))}
                           {!validStages.includes("lost") && (<option value="lost">Lost</option>)}
                         </select>
-                        <button type="submit" className="text-[10px] text-amber-400 hover:text-amber-300">Save</button>
+                        <SubmitButton className="text-[10px] text-amber-400 hover:text-amber-300">Save</SubmitButton>
                       </form>
                     </td>
                     <td className="px-3 py-2 text-xs">{d.assignedTo ? userMap.get(d.assignedTo) ?? "—" : (d.salesRep ?? "—")}</td>
@@ -262,7 +263,7 @@ export default async function DealsPage({
                       <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="deals" id={d.id} tags={d.tags ?? []} archived={d.archived} /></div>
                       <a href={`/deals/${d.id}`} className="text-[11px] text-blue-400 hover:text-blue-300 mr-3">Open</a>
                       <a href={`/deals/${d.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 mr-3">Edit</a>
-                      <form action={deleteDeal} className="inline"><input type="hidden" name="id" value={d.id} /><button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button></form>
+                      <form action={deleteDeal} className="inline"><input type="hidden" name="id" value={d.id} /><SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400">Delete</SubmitButton></form>
                     </td>
                   </tr>
                 );

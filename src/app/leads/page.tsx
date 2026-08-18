@@ -9,6 +9,7 @@ import { parsePagination } from "@/lib/pagination";
 import { NewLeadForm } from "./NewLeadForm";
 import { convertLeadAction, deleteLeadAction } from "./actions";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -116,9 +117,9 @@ export default async function LeadsPage({
                   <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(l.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="leads" id={l.id} tags={l.tags ?? []} archived={l.archived} /></div>
-                    {l.status !== "converted" ? (<form action={convertLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><button type="submit" className="text-[11px] text-green-400 hover:text-green-300 font-body mr-3">Convert</button></form>) : null}
+                    {l.status !== "converted" ? (<form action={convertLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><SubmitButton className="text-[11px] text-green-400 hover:text-green-300 font-body mr-3">Convert</SubmitButton></form>) : null}
                     <a href={`/leads/${l.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3">Edit</a>
-                    <form action={deleteLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</button></form>
+                    <form action={deleteLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</SubmitButton></form>
                   </td>
                 </tr>
               ))
