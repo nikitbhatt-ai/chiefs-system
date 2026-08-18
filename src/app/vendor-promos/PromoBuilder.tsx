@@ -94,6 +94,9 @@ export function PromoBuilder({ vendors }: { vendors: Vendor[] }) {
 
   const label = "block text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-1";
   const input = "w-full bg-black/20 border border-white/10 rounded-md px-2.5 py-1.5 text-sm text-white font-body focus:border-amber-500/50 outline-none";
+  // Same look without `w-full`, for flex-row line cells where a stray w-full
+  // would fight the flex-1/fixed widths and collapse the SKU box.
+  const cell = "bg-black/20 border border-white/10 rounded-md px-2.5 py-1.5 text-sm text-white font-body focus:border-amber-500/50 outline-none";
 
   return (
     <div className="bg-surface border border-white/5 rounded-lg p-5 space-y-4">
@@ -130,14 +133,14 @@ export function PromoBuilder({ vendors }: { vendors: Vendor[] }) {
         {lines.map((l, i) => (
           <div key={i} className="flex items-center gap-2">
             <input
-              className={`${input} flex-1`}
+              className={`${cell} flex-1 min-w-0`}
               value={l.sku}
               onChange={(e) => setLine(i, { sku: e.target.value, state: "idle", alacarte: null })}
               onBlur={(e) => resolveCost(i, e.target.value)}
               placeholder="SKU (e.g. XI3JC)"
             />
             <input
-              className={`${input} w-20`}
+              className={`${cell} w-20 shrink-0`}
               type="number"
               min={1}
               value={l.quantity}
