@@ -87,9 +87,16 @@ export default async function VendorPromosPage() {
   return (
     <AppShell title="Vendor promos" subtitle="Package deals — one price for a fixed basket, allocated across the parts">
       <div className="flex items-center gap-3">
+        <Link href="/packages/import-template" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5">
+          ⬆ Import promo from a vendor sheet
+        </Link>
         <Link href="/vendor-pricing" className="text-xs text-amber-400 hover:text-amber-300 font-body">à la carte price list →</Link>
         <Link href="/purchase-orders" className="text-xs text-amber-400 hover:text-amber-300 font-body">Purchase orders →</Link>
       </div>
+      <p className="text-[11px] text-zinc-500 font-body -mt-1">
+        Uploading a vendor sheet loads the à la carte prices, creates the allocated promo, and builds a sellable
+        package in one step — no need to type SKUs below. Use the builder below only for a quick one-off promo.
+      </p>
 
       {vendorRows.length === 0 ? (
         <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300 font-body">
