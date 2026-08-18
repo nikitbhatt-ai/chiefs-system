@@ -3115,6 +3115,30 @@ could not be reproduced without interception, and under real timings the flash
 lands after the row exists — so it is recorded as a likely artifact of the
 interception, not a verified property.
 
+## Package pricing + PO status: the SQL that was missing (2026-08-18)
+
+PRs #93–#98 (package cost/markup pricing, markup-vs-margin mode, promo→package,
+and the Pending → Ordered → Received → Fulfilled purchase-order workflow) changed
+`src/db/schema.ts` but shipped **no SQL**, so the live database never got:
+
+- `purchase_order_status` enum values `ordered` and `fulfilled`
+- `packages.package_price`, `.markup_pct`, `.pricing_mode`, `.source_promo_id`
+
+The code on `main` reads and writes all of these, so those screens error against
+the live database until the SQL runs. `docs/sql/promo_phase7.sql` covers it —
+additive and nullable only, no backfill, safe to re-run.
+
+Verified by building a database from the schema as it stood at the last SQL the
+user ran (accounting_phase11), confirming `scripts/scratch-schema-drift.ts`
+reported exactly those four columns as missing, applying the file, and
+confirming the drift went to zero and the enum gained both values. Re-run twice
+more with no errors.
+
+**When a session changes `schema.ts`, it owes a SQL file in the same commit.**
+That is the rule in this document's build-patterns section, and this is the
+second time it has been missed (see the `part_receipts` gap above) — both found
+only because something else went looking.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW
