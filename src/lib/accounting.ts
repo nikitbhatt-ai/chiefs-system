@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { glAccounts, journalEntries, journalLines } from "@/db/schema";
 
@@ -10,10 +10,37 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
  * Returns null when the account doesn't exist (e.g. the Phase 1 seed hasn't been
  * run yet) so callers that post *opportunistically* — like the inventory hooks —
  * can skip posting instead of blowing up a core operation.
+ *
+ * The accounting schema is OPTIONAL: a deployment may never have run
+ * docs/sql/accounting_phase1.sql, in which case `gl_accounts` doesn't exist at
+ * all. A plain SELECT against a missing table doesn't just return nothing — it
+ * RAISES `relation "gl_accounts" does not exist`, and because this helper runs
+ * inside a caller-supplied transaction shared with core inventory writes
+ * (receivePurchaseOrder, consumeWorkOrderParts, restoreWorkOrderParts), that
+ * error aborts the whole transaction and fails the inventory operation itself
+ * (this is what broke "Receive" on a PO). Probe with `to_regclass` first — it
+ * returns NULL instead of raising when the relation is absent — so a not-yet-
+ * installed accounting module cleanly skips posting and inventory keeps working.
  */
 export async function resolveAccountId(tx: Tx, code: string): Promise<string | null> {
+  if (!(await accountingTablesExist(tx))) return null;
   const [row] = await tx.select({ id: glAccounts.id }).from(glAccounts).where(eq(glAccounts.code, code)).limit(1);
   return row?.id ?? null;
+}
+
+/**
+ * True when the core ledger table exists in the current search_path. Uses
+ * `to_regclass`, which yields NULL (never an error) for a missing relation, so
+ * it is safe to call inside a transaction without poisoning it. `gl_accounts`,
+ * `journal_entries`, and `journal_lines` are all created together by the Phase 1
+ * SQL, so probing `gl_accounts` is a sufficient proxy for the whole schema.
+ */
+async function accountingTablesExist(tx: Tx): Promise<boolean> {
+  const res = await tx.execute(sql`select to_regclass('gl_accounts') as reg`);
+  const rows = (Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? []) as Array<{
+    reg: string | null;
+  }>;
+  return rows[0]?.reg != null;
 }
 
 // ── Money: always integer cents internally, dollars only at the edges ─────────
