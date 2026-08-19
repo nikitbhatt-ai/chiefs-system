@@ -548,6 +548,17 @@ export type PackageComponent =
       // part's normal average cost). Drives margin and the markup→sell math.
       // Optional: hand-built packages may leave it unset.
       cost?: number | null;
+      // Per-line discount authored ON the package, independent of the package's
+      // bundle price: the bundle price sets the deal, this comes off on top of
+      // it. Neither overrides the other, so a promo can be quoted at its
+      // negotiated price AND a line still discounted further when a build needs
+      // it. Percentages are taken off the bundle-allocated price, not list.
+      discount?: number | null;
+      discountKind?: "pct" | "amt" | null;
+      // Provenance when this line was pulled in from another package or a
+      // vendor promo. Display only — the line is a full copy and editing it
+      // never touches the source.
+      fromLabel?: string | null;
       partId?: string | null;
       sku?: string | null;
     }

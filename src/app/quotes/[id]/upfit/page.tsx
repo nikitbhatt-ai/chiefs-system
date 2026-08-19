@@ -1,3 +1,4 @@
+import { lineNet } from "@/lib/quoteTotals";
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq, inArray } from "drizzle-orm";
@@ -130,9 +131,8 @@ async function generateQuoteFromUpfit(formData: FormData) {
     let base = 0;
     for (const l of ls) {
       if (l.kind === "item") {
-        const gross = (l.quantity || 0) * (l.unitPrice || 0);
-        const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
-        base += gross - disc;
+        // Shared module, not local arithmetic — see src/lib/quoteTotals.ts.
+        base += lineNet(l);
       } else if (l.kind === "labor") {
         base += (l.hours || 0) * (l.rate || 0);
       } else {

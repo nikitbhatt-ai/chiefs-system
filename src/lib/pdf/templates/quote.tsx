@@ -2,12 +2,22 @@ import { Document, Page, Text, View } from "@react-pdf/renderer";
 import React from "react";
 import { sharedStyles } from "../styles";
 import { BRANDING } from "../branding";
-import { quoteTotals, lineNet, round2 } from "@/lib/quoteTotals";
+import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
 
 export type QuoteLine =
-  | ({ kind: "item"; description: string; quantity: number; unitPrice: number; discount: number; discountKind: "pct" | "amt"; partId?: string } & LineGroup)
+  | ({
+      kind: "item";
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      discount: number;
+      discountKind: "pct" | "amt";
+      /** Allocated from a package/promo bundle price; discounts on top of it. */
+      bundleDiscount?: number;
+      partId?: string;
+    } & LineGroup)
   | ({ kind: "fee"; description: string; amount: number; fixed: boolean } & LineGroup)
   | ({ kind: "labor"; description: string; hours: number; rate: number } & LineGroup);
 
@@ -59,15 +69,19 @@ function KindTables({ lines, showTitles }: { lines: QuoteLine[]; showTitles: boo
             {items.map((l, idx) => {
               if (l.kind !== "item") return null;
               const last = idx === items.length - 1;
-              const gross = (l.quantity || 0) * (l.unitPrice || 0);
-              const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+              // Via the shared money module, not recomputed here: this line
+              // used to do its own discount arithmetic, which ignored the
+              // bundle/promo allocation entirely and printed a total that
+              // disagreed with the editor and the saved grand total.
+              const gross = lineGross(l);
+              const disc = lineDiscount(l);
               return (
                 <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
                   <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
-                    {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
+                    {disc > 0 ? money(disc) : l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
                   </Text>
                   {disc > 0 ? (
                     // Show the pre-discount price struck through above the

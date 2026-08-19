@@ -9,18 +9,28 @@
 //
 // Pure module (no server-only imports) so the client editor can use it too.
 
+import { discountAmount, round2 } from "@/lib/money";
+
 export type TotalsLine = {
   kind?: string;
   quantity?: number;
   unitPrice?: number;
   discount?: number;
   discountKind?: "pct" | "amt";
+  /**
+   * Dollars per line already allocated from a package/promo bundle price. Kept
+   * separate from `discount` so both can be set and both take effect, and so a
+   * rep can see which part of the reduction is the promo and which they typed.
+   */
+  bundleDiscount?: number;
   hours?: number;
   rate?: number;
   amount?: number;
 };
 
-export const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+// Re-exported, not redefined: src/lib/money.ts owns rounding. Two subtly
+// different rounders is how printed line totals stop adding up to the grand.
+export { round2 };
 
 /** An item line's extended (pre-discount) value, to the cent. */
 export function lineGross(l: TotalsLine): number {
@@ -30,8 +40,13 @@ export function lineGross(l: TotalsLine): number {
 /** An item line's discount in dollars, rounded to the cent (matches the row). */
 export function lineDiscount(l: TotalsLine): number {
   const gross = (l.quantity || 0) * (l.unitPrice || 0);
-  const raw = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
-  return round2(raw);
+  // A bundle/promo price arrives as an already-allocated per-line amount. The
+  // manual discount then comes off ON TOP of that promo price — neither
+  // overrides the other — so the base for a percentage is the promo price, not
+  // list. "10% off" on a promo line means 10% off what the promo charges.
+  const bundle = discountAmount(gross, l.bundleDiscount, "amt");
+  const manual = discountAmount(gross - bundle, l.discount, l.discountKind ?? "pct");
+  return round2(bundle + manual);
 }
 
 /** An item line's net total (gross − rounded discount) — what the row shows. */
