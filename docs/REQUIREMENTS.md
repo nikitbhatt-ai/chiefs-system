@@ -3208,12 +3208,69 @@ costing actually uses — rather than `parts.cost`, a 2dp mirror that only track
 it when the receive path updates it and can be edited by hand. The part search
 API returns both; `cost` remains the fallback.
 
+### A bundle price ABOVE the à la carte total (added 2026-08-19)
+
+Reported from the floor: a build came to $14,274.98 à la carte, the negotiated
+number for the bundle was $14,378.10, and the builder refused it — *"Bundle
+price is above the à la carte parts total; it can't allocate."* The allocator
+only ever discounted downward, so the ordinary workflow of setting a specific
+bundle price **after add-ons have been added** was blocked.
+
+A price above list is not an error. The bundle price is the authoritative parts
+total in both directions:
+
+- **Below** à la carte → allocated across the part lines as per-line discounts
+  (unchanged).
+- **Above** à la carte → the part lines' **sell prices scale up** proportionally
+  until they total exactly the price typed.
+
+Chosen over the alternatives (adding an "uplift" line, or letting the total sit
+wrong) because it keeps one number per line that the customer can read, and it
+is the mirror image of what already happens below list.
+
+Rules this path follows:
+
+- **Labor and fees are never touched.** A bundle price covers parts; install and
+  freight quote on top. ($14,378.10 parts + $380 labor = $14,758.10.)
+- **The apportionment is done in integer cents on the unit prices**, floor-then-
+  distribute, so the unit prices *themselves* add up to the target. Scaling each
+  line independently and rounding left a cent over, which then printed as a
+  `Discount $0.01` line on the customer's quote — noise on a document someone
+  signs. Raising a unit price by a cent moves the total by that line's quantity,
+  so the leftover cents are handed out largest-quantity-first. Only when no
+  combination of quantities can make up the last cent (every line qty 2, one
+  cent left) does a rounding adjustment appear.
+- **A $0 line stays $0** — an included accessory must not quietly acquire a cent.
+- **"Retail (list)" keeps meaning à la carte.** `packageTotals` reports
+  `alacarteGross` measured off the saved components, separately from
+  `partsGross` (what the rows now add up to). Without the split, setting a
+  bundle price above list made the screen claim list *was* $14,378 and the
+  customer had saved a penny. The readout shows `Bundle price +$103.12` as an
+  uplift, never a saving.
+- **The builder's price boxes keep the catalogue prices.** They are the source
+  data; rewriting them would destroy the à la carte reference on save. The
+  scaling shows in the totals, and in the prices that land on the quote — the
+  same shape as a below-list promo.
+- **A per-line discount still applies on top**, as everywhere else.
+
+The only real error left is having nothing to scale from: no part line carries a
+sell price. That says so plainly rather than blaming the bundle price.
+
 ### Verified
 
 - `scripts/verify-package-money.ts` — pure math: both reductions apply, a
   percentage comes off the promo price, rows foot to the total at awkward bundle
   prices ($1, $99.99, $123.45), labor/fees stay out of a parts bundle, and a
-  bundle above list is refused rather than inverted.
+  bundle above list scales the sell prices to hit it exactly — including the
+  reported $14,274.98 → $14,378.10, targets of $20,000/$14,274.99/$99,999.99,
+  all-even quantities where a leftover cent cannot be handed out singly, and a
+  $0 accessory that stays $0.
+- The above-list case end to end on a production build: the amber explanation
+  replaces the old red refusal, "Retail (list)" stays $14,274.98 while
+  "Customer pays (parts)" reads $14,378.10, labor stays $380 through the
+  scaling and a save/reload, the quote receives scaled unit prices
+  ($9,341.98 / $2,518.06), and the **print view and the PDF** both show
+  subtotal $14,378.10 and grand total $14,758.10 with no stray discount line.
 - `scripts/verify-package-builder.mjs` — Playwright against a **production**
   build: the Whelen scenario end to end (promo in, costs 840/195 locked, parts
   net exactly $1,700, 2 Ions added at avg cost 61.25 not 55.00), add controls at
