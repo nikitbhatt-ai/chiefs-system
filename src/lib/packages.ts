@@ -83,21 +83,36 @@ export function componentsToQuoteLines(components: PackageComponent[]): Expanded
  * covers the parts. Reuses the promo allocation engine (integer cents, ties to
  * target exactly, refuses a price above the à la carte parts value).
  *
- * Returns the (possibly discounted) lines plus a status the editor can surface:
- * `allocated` true when a discount was applied, `error` when a bundle price was
- * set but couldn't be allocated (no parts, or price > à la carte) — in which
- * case the lines come back undiscounted so the rep still gets the bundle.
+ * A bundle price ABOVE the à la carte total is not an error. That happens
+ * routinely once add-ons are on the build and the negotiated number for the
+ * whole bundle lands above the sum of list prices. In that case the part lines'
+ * SELL PRICES are scaled proportionally to hit the target exactly, rather than a
+ * discount being allocated — the bundle price is the authoritative total either
+ * way. `scaled` reports which path ran.
+ *
+ * Labor and fees are never touched: a bundle/promo price covers the parts, and
+ * install and freight quote on top.
+ *
+ * Returns the adjusted lines plus a status the editor can surface: `allocated`
+ * when a discount was applied, `scaled` when line prices were raised, `error`
+ * only when there is nothing to apply the price to at all.
  */
 export function expandPackageWithBundlePrice(
   components: PackageComponent[],
   packagePrice: number | string | null | undefined,
-): { lines: ExpandedQuoteLine[]; allocated: boolean; error: string | null; saving: number | null } {
+): {
+  lines: ExpandedQuoteLine[];
+  allocated: boolean;
+  scaled: boolean;
+  error: string | null;
+  saving: number | null;
+} {
   const lines = componentsToQuoteLines(components);
 
   const raw = packagePrice == null ? "" : String(packagePrice).trim();
   const price = raw === "" ? null : Number(raw);
   if (price == null || !Number.isFinite(price) || price <= 0) {
-    return { lines, allocated: false, error: null, saving: null };
+    return { lines, allocated: false, scaled: false, error: null, saving: null };
   }
 
   // Basis = each part line's extended sell value; allocate the bundle price
@@ -115,7 +130,132 @@ export function expandPackageWithBundlePrice(
     }
   });
   if (allocInput.length === 0) {
-    return { lines, allocated: false, error: "This package has no part lines to apply a bundle price to.", saving: null };
+    return {
+      lines,
+      allocated: false,
+      scaled: false,
+      error: "This package has no part lines to apply a bundle price to.",
+      saving: null,
+    };
+  }
+
+  // ── Target above list: scale the sell prices up to meet it ────────────────
+  // The allocator only discounts downward, so this case used to be refused with
+  // "it can't allocate" — which blocked the ordinary workflow of setting a
+  // negotiated bundle price after add-ons had been added.
+  const grossTotal = round2(
+    allocInput.reduce((sum, l) => round2(sum + round2(l.quantity * l.alacarteCostSnap)), 0),
+  );
+  if (price > grossTotal + 0.005) {
+    if (grossTotal <= 0) {
+      return {
+        lines,
+        allocated: false,
+        scaled: false,
+        error:
+          "The part lines have no sell price to scale from. Set a sell price on at least one part, then the bundle price can be spread across them.",
+        saving: null,
+      };
+    }
+    // Apportion in integer cents so the unit prices themselves add up to the
+    // target. Scaling each line and rounding independently would leave a cent or
+    // two over, which then has to show up as a "Discount $0.01" line on the
+    // customer's quote — noise on a document someone signs.
+    //
+    // Round each unit DOWN first (so the total lands at or just under target),
+    // then hand out the remaining cents one unit-cent at a time. Raising a
+    // line's unit price by a cent moves the total by its quantity, so a line
+    // with qty 2 moves the total 2c — which is why this is a coin problem and
+    // not a simple division.
+    const targetCents = Math.round(price * 100);
+    const out: ExpandedQuoteLine[] = lines.map((l) => ({ ...l }));
+
+    const qtyOf = (idx: number) => {
+      const l = out[idx];
+      return l.kind === "item" ? l.quantity || 0 : 0;
+    };
+    const baseCents = itemIdx.reduce((sum, idx) => {
+      const l = out[idx];
+      return l.kind === "item" ? sum + qtyOf(idx) * Math.round((l.unitPrice || 0) * 100) : sum;
+    }, 0);
+    if (baseCents <= 0) {
+      return {
+        lines,
+        allocated: false,
+        scaled: false,
+        error:
+          "The part lines have no sell price to scale from. Set a sell price on at least one part, then the bundle price can be spread across them.",
+        saving: null,
+      };
+    }
+
+    const unitCents = new Map<number, number>();
+    let sumCents = 0;
+    for (const idx of itemIdx) {
+      const line = out[idx];
+      if (line.kind !== "item") continue;
+      const listCents = Math.round((line.unitPrice || 0) * 100);
+      const scaled = Math.floor((listCents * targetCents) / baseCents);
+      unitCents.set(idx, scaled);
+      sumCents += qtyOf(idx) * scaled;
+    }
+
+    // Hand out the remaining cents, biggest quantities first so it converges
+    // quickly — and never onto a line with no sell price, so a $0 accessory
+    // stays $0 rather than quietly becoming a cent.
+    let shortfall = targetCents - sumCents;
+    const absorbers = itemIdx
+      .filter((idx) => qtyOf(idx) > 0 && (unitCents.get(idx) ?? 0) > 0)
+      .sort((a, b) => qtyOf(b) - qtyOf(a));
+    let progress = true;
+    while (shortfall > 0 && progress) {
+      progress = false;
+      for (const idx of absorbers) {
+        if (qtyOf(idx) <= shortfall) {
+          unitCents.set(idx, (unitCents.get(idx) ?? 0) + 1);
+          shortfall -= qtyOf(idx);
+          progress = true;
+          if (shortfall === 0) break;
+        }
+      }
+    }
+
+    // If no combination of quantities can make up the last few cents — every
+    // line has qty 2 and one cent is left over, say — overshoot by the smallest
+    // step available and take the difference back off as a rounding adjustment.
+    // Any line with qty 1 makes this unreachable, which covers most builds.
+    let excessCents = 0;
+    if (shortfall > 0 && absorbers.length > 0) {
+      const cheapest = absorbers[absorbers.length - 1]; // smallest quantity → smallest overshoot
+      unitCents.set(cheapest, (unitCents.get(cheapest) ?? 0) + 1);
+      excessCents = qtyOf(cheapest) - shortfall;
+      shortfall = 0;
+    }
+
+    for (const idx of itemIdx) {
+      const line = out[idx];
+      if (line.kind !== "item") continue;
+      line.unitPrice = round2((unitCents.get(idx) ?? 0) / 100);
+    }
+
+    if (excessCents > 0) {
+      let biggest = -1;
+      let biggestValue = -1;
+      for (const idx of itemIdx) {
+        const line = out[idx];
+        if (line.kind !== "item") continue;
+        const ext = round2(qtyOf(idx) * (line.unitPrice || 0));
+        if (ext > biggestValue) {
+          biggestValue = ext;
+          biggest = idx;
+        }
+      }
+      const line = biggest >= 0 ? out[biggest] : null;
+      if (line && line.kind === "item") {
+        line.bundleDiscount = round2((line.bundleDiscount ?? 0) + excessCents / 100);
+      }
+    }
+    return { lines: out, allocated: false, scaled: true, error: null, saving: null };
   }
 
   // Reuse the promo allocation engine on the SELL basis. It throws when the
@@ -124,7 +264,13 @@ export function expandPackageWithBundlePrice(
   try {
     result = allocatePromo({ packagePrice: price, lines: allocInput });
   } catch (e) {
-    return { lines, allocated: false, error: e instanceof Error ? e.message : "Could not allocate bundle price.", saving: null };
+    return {
+      lines,
+      allocated: false,
+      scaled: false,
+      error: e instanceof Error ? e.message : "Could not allocate bundle price.",
+      saving: null,
+    };
   }
 
   const out: ExpandedQuoteLine[] = lines.map((l) => ({ ...l }));
@@ -139,12 +285,29 @@ export function expandPackageWithBundlePrice(
       line.bundleDiscount = round2(disc);
     }
   });
-  return { lines: out, allocated: true, error: null, saving: result.saving };
+  return { lines: out, allocated: true, scaled: false, error: null, saving: result.saving };
 }
 
 export type PackageTotals = {
-  /** Parts at list, before any reduction. */
+  /**
+   * Parts at the sell prices actually on the rows, before any reduction. When
+   * a bundle price scaled the rows up this is the SCALED figure — it is what
+   * the rows on screen add up to, so use it to check that they foot.
+   */
   partsGross: number;
+  /**
+   * Parts at the catalogue sell prices the components were saved with — the
+   * true à la carte value, unaffected by any bundle price. This is what
+   * "Retail (list)" means, and what a saving or an uplift is measured against.
+   */
+  alacarteGross: number;
+  /** True when the bundle price was above à la carte and the rows were scaled up to it. */
+  scaled: boolean;
+  /**
+   * Dollars the bundle price adds over à la carte (0 unless `scaled`). The
+   * mirror image of `bundleDiscount`.
+   */
+  uplift: number;
   /** Dollars taken off by the bundle/promo price allocation. */
   bundleDiscount: number;
   /** Dollars taken off by per-line discounts, ON TOP of the bundle price. */
@@ -170,7 +333,19 @@ export function packageTotals(
   components: PackageComponent[],
   packagePrice?: number | string | null,
 ): PackageTotals {
-  const { lines } = expandPackageWithBundlePrice(components ?? [], packagePrice ?? null);
+  const { lines, scaled } = expandPackageWithBundlePrice(components ?? [], packagePrice ?? null);
+
+  // Measured off the components as saved, so a scaled-up bundle price does not
+  // rewrite what "list" means. Without this, setting a bundle price of $14,378
+  // on a $14,275 build would make the screen claim list was $14,378 and the
+  // customer saved a penny.
+  const alacarteGross = round2(
+    (components ?? []).reduce(
+      (sum, c) => (c.kind === "item" ? round2(sum + round2((c.quantity || 0) * (c.unitPrice || 0))) : sum),
+      0,
+    ),
+  );
+
   let partsGross = 0;
   let bundleDiscount = 0;
   let lineDiscount = 0;
@@ -193,7 +368,18 @@ export function packageTotals(
   }
 
   const partsNet = round2(partsGross - bundleDiscount - lineDiscount);
-  return { partsGross, bundleDiscount, lineDiscount, partsNet, labor, fees, total: round2(partsNet + labor + fees) };
+  return {
+    partsGross,
+    alacarteGross,
+    scaled,
+    uplift: scaled ? round2(Math.max(0, partsNet - alacarteGross)) : 0,
+    bundleDiscount,
+    lineDiscount,
+    partsNet,
+    labor,
+    fees,
+    total: round2(partsNet + labor + fees),
+  };
 }
 
 export function packageValue(components: PackageComponent[]): number {

@@ -507,8 +507,14 @@ export function PackageBuilder({
           <div className="bg-surface border border-white/5 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3 text-xs font-body">
             <div className="flex flex-wrap gap-4 text-zinc-400 items-center">
               <span>Cost (we pay) <span className="text-white tabular-nums">{fmtUSD(cost)}</span></span>
-              <span>Retail (list) <span className="text-white tabular-nums">{fmtUSD(totals.partsGross)}</span></span>
-              {totals.bundleDiscount > 0 ? (
+              <span>Retail (list) <span className="text-white tabular-nums">{fmtUSD(totals.alacarteGross)}</span></span>
+              {totals.scaled ? (
+                // Scaled up to a negotiated bundle price: show it as an uplift
+                // over list. The cent or two of rounding that lands in
+                // `bundleDiscount` on this path is an artifact, not a discount,
+                // so it is deliberately not shown as one.
+                <span>Bundle price <span className="text-amber-300 tabular-nums">+{fmtUSD(totals.uplift)}</span></span>
+              ) : totals.bundleDiscount > 0 ? (
                 <span>Bundle price <span className="text-amber-300 tabular-nums">−{fmtUSD(totals.bundleDiscount)}</span></span>
               ) : null}
               {totals.lineDiscount > 0 ? (
@@ -581,7 +587,15 @@ export function PackageBuilder({
       {(() => {
         const bp = bundlePrice.trim() === "" ? null : Number(bundlePrice);
         const valid = bp != null && Number.isFinite(bp) && bp > 0;
-        const tooHigh = valid && bp > totals.partsGross + 0.005;
+        // Above the à la carte total is a normal case, not an error: the sell
+        // prices scale up to meet the number. It only fails when there is no
+        // sell price anywhere to scale from.
+        //
+        // `totals.scaled` is the authority here. Comparing the price against
+        // `partsGross` would be wrong once scaling has run, because by then the
+        // rows already add up to the price.
+        const scalingUp = totals.scaled;
+        const nothingToScale = valid && !scalingUp && bp > totals.alacarteGross + 0.005;
         return (
           <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
             <div className="flex flex-wrap items-center gap-3">
@@ -603,24 +617,32 @@ export function PackageBuilder({
                   Clear
                 </button>
               ) : null}
-              {hasBundle && !tooHigh ? (
+              {hasBundle && !scalingUp && !nothingToScale ? (
                 <span className="text-[11px] text-emerald-300">
-                  Customer saves {fmtUSD(totals.bundleDiscount)} vs à la carte parts ({fmtUSD(totals.partsGross)}).
+                  Customer saves {fmtUSD(totals.bundleDiscount)} vs à la carte parts ({fmtUSD(totals.alacarteGross)}).
                   {totals.lineDiscount > 0
                     ? ` Line discounts take a further ${fmtUSD(totals.lineDiscount)} off on top.`
                     : ""}
                 </span>
               ) : null}
-              {tooHigh ? (
+              {scalingUp ? (
+                <span className="text-[11px] text-amber-300">
+                  Above à la carte ({fmtUSD(totals.alacarteGross)}), so the part sell prices scale up proportionally to
+                  total exactly {fmtUSD(totals.partsNet)}. Labor and fees are not included.
+                </span>
+              ) : null}
+              {nothingToScale ? (
                 <span className="text-[11px] text-red-400">
-                  Bundle price is above the à la carte parts total ({fmtUSD(totals.partsGross)}); it can&apos;t allocate. Lower it or leave blank.
+                  No part line has a sell price to spread this across. Add a part and give it a sell price, then this
+                  price will apply to it.
                 </span>
               ) : null}
             </div>
             <p className="text-[11px] text-zinc-500">
-              Optional. Leave blank to quote at à la carte line prices. When set, dropping this package on a quote
-              allocates this total across the <em>part</em> lines so their totals sum to it (labor/fees quote
-              separately). A per-line discount still applies <em>on top</em> of this price — neither overrides the other.
+              Optional. Leave blank to quote at à la carte line prices. When set, this is the authoritative parts
+              total: below à la carte it is allocated as per-line discounts, and above it the sell prices scale up
+              proportionally to meet it — either way the part lines sum to exactly this number. Labor and fees quote
+              separately. A per-line discount still applies <em>on top</em> of this price — neither overrides the other.
             </p>
           </div>
         );

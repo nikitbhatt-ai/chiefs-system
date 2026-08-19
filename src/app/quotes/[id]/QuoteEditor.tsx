@@ -204,7 +204,7 @@ export function QuoteEditor({
     // lines as per-line discounts so their totals sum to it (the promo deal);
     // otherwise lines come in at à la carte with no discount. The rep tweaks
     // from there. A package can intentionally repeat a part — appended verbatim.
-    const { lines: expanded, allocated, error, saving } = expandPackageWithBundlePrice(
+    const { lines: expanded, allocated, scaled, error, saving } = expandPackageWithBundlePrice(
       pkg.components ?? [],
       pkg.packagePrice,
     );
@@ -226,8 +226,19 @@ export function QuoteEditor({
           `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}) — bundle price applied` +
           (saving != null ? `, ${fmt(saving)} off à la carte spread across the parts.` : "."),
       });
+    } else if (scaled) {
+      // The bundle price was above à la carte, so the sell prices were scaled up
+      // to meet it. Worth saying out loud — the unit prices on these lines are
+      // not the catalogue list prices.
+      setPkgMsg({
+        tone: "ok",
+        text:
+          `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}) — bundle price is above à la carte, ` +
+          `so the part sell prices were scaled up to total it exactly.`,
+      });
     } else if (error) {
-      // A bundle price was set but couldn't allocate — lines added undiscounted.
+      // A bundle price was set but couldn't be applied at all — lines added
+      // at à la carte so the rep still gets the bundle.
       setPkgMsg({ tone: "err", text: `Added "${pkg.name}" at à la carte — bundle price not applied: ${error}` });
     } else {
       setPkgMsg({ tone: "ok", text: `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}).` });

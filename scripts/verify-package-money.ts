@@ -99,10 +99,100 @@ check("labor untouched", eq(m.labor, 190), String(m.labor));
 check("fees untouched", eq(m.fees, 40), String(m.fees));
 check("total = parts net + labor + fees", eq(m.total, 630), String(m.total));
 
-console.log("\n7. a bundle price above list is refused rather than inverted");
-const tooHigh = expandPackageWithBundlePrice(promo, 5000);
-check("allocation refuses and reports why", !tooHigh.allocated && !!tooHigh.error, tooHigh.error ?? "");
-check("lines come back undiscounted, not negative", eq(lineGross(tooHigh.lines[0] as never), 2000) && lineDiscount(tooHigh.lines[0] as never) === 0);
+console.log("\n7. a bundle price ABOVE list scales the sell prices to hit it");
+// The reported case: add-ons on the build, and the negotiated bundle number
+// lands just above the sum of list prices.
+const addOns = [
+  item({ description: "Lightbar", quantity: 1, unitPrice: 9274.98 }),
+  item({ description: "Ion", quantity: 2, unitPrice: 2500 }),
+];
+const grossAddOns = packageTotals(addOns, null).partsGross;
+check("à la carte total is what we expect", eq(grossAddOns, 14274.98), String(grossAddOns));
+
+const target = 14378.1;
+const up = expandPackageWithBundlePrice(addOns, target);
+check("it scales rather than erroring", up.scaled && !up.error, up.error ?? "scaled");
+const upTotal = packageTotals(addOns, target);
+check("parts total lands exactly on the target", eq(upTotal.partsNet, target), String(upTotal.partsNet));
+const rowSum = round2(
+  up.lines.reduce((s, l) => (l.kind === "item" ? round2(s + lineNet(l as never)) : s), 0),
+);
+check("the rows sum to the target too", eq(rowSum, target), String(rowSum));
+check("every scaled unit price is still 2dp", up.lines.every((l) => l.kind !== "item" || Number(l.unitPrice.toFixed(2)) === l.unitPrice), JSON.stringify(up.lines.filter((l) => l.kind === "item").map((l) => (l as { unitPrice: number }).unitPrice)));
+check("prices went UP, not down", up.lines.every((l) => l.kind !== "item" || l.unitPrice > 0));
+// The unit prices must reach the target on their own. Anything left over would
+// print as a "Discount $0.01" line on the customer's quote.
+check(
+  "no stray rounding discount is left on the lines",
+  up.lines.every((l) => l.kind !== "item" || !l.bundleDiscount),
+  JSON.stringify(up.lines.filter((l) => l.kind === "item").map((l) => (l as { bundleDiscount?: number }).bundleDiscount)),
+);
+
+// Awkward targets must still land exactly.
+for (const t of [14378.1, 20000, 14274.99, 99999.99]) {
+  const r = packageTotals(addOns, t);
+  check(`target $${t}: exact`, eq(r.partsNet, t), String(r.partsNet));
+}
+
+console.log("\n7b. scaling does not rewrite what 'list' means");
+// The trap: partsGross is the scaled figure, so a screen that reads "Retail
+// (list)" off it would claim list was the bundle price and the customer saved
+// a penny. `alacarteGross` is the honest one.
+check("alacarteGross stays at the catalogue total", eq(upTotal.alacarteGross, 14274.98), String(upTotal.alacarteGross));
+check("the scaled flag is set", upTotal.scaled === true);
+check("uplift is the difference over list", eq(upTotal.uplift, 103.12), String(upTotal.uplift));
+check("nothing is passed off as a discount when scaling up", upTotal.bundleDiscount === 0, String(upTotal.bundleDiscount));
+
+console.log("\n7c. awkward quantities still tie exactly");
+// Every quantity even, so a single leftover cent cannot be handed out one
+// unit-cent at a time — the fallback has to catch it and still tie.
+const evens = [
+  item({ description: "A", quantity: 2, unitPrice: 100 }),
+  item({ description: "B", quantity: 4, unitPrice: 50 }),
+];
+for (const t of [401, 400.01, 777.77, 1000.03]) {
+  const r = packageTotals(evens, t);
+  const ex = expandPackageWithBundlePrice(evens, t);
+  const rows = round2(ex.lines.reduce((s, l) => (l.kind === "item" ? round2(s + lineNet(l as never)) : s), 0));
+  check(`even quantities, target $${t}: parts total is exact`, eq(r.partsNet, t), String(r.partsNet));
+  check(`even quantities, target $${t}: rows foot to it`, eq(rows, t), String(rows));
+  check(
+    `even quantities, target $${t}: unit prices are 2dp`,
+    ex.lines.every((l) => l.kind !== "item" || Number(l.unitPrice.toFixed(2)) === l.unitPrice),
+    JSON.stringify(ex.lines.filter((l) => l.kind === "item").map((l) => (l as { unitPrice: number }).unitPrice)),
+  );
+}
+
+// A $0 accessory riding along must not silently acquire a price.
+const withFreebie = [
+  item({ description: "Paid", quantity: 1, unitPrice: 1000 }),
+  item({ description: "Included accessory", quantity: 3, unitPrice: 0 }),
+];
+const freebie = expandPackageWithBundlePrice(withFreebie, 1234.57);
+const zeroLine = freebie.lines.find((l) => l.kind === "item" && l.description === "Included accessory");
+check("a $0 line stays $0 through the scaling", (zeroLine as { unitPrice: number }).unitPrice === 0, String((zeroLine as { unitPrice: number }).unitPrice));
+check("and the total still ties", eq(packageTotals(withFreebie, 1234.57).partsNet, 1234.57), String(packageTotals(withFreebie, 1234.57).partsNet));
+const belowT = packageTotals(addOns, 12000);
+check("below list: not scaled, and list is unchanged", belowT.scaled === false && eq(belowT.alacarteGross, 14274.98));
+check("below list: uplift is zero, discount is real", eq(belowT.uplift, 0) && eq(belowT.bundleDiscount, 2274.98), String(belowT.bundleDiscount));
+const noneT = packageTotals(addOns, null);
+check("no bundle price: gross and à la carte agree", eq(noneT.partsGross, noneT.alacarteGross) && !noneT.scaled);
+
+console.log("\n8. scaling never touches labor or fees");
+const withLabor: PackageComponent[] = [
+  item({ description: "Part", quantity: 1, unitPrice: 500 }),
+  { kind: "labor", description: "Install", hours: 4, rate: 95 },
+  { kind: "fee", description: "Freight", amount: 103.12, fixed: true },
+];
+const scaledMix = packageTotals(withLabor, 900);
+check("parts scaled up to the target", eq(scaledMix.partsNet, 900), String(scaledMix.partsNet));
+check("labor untouched at $380", eq(scaledMix.labor, 380), String(scaledMix.labor));
+check("fee untouched at $103.12", eq(scaledMix.fees, 103.12), String(scaledMix.fees));
+
+console.log("\n9. nothing to scale from is still an honest error");
+const noPrices = [item({ description: "Unpriced", quantity: 1, unitPrice: 0 })];
+const bad = expandPackageWithBundlePrice(noPrices, 500);
+check("explains that a sell price is needed", !!bad.error && /sell price/i.test(bad.error), bad.error ?? "");
 
 console.log(`\n${fails === 0 ? "ALL CHECKS PASSED" : `${fails} CHECK(S) FAILED`}`);
 process.exit(fails === 0 ? 0 : 1);
