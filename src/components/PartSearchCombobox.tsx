@@ -10,6 +10,8 @@ export type PartHit = {
   mfgPartNumber: string | null;
   price: string | null;
   cost: string | null;
+  /** Weighted-average cost — the authoritative internal cost basis. */
+  avgCost?: string | null;
   restricted: boolean;
   restrictionCategory: string | null;
 };

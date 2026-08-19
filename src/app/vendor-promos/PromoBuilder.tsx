@@ -3,11 +3,14 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { allocatePromo, PromoAllocationError } from "@/lib/promoAllocation";
+import { MoneyInput, QtyInput } from "@/components/MoneyInput";
+import { fmtUSD } from "@/lib/money";
 
 type Vendor = { id: string; name: string };
 type Line = { sku: string; quantity: number; alacarte: number | null; state: "idle" | "loading" | "missing" | "ok" };
 
-const money = (n: number) => n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+// One money formatter for the whole app — always $, always two decimals.
+const money = fmtUSD;
 
 export function PromoBuilder({ vendors }: { vendors: Vendor[] }) {
   const router = useRouter();
@@ -22,6 +25,16 @@ export function PromoBuilder({ vendors }: { vendors: Vendor[] }) {
 
   function setLine(i: number, patch: Partial<Line>) {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  }
+
+  const [focusLine, setFocusLine] = useState<number | null>(null);
+
+  /** New blank line, focused. Enter in any row ends up here. */
+  function addLine() {
+    setLines((ls) => {
+      setFocusLine(ls.length);
+      return [...ls, { sku: "", quantity: 1, alacarte: null, state: "idle" }];
+    });
   }
 
   async function resolveCost(i: number, sku: string) {
@@ -116,35 +129,64 @@ export function PromoBuilder({ vendors }: { vendors: Vendor[] }) {
           <input className={input} value={name} onChange={(e) => setName(e.target.value)} placeholder="Inner Edge Regional Promo" />
         </div>
         <div>
-          <label className={label}>Package price ($)</label>
-          <input className={input} inputMode="decimal" value={packagePrice} onChange={(e) => setPackagePrice(e.target.value)} placeholder="6840.00" />
+          <label className={label}>Package price</label>
+          <MoneyInput
+            value={packagePrice}
+            allowEmpty
+            onChange={(v) => setPackagePrice(v == null ? "" : String(v))}
+            ariaLabel="Package price"
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div>
-          <label className={label}>Freight ($, optional)</label>
-          <input className={input} inputMode="decimal" value={freight} onChange={(e) => setFreight(e.target.value)} placeholder="0.00" />
+          <label className={label}>Freight (optional)</label>
+          <MoneyInput
+            value={freight}
+            allowEmpty
+            onChange={(v) => setFreight(v == null ? "" : String(v))}
+            ariaLabel="Freight"
+          />
         </div>
       </div>
 
       <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">Lines — cost auto-fills from the vendor price list</div>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">
+            Lines — cost auto-fills from the vendor price list
+          </div>
+          {/* Also at the top: on a long promo you were scrolling to the bottom
+              just to start the next line. */}
+          <button type="button" onClick={addLine} className="text-xs font-body text-amber-400 hover:text-amber-300">
+            + Add line
+          </button>
+        </div>
         {lines.map((l, i) => (
           <div key={i} className="flex items-center gap-2">
             <input
               className={`${cell} flex-1 min-w-0`}
               value={l.sku}
+              autoFocus={focusLine === i}
               onChange={(e) => setLine(i, { sku: e.target.value, state: "idle", alacarte: null })}
               onBlur={(e) => resolveCost(i, e.target.value)}
+              onKeyDown={(e) => {
+                // Enter used to do nothing here — you had to click away for the
+                // cost to resolve. Now it looks the part up and starts the next
+                // line, so a promo sheet can be typed straight through.
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                void resolveCost(i, l.sku);
+                addLine();
+              }}
               placeholder="SKU (e.g. XI3JC)"
             />
-            <input
-              className={`${cell} w-20 shrink-0`}
-              type="number"
-              min={1}
+            <QtyInput
+              className="w-20 shrink-0"
               value={l.quantity}
-              onChange={(e) => setLine(i, { quantity: Math.max(1, Math.trunc(Number(e.target.value) || 1)) })}
+              onChange={(v) => setLine(i, { quantity: Math.max(1, v) })}
+              onEnter={addLine}
+              ariaLabel="Quantity"
             />
             <div className="w-32 text-right text-xs font-body">
               {l.state === "loading" ? (
@@ -167,11 +209,7 @@ export function PromoBuilder({ vendors }: { vendors: Vendor[] }) {
             </button>
           </div>
         ))}
-        <button
-          type="button"
-          onClick={() => setLines((ls) => [...ls, { sku: "", quantity: 1, alacarte: null, state: "idle" }])}
-          className="text-xs font-body text-amber-400 hover:text-amber-300"
-        >
+        <button type="button" onClick={addLine} className="text-xs font-body text-amber-400 hover:text-amber-300">
           + Add line
         </button>
       </div>

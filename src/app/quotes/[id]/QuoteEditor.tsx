@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
+import { MoneyInput, QtyInput, HoursInput, PercentInput } from "@/components/MoneyInput";
+import { fmtUSD } from "@/lib/money";
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
 import { expandPackageWithBundlePrice } from "@/lib/packages";
 import { quoteTotals, lineNet } from "@/lib/quoteTotals";
@@ -26,6 +28,12 @@ export type QuoteLine =
       // on the line for margin/reporting; costLocked marks it authoritative.
       cost?: number;
       costLocked?: boolean;
+      /**
+       * Dollars allocated to this line from a package's bundle/promo price.
+       * Separate from `discount` so a rep can still discount on top of a promo
+       * without the allocation overwriting what they typed (or vice versa).
+       */
+      bundleDiscount?: number;
     } & LineGroup)
   | ({
       kind: "fee";
@@ -433,35 +441,37 @@ export function QuoteEditor({
             }
           />
         </div>
-        <input
-          type="number"
-          min="0"
-          step="1"
+        <QtyInput
+          className="col-span-1"
           value={l.quantity}
-          onChange={(e) =>
-            updateLine(i, { quantity: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
-          }
-          placeholder="Qty"
-          className="col-span-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+          onChange={(v) => updateLine(i, { quantity: v })}
+          onEnter={addItem}
+          ariaLabel="Quantity"
         />
-        <input
-          type="number"
-          min="0"
-          step="0.01"
+        <MoneyInput
+          className="col-span-2"
           value={l.unitPrice}
-          onChange={(e) => updateLine(i, { unitPrice: Number(e.target.value) })}
-          placeholder="Price"
-          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+          onChange={(v) => updateLine(i, { unitPrice: v ?? 0 })}
+          onEnter={addItem}
+          ariaLabel="Unit price"
         />
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          value={l.discount}
-          onChange={(e) => updateLine(i, { discount: Number(e.target.value) })}
-          placeholder="Discount"
-          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
-        />
+        {l.discountKind === "amt" ? (
+          <MoneyInput
+            className="col-span-2"
+            value={l.discount}
+            onChange={(v) => updateLine(i, { discount: v ?? 0 })}
+            onEnter={addItem}
+            ariaLabel="Discount in dollars"
+          />
+        ) : (
+          <PercentInput
+            className="col-span-2"
+            value={l.discount || ""}
+            onChange={(v) => updateLine(i, { discount: v })}
+            onEnter={addItem}
+            ariaLabel="Discount percent"
+          />
+        )}
         <select
           value={l.discountKind}
           onChange={(e) => updateLine(i, { discountKind: e.target.value as "pct" | "amt" })}
@@ -478,6 +488,11 @@ export function QuoteEditor({
           Remove
         </button>
         <div className="col-span-12 text-right text-[11px] text-zinc-500">
+          {l.bundleDiscount ? (
+            <span className="text-amber-300/80 mr-2">
+              promo −{fmtUSD(l.bundleDiscount)}
+            </span>
+          ) : null}
           {`Line total: ${fmt(lineNet(l))}`}
         </div>
       </div>

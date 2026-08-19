@@ -32,7 +32,13 @@ export async function GET(req: Request) {
       name: parts.name,
       mfgPartNumber: parts.mfgPartNumber,
       price: parts.price,
+      // `cost` is a 2dp mirror that only follows avg_cost when the receive path
+      // updates it, so it goes stale and can be edited by hand. `avgCost` is the
+      // authoritative weighted-average basis (numeric(12,4)) that job costing
+      // uses. Both are returned: callers wanting an internal cost should prefer
+      // avgCost and fall back to cost.
       cost: parts.cost,
+      avgCost: parts.avgCost,
       restricted: parts.restricted,
       restrictionCategory: parts.restrictionCategory,
     })

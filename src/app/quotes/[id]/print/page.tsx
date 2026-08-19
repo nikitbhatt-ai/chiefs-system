@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { quotes, customers } from "@/db/schema";
 import { PrintTrigger } from "./PrintTrigger";
-import { quoteTotals, lineNet, round2 } from "@/lib/quoteTotals";
+import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
 type Line =
@@ -14,6 +14,8 @@ type Line =
       unitPrice: number;
       discount: number;
       discountKind: "pct" | "amt";
+      /** Allocated from a package/promo bundle price; line discount is on top. */
+      bundleDiscount?: number;
       partId?: string;
     } & LineGroup)
   | ({
@@ -57,14 +59,16 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
             </thead>
             <tbody>
               {items.map((l, i) => {
-                const gross = (l.quantity || 0) * (l.unitPrice || 0);
-                const disc =
-                  l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+                // Shared money module: a bundle/promo allocation lives in its own
+                // field, so recomputing the discount here printed a different
+                // number from the one on screen.
+                const gross = lineGross(l);
+                const disc = lineDiscount(l);
                 const discLabel =
-                  l.discount > 0
-                    ? l.discountKind === "pct"
+                  disc > 0
+                    ? l.discountKind === "pct" && !l.bundleDiscount
                       ? `${l.discount}% (−${fmt(disc)})`
-                      : `−${fmt(l.discount)}`
+                      : `−${fmt(disc)}`
                     : "—";
                 return (
                   <tr key={`item-${i}`}>

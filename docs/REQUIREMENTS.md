@@ -3139,6 +3139,91 @@ That is the rule in this document's build-patterns section, and this is the
 second time it has been missed (see the `part_receipts` gap above) — both found
 only because something else went looking.
 
+## Packages: composition, per-line discounts, currency (user requirements, 2026-08-18)
+
+Six fixes to the packages / quotes / promos builders.
+
+### Composing a package from a promo plus add-ons
+
+> "I have a whelen regional piu promo + 2 additional ions I need to add to the
+> build. That should be its own package."
+
+`+ Add package / promo…` in the package builder pulls an existing package (a
+vendor promo becomes one via **Add to Packages**) into the one being edited as
+**flat, individually editable lines** — the user's explicit choice over a
+collapsed group.
+
+Everything is COPIED, nothing referenced:
+
+- the source package is never written to, so re-syncing the promo later cannot
+  disturb a build made from it, and editing a line here cannot disturb the promo
+- each line's `cost` is locked from the source (the negotiated promo cost, not
+  today's average cost)
+- the source's bundle price is allocated across the copied lines as per-line
+  discounts, so the parts still total the promo price instead of silently
+  reverting to list
+- lines carry `fromLabel` and show "from <promo name>" so the origin is visible
+
+### Per-line discounts, composing with the bundle price
+
+Packages already had a bundle price; quotes already had per-line discounts.
+Packages now have both, and — per the user — **neither overrides the other**:
+"the bundle promo price should stay with the option to discount on top of the
+promo as well if needed."
+
+Order: list price → bundle allocation → per-line discount. A percentage is taken
+off the **bundle-allocated price**, so "10% off" on a promo line means 10% off
+what the promo charges, not 10% off list. The two live in separate fields
+(`bundleDiscount` vs `discount`) precisely so one cannot silently overwrite the
+other — the allocation used to write `discount` directly, which wiped out any
+discount the package carried.
+
+### Currency
+
+One module owns money: `src/lib/money.ts` (`round2`, `fmtUSD`, `parseMoney`,
+`discountAmount`) with `src/components/MoneyInput.tsx` providing the field
+primitives. Every currency figure carries a `$` and exactly two decimals, in
+readouts AND input boxes; quantities and hours deliberately carry neither, which
+is what the user was asking for ("It currently confuses with quantities").
+
+**The audit found the same discount arithmetic hand-written in five places** —
+the editor, the print view, the quote PDF, and the upfit PDF twice — each
+slightly free to drift, and none of them aware of the bundle allocation. All now
+call `lineGross` / `lineDiscount` / `lineNet`. `quoteTotals` re-exports `round2`
+rather than defining a second one.
+
+### Enter, and the add controls
+
+- Enter in any builder field commits the value and opens the next line, instead
+  of doing nothing (or submitting the whole form). Values also still commit as
+  you type, so nothing is lost by clicking away either.
+- The add controls sit at the **top and bottom** of the contents box in packages
+  and promos (quotes already had both), and the contents list scrolls inside its
+  own card so the totals and the bottom controls stay reachable on a long build.
+
+### Internal cost
+
+Package lines take the part's **`avg_cost`** — the weighted-average basis job
+costing actually uses — rather than `parts.cost`, a 2dp mirror that only tracks
+it when the receive path updates it and can be edited by hand. The part search
+API returns both; `cost` remains the fallback.
+
+### Verified
+
+- `scripts/verify-package-money.ts` — pure math: both reductions apply, a
+  percentage comes off the promo price, rows foot to the total at awkward bundle
+  prices ($1, $99.99, $123.45), labor/fees stay out of a parts bundle, and a
+  bundle above list is refused rather than inverted.
+- `scripts/verify-package-builder.mjs` — Playwright against a **production**
+  build: the Whelen scenario end to end (promo in, costs 840/195 locked, parts
+  net exactly $1,700, 2 Ions added at avg cost 61.25 not 55.00), add controls at
+  both ends, Enter adds a line without submitting, money formatted and
+  quantities not, and the source promo byte-identical afterwards.
+
+One caution worth recording: an earlier version of the quote check reported
+"PASSED" while running **zero** assertions, because the seed had no quotes to
+open. A check that cannot fail is not a check — assert that the fixture exists.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

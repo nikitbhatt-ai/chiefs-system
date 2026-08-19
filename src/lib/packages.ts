@@ -12,6 +12,7 @@
 // schema, and `import type` is erased at build time.
 import type { PackageComponent } from "@/db/schema";
 import { allocatePromo } from "@/lib/promoAllocation";
+import { discountAmount, round2 } from "@/lib/money";
 
 // The quote editor's line shape. Mirrors QuoteLine in
 // src/app/quotes/[id]/QuoteEditor.tsx. Components become lines with a
@@ -25,6 +26,14 @@ export type ExpandedQuoteLine =
       unitPrice: number;
       discount: number;
       discountKind: "pct" | "amt";
+      /**
+       * Dollars allocated to this line from the package's bundle price. Kept
+       * apart from `discount` so a bundle price and a hand-typed line discount
+       * can BOTH apply — the bundle sets the deal, the discount comes off on
+       * top — and so the rep can see which is which.
+       */
+      bundleDiscount?: number;
+      fromLabel?: string;
       partId?: string;
       // Internal cost carried from the package (e.g. promo cost). When set,
       // `costLocked` tells the quote save path not to re-snapshot it from the
@@ -48,8 +57,13 @@ export function componentsToQuoteLines(components: PackageComponent[]): Expanded
       description: c.description,
       quantity: c.quantity || 0,
       unitPrice: c.unitPrice || 0,
-      discount: 0,
-      discountKind: "pct",
+      // The package's own per-line discount travels with the line. It used to be
+      // zeroed here on the theory that discounting belongs on the quote; that
+      // silently threw away a discount someone had deliberately built into the
+      // package.
+      discount: c.discount ?? 0,
+      discountKind: c.discountKind ?? "pct",
+      ...(c.fromLabel ? { fromLabel: c.fromLabel } : {}),
       partId: c.partId ?? undefined,
       // Carry the package's internal cost onto the line and lock it, so quote
       // save doesn't overwrite the promo cost with the part's average cost.
@@ -120,11 +134,66 @@ export function expandPackageWithBundlePrice(
     if (line.kind === "item") {
       const gross = (line.unitPrice || 0) * (line.quantity || 0);
       const disc = Math.max(0, gross - al.allocatedExtended);
-      line.discount = Math.round(disc * 100) / 100;
-      line.discountKind = "amt";
+      // Into bundleDiscount, NOT discount: overwriting `discount` here wiped out
+      // any per-line discount the package carried.
+      line.bundleDiscount = round2(disc);
     }
   });
   return { lines: out, allocated: true, error: null, saving: result.saving };
+}
+
+export type PackageTotals = {
+  /** Parts at list, before any reduction. */
+  partsGross: number;
+  /** Dollars taken off by the bundle/promo price allocation. */
+  bundleDiscount: number;
+  /** Dollars taken off by per-line discounts, ON TOP of the bundle price. */
+  lineDiscount: number;
+  /** What the customer pays for parts: gross − bundle − per-line. */
+  partsNet: number;
+  labor: number;
+  fees: number;
+  /** Parts net + labor + fees. Tax is applied on the quote, not here. */
+  total: number;
+};
+
+/**
+ * The package's money, in one place, in the same order the quote applies it:
+ * list price → bundle/promo allocation → per-line discount. Rounds each line to
+ * the cent before summing so the rows shown in the builder foot to the totals
+ * underneath them.
+ *
+ * Both reductions compose deliberately: a bundle price is the negotiated deal,
+ * and a per-line discount still comes off on top of it. Neither wins.
+ */
+export function packageTotals(
+  components: PackageComponent[],
+  packagePrice?: number | string | null,
+): PackageTotals {
+  const { lines } = expandPackageWithBundlePrice(components ?? [], packagePrice ?? null);
+  let partsGross = 0;
+  let bundleDiscount = 0;
+  let lineDiscount = 0;
+  let labor = 0;
+  let fees = 0;
+
+  for (const l of lines) {
+    if (l.kind === "item") {
+      const gross = round2((l.quantity || 0) * (l.unitPrice || 0));
+      const bundle = discountAmount(gross, l.bundleDiscount, "amt");
+      const manual = discountAmount(gross - bundle, l.discount, l.discountKind);
+      partsGross = round2(partsGross + gross);
+      bundleDiscount = round2(bundleDiscount + bundle);
+      lineDiscount = round2(lineDiscount + manual);
+    } else if (l.kind === "labor") {
+      labor = round2(labor + (l.hours || 0) * (l.rate || 0));
+    } else {
+      fees = round2(fees + (l.amount || 0));
+    }
+  }
+
+  const partsNet = round2(partsGross - bundleDiscount - lineDiscount);
+  return { partsGross, bundleDiscount, lineDiscount, partsNet, labor, fees, total: round2(partsNet + labor + fees) };
 }
 
 export function packageValue(components: PackageComponent[]): number {
@@ -215,6 +284,9 @@ export function sanitizeComponents(input: unknown): PackageComponent[] {
         unitPrice: num(c.unitPrice),
         // Preserve the internal cost when present (blank/invalid → null).
         cost: c.cost == null || c.cost === "" ? null : num(c.cost),
+        discount: c.discount == null || c.discount === "" ? null : Math.max(0, num(c.discount)),
+        discountKind: c.discountKind === "amt" ? "amt" : c.discountKind === "pct" ? "pct" : null,
+        fromLabel: c.fromLabel ? String(c.fromLabel) : null,
         partId: c.partId ? String(c.partId) : null,
         sku: c.sku ? String(c.sku) : null,
       });
