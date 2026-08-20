@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers } from "@/db/schema";
+import { quotes } from "@/db/schema";
 import { PrintTrigger } from "./PrintTrigger";
 import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
+import { fmtUSD } from "@/lib/money";
+import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
+import { BRANDING, brandLogoWebPath } from "@/lib/pdf/branding";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
 type Line =
@@ -31,14 +34,33 @@ type Line =
       rate: number;
     } & LineGroup);
 
-function fmt(n: number) {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+// The single owner of money formatting — same `$` and two decimals the editor
+// and the PDF use, so the three never disagree by a rounding step.
+const fmt = fmtUSD;
+
+/**
+ * A line's discount as a percentage off its own list value — what gets checked
+ * against a contract. Derived from the dollars actually coming off, so a
+ * bundle-allocated promo line shows a real percentage rather than a blank.
+ */
+function discountPct(l: Extract<Line, { kind: "item" }>) {
+  const gross = lineGross(l);
+  if (gross <= 0) return 0;
+  return round2((lineDiscount(l) / gross) * 100);
 }
 
 // Parts / Labor / Fees tables for a set of lines. `showTitles` labels
 // each sub-table (loose lines); package groups hide them since the
 // package name is the section header.
-function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: boolean }) {
+function PrintKindSections({
+  lines,
+  showTitles,
+  partNumbers,
+}: {
+  lines: Line[];
+  showTitles: boolean;
+  partNumbers: Record<string, string>;
+}) {
   const items = lines.filter((l): l is Extract<Line, { kind: "item" }> => l.kind === "item");
   const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
   const fees = lines.filter((l): l is Extract<Line, { kind: "fee" }> => l.kind === "fee");
@@ -50,10 +72,12 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
           <table>
             <thead>
               <tr>
-                <th style={{ width: "55%" }}>Description</th>
-                <th className="right" style={{ width: "8%" }}>Qty</th>
+                <th style={{ width: "4%" }}>#</th>
+                <th style={{ width: "39%" }}>Description</th>
+                <th style={{ width: "15%" }}>Part #</th>
+                <th className="right" style={{ width: "7%" }}>Qty</th>
                 <th className="right" style={{ width: "12%" }}>Unit price</th>
-                <th className="right" style={{ width: "12%" }}>Discount</th>
+                <th className="right" style={{ width: "10%" }}>Disc %</th>
                 <th className="right" style={{ width: "13%" }}>Line total</th>
               </tr>
             </thead>
@@ -64,18 +88,16 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
                 // number from the one on screen.
                 const gross = lineGross(l);
                 const disc = lineDiscount(l);
-                const discLabel =
-                  disc > 0
-                    ? l.discountKind === "pct" && !l.bundleDiscount
-                      ? `${l.discount}% (−${fmt(disc)})`
-                      : `−${fmt(disc)}`
-                    : "—";
+                const pct = discountPct(l);
+                const partNo = l.partId ? partNumbers[l.partId] : undefined;
                 return (
                   <tr key={`item-${i}`}>
+                    <td>{i + 1}</td>
                     <td>{l.description || "Item"}</td>
+                    <td style={{ fontSize: "10pt" }}>{partNo ?? "—"}</td>
                     <td className="right">{l.quantity}</td>
                     <td className="right">{fmt(l.unitPrice)}</td>
-                    <td className="right">{discLabel}</td>
+                    <td className="right">{pct > 0 ? `${pct.toFixed(2)}%` : "—"}</td>
                     <td className="right">
                       {disc > 0 ? (
                         <>
@@ -159,9 +181,11 @@ export default async function PrintQuotePage({
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) notFound();
 
-  const customer = q.customerId
-    ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0]
-    : null;
+  // Same resolver the PDF uses, so the sales rep, contact details and vehicle
+  // on screen are the ones that get printed.
+  const facts = await quoteDocumentFacts(q);
+  const logoPath = brandLogoWebPath();
+  const isInvoice = q.status === "converted";
 
   const lines = (q.lineItems as unknown as Line[]) ?? [];
   const items = lines.filter((l): l is Extract<Line, { kind: "item" }> => l.kind === "item");
@@ -258,50 +282,61 @@ export default async function PrintQuotePage({
         </span>
       </div>
 
+      {/* Masthead: logo + company block on the left, document number and the
+          assigned sales rep on the right — the same arrangement as the PDF. */}
       <div className="header">
         <div>
-          <h1 style={{ fontSize: "20pt", margin: 0 }}>Chiefs Pursuit Surplus</h1>
-          <div className="meta">Quote / Estimate</div>
+          {logoPath ? (
+            // eslint-disable-next-line @next/next/no-img-element -- a print
+            // stylesheet document, not an optimised app image.
+            <img src={logoPath} alt={BRANDING.companyName} style={{ height: "48pt", marginBottom: "4pt" }} />
+          ) : null}
+          <h1 style={{ fontSize: logoPath ? "13pt" : "20pt", margin: 0 }}>{BRANDING.companyName}</h1>
+          {BRANDING.address ? <div className="meta">{BRANDING.address}</div> : null}
+          {BRANDING.phone ? <div className="meta">{BRANDING.phone}</div> : null}
+          {BRANDING.email ? <div className="meta">{BRANDING.email}</div> : null}
+          {BRANDING.website ? <div className="meta">{BRANDING.website}</div> : null}
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: "14pt", fontWeight: "bold" }}>
+          <div style={{ fontSize: "16pt", fontWeight: "bold" }}>{isInvoice ? "INVOICE" : "QUOTE"}</div>
+          <div style={{ fontSize: "13pt", fontWeight: "bold" }}>
             {q.quoteNumber ?? q.id.slice(0, 8)}
           </div>
-          <div className="meta">Status: {q.status}</div>
           <div className="meta">
-            Issued: {new Date(q.createdAt).toLocaleDateString()}
+            {isInvoice ? "Invoice date" : "Quote date"}: {new Date(q.createdAt).toLocaleDateString()}
           </div>
+          {facts.salesPerson ? (
+            <div style={{ fontSize: "10pt" }}>Sales rep: {facts.salesPerson}</div>
+          ) : null}
         </div>
       </div>
 
-      <div style={{ marginBottom: "16pt" }}>
-        <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
-          Bill to
-        </div>
-        <div style={{ fontWeight: "bold", marginTop: "2pt" }}>
-          {customer?.name ?? "—"}
-        </div>
-        {customer?.address ? <div>{customer.address}</div> : null}
-        {customer?.email ? <div>{customer.email}</div> : null}
-        {customer?.phone ? <div>{customer.phone}</div> : null}
-      </div>
-
-      {(() => {
-        const vehLabel = [q.vehicleYear, q.vehicleMake, q.vehicleModel, q.vehicleTrim]
-          .filter(Boolean)
-          .join(" ");
-        if (!vehLabel && !q.vin && !q.unitNumber) return null;
-        return (
-          <div style={{ marginBottom: "16pt" }}>
-            <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
-              Vehicle
-            </div>
-            {vehLabel ? <div style={{ fontWeight: "bold", marginTop: "2pt" }}>{vehLabel}</div> : null}
-            {q.vin ? <div>VIN: {q.vin}</div> : null}
-            {q.unitNumber ? <div>Unit #: {q.unitNumber}</div> : null}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: "24pt", marginBottom: "16pt" }}>
+        <div style={{ width: "48%" }}>
+          <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
+            {isInvoice ? "Bill to" : "Prepared for"}
           </div>
-        );
-      })()}
+          <div style={{ fontWeight: "bold", marginTop: "2pt" }}>{facts.customerName ?? "—"}</div>
+          {facts.customerAddress ? <div>{facts.customerAddress}</div> : null}
+          {facts.customerPhone ? <div>{facts.customerPhone}</div> : null}
+          {facts.customerEmail ? <div>{facts.customerEmail}</div> : null}
+        </div>
+        <div style={{ width: "48%" }}>
+          {/* Engine and transmission are not shown because the app does not
+              record them — a blank line beats an invented one. */}
+          <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
+            Vehicle
+          </div>
+          <div style={{ fontWeight: "bold", marginTop: "2pt" }}>{facts.vehicleSummary ?? "—"}</div>
+          {facts.vin ? <div>VIN: {facts.vin}</div> : null}
+          {facts.unitNumber ? <div>Unit #: {facts.unitNumber}</div> : null}
+          {facts.vehicleColor ? <div>Color: {facts.vehicleColor}</div> : null}
+          {facts.vehicleMileage != null ? (
+            <div>Mileage: {facts.vehicleMileage.toLocaleString("en-US")}</div>
+          ) : null}
+          <div className="meta" style={{ marginTop: "3pt" }}>Status: {q.status.replace(/_/g, " ")}</div>
+        </div>
+      </div>
 
       {lines.length === 0 ? (
         <div style={{ textAlign: "center", color: "#666", padding: "16pt 0" }}>
@@ -338,11 +373,11 @@ export default async function PrintQuotePage({
                     >
                       {title}
                     </div>
-                    <PrintKindSections lines={gl} showTitles={false} />
+                    <PrintKindSections lines={gl} showTitles={false} partNumbers={facts.partNumbers} />
                   </div>
                 );
               })}
-              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} /> : null}
+              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} partNumbers={facts.partNumbers} /> : null}
             </>
           );
         })()

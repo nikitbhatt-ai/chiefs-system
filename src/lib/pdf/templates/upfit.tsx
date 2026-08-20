@@ -488,7 +488,7 @@ function QuoteSections({ data }: { data: UpfitPdfData }) {
         {discountTotal > 0 && (
           <View style={styles.totalRow}>
             <Text>Discount</Text>
-            <Text>−{money(discountTotal)}</Text>
+            <Text>-{money(discountTotal)}</Text>
           </View>
         )}
         {laborTotal > 0 && (

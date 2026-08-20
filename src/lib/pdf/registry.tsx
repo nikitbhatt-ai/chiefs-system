@@ -17,6 +17,7 @@ import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
 import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
 import { resolvePartsFromLineItems } from "@/lib/workOrderParts";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
+import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
 export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit" | "work_order";
 
@@ -29,20 +30,14 @@ export type ResolvedPdf = {
 async function resolveQuote(recordId: string, variant: "quote" | "invoice"): Promise<QuoteData | null> {
   const [q] = await db.select().from(quotes).where(eq(quotes.id, recordId));
   if (!q) return null;
-  const customer = q.customerId
-    ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0] ?? null
-    : null;
-  const vehicleSummary = await resolveVehicleLabel(q);
+  // Customer contact, vehicle detail and the assigned sales person all come
+  // from one shared resolver so the PDF and the print view cannot disagree.
+  const facts = await quoteDocumentFacts(q);
   return {
     quoteId: q.id,
     quoteNumber: q.quoteNumber,
     createdAt: q.createdAt,
-    customerName: customer?.name ?? null,
-    customerEmail: customer?.email ?? null,
-    customerAddress: customer?.address ?? null,
-    vehicleSummary: vehicleSummary || null,
-    vin: q.vin ?? null,
-    unitNumber: q.unitNumber ?? null,
+    ...facts,
     lineItems: ((q.lineItems as unknown as QuoteLine[]) ?? []),
     taxTotal: Number(q.taxTotal ?? 0),
     grandTotal: Number(q.grandTotal ?? 0),
