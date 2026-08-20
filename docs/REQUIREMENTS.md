@@ -3281,6 +3281,110 @@ One caution worth recording: an earlier version of the quote check reported
 "PASSED" while running **zero** assertions, because the seed had no quotes to
 open. A check that cannot fail is not a check — assert that the fixture exists.
 
+## Invoice document format (user requirement, 2026-08-20)
+
+The user supplied a Shopmonkey work order (`Estimate #1938 — City of Navasota,
+2026 Chevrolet Silverado 1500 WT`) and asked that **downloaded invoices be
+formatted the same way**, naming six things they must carry:
+
+1. the vehicle info connected to the build
+2. the customer name
+3. contact info
+4. **discount percentage** by line item
+5. the Chiefs logo in the top left
+6. the assigned sales person
+
+Note what the reference document is and is not: it is a *work order*, with
+columns `Description | QTY | Part # | Vendor | Status` and **no prices at all**.
+So "the same way" means its **structure** — masthead, party blocks, grouped
+sections with their own table headers, running footer — with the money columns
+an invoice needs. `Vendor` and `Status` are deliberately NOT carried onto a
+customer invoice: they expose sourcing. `Part #` is, because a customer can
+cross-reference it.
+
+Invoices are converted quotes (no separate table — see the accounting section),
+so this is `templates/quote.tsx` plus `/quotes/[id]/print`, and both variants of
+the template get the new masthead.
+
+### What was built
+
+- **Running masthead**, repeated on every page (`fixed` + absolute, with
+  `pageWithRunningHeader` reserving 132pt): logo top-left over the company
+  address / phone / email / website, and on the right the document title,
+  number, date, and `Sales rep: <name>`. A three-page invoice identifies itself
+  on page 3, which the reference document does too.
+- **Bill to / Vehicle side by side.** Customer name, address, **phone**, email
+  (phone was in `customers` all along and simply never reached the PDF).
+  Vehicle is year/make/model/trim, VIN, unit #, colour, mileage.
+- **`Disc %` per line item**, computed from the dollars actually coming off
+  (`lineDiscount / lineGross`), so a **bundle-allocated promo line shows a real
+  percentage** rather than a blank where its stored `discount` is zero. A flat
+  `$125` off an `$850` line prints `14.71%`.
+- **`Part #` column** from `parts.mfg_part_number`, falling back to `parts.sku`
+  — the manufacturer's number is the one a customer can look up.
+- **`src/lib/quoteDocumentFacts.ts`** resolves customer contact, vehicle detail,
+  sales person and part numbers **once**, for both the PDF and the print view.
+  Two copies of these lookups is how an invoice ends up naming a different sales
+  rep than the screen — the same trap the discount arithmetic fell into before
+  it was consolidated.
+
+### Sales person and vehicle detail: where they come from
+
+Quotes have no rep of their own. The name resolves through the quote's deal:
+assigned user's display name → name → email, then the deal's free-text
+`sales_rep`, then **null** — an unassigned quote must not print somebody else's
+name. Colour and mileage come from the deal's linked `vehicles` row.
+
+**Engine size and transmission are on the reference document and are NOT
+printed**, because the app does not store them anywhere. A blank line beats an
+invented one on a document a customer signs. Adding them means new columns on
+`quotes` (or decoding more of the VIN response) — not done.
+
+### The logo — still needs the artwork
+
+There is **no Chiefs logo file anywhere in the repo**, and the reference PDF
+does not contain one either (its only images are Shopmonkey's own wordmark).
+`brandLogo()` / `brandLogoWebPath()` read `public/brand/chiefs-logo.png` (or
+`PDF_LOGO_PATH`) once and cache it; PNG or JPEG, roughly 4:1 landscape for the
+150×38pt slot. Until the file is dropped in, the header sets the company name as
+a wordmark so documents are never broken by a missing asset — they are just not
+branded yet.
+
+### Two defects the verification caught
+
+- **The totals block straddled a page break** — "Subtotal" on page 1, "Amount
+  due" on page 2. Fixed with `wrap={false}` on the totals view.
+- **`U+2212 MINUS SIGN` rendered as nothing.** The templates use standard-14
+  Helvetica with `/WinAnsiEncoding`, which has no U+2212; react-pdf emitted byte
+  `0x12` (undefined in that encoding), so the discount row printed
+  `Discount $530.00` with **no minus sign**. Replaced with ASCII hyphen in
+  `quote.tsx` and `upfit.tsx`. The check now scans for any byte undefined in
+  WinAnsi, so the whole class is caught rather than that one character.
+- Also: react-pdf hyphenates by default and printed `3M re-flective`. Disabled
+  via `Font.registerHyphenationCallback`.
+
+### Verified
+
+Against a seeded record on a **production** build — a converted quote for City
+of Navasota with a bundle-allocated promo group, a 10% line, a flat-$125 line,
+labor and a fee:
+
+- the downloaded PDF carries all six requested items, `Disc %` shows
+  `15.00 / 15.00 / 10.00 / 14.71`, the manufacturer part number prints, the
+  masthead and sales rep repeat on both pages, and
+  `$3,900.00 − $530.00 + $570.00 + $185.00 = $4,125.00` foots;
+- no character falls outside the font encoding;
+- no word is hyphenated mid-line;
+- the print view shows the same customer, vehicle, rep, percentages and grand
+  total as the PDF.
+
+One method note worth keeping: the first run of this check reported everything
+missing because the extractor only understood two-byte subset CIDs, while these
+documents use single-byte WinAnsi — it decoded 20 characters and would have
+reported a *pass* for every `contains` had the guard ("the PDF's text decoded")
+not been there. Assert that your extraction worked before trusting what it
+says about the content.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

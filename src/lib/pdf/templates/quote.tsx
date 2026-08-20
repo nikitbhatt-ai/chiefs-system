@@ -1,7 +1,7 @@
-import { Document, Page, Text, View } from "@react-pdf/renderer";
+import { Document, Image, Page, Text, View } from "@react-pdf/renderer";
 import React from "react";
 import { sharedStyles } from "../styles";
-import { BRANDING } from "../branding";
+import { BRANDING, brandLogo } from "../branding";
 import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
@@ -27,10 +27,17 @@ export type QuoteData = {
   createdAt: Date;
   customerName: string | null;
   customerEmail: string | null;
+  customerPhone: string | null;
   customerAddress: string | null;
   vehicleSummary: string | null;
   vin: string | null;
   unitNumber: string | null;
+  vehicleColor: string | null;
+  vehicleMileage: number | null;
+  /** Assigned sales person, printed in the header. */
+  salesPerson: string | null;
+  /** partId → customer-facing part number (`parts.sku`), for the Part # column. */
+  partNumbers: Record<string, string>;
   lineItems: QuoteLine[];
   taxTotal: number;
   grandTotal: number;
@@ -42,13 +49,43 @@ export type QuoteData = {
 };
 
 function money(n: number): string {
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  return n.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/**
+ * The discount on a line, as the percentage off its own list value.
+ *
+ * Printed rather than the dollar figure because that is what gets checked
+ * against a contract or a promo sheet ("we were quoted 22% off list"). It is
+ * derived from the money actually coming off — `lineDiscount` already accounts
+ * for a percentage discount, a flat dollar discount, and a package's bundle
+ * allocation — so a bundled promo line shows a real percentage instead of a
+ * blank where its stored `discount` field happens to be zero.
+ */
+function discountPct(l: Extract<QuoteLine, { kind: "item" }>): number {
+  const gross = lineGross(l);
+  if (gross <= 0) return 0;
+  return round2((lineDiscount(l) / gross) * 100);
 }
 
 // Renders the Parts / Labor / Fees sub-tables for a set of lines. Used
 // both for a package group's lines (showTitles=false — the package
 // title is the header) and for loose lines (showTitles=true).
-function KindTables({ lines, showTitles }: { lines: QuoteLine[]; showTitles: boolean }) {
+function KindTables({
+  lines,
+  showTitles,
+  partNumbers,
+}: {
+  lines: QuoteLine[];
+  showTitles: boolean;
+  /** partId → customer-facing part number, for the Part # column. */
+  partNumbers?: Record<string, string>;
+}) {
   const styles = sharedStyles;
   const items = lines.filter((l) => l.kind === "item");
   const labor = lines.filter((l) => l.kind === "labor");
@@ -60,11 +97,13 @@ function KindTables({ lines, showTitles }: { lines: QuoteLine[]; showTitles: boo
           {showTitles && <Text style={styles.sectionTitle}>Parts &amp; Items</Text>}
           <View style={styles.table}>
             <View style={[styles.tableRow, styles.tableHeader]}>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Unit price</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Disc</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Total</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: "4%" }]}>#</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>Description</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>Part #</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "7%" }]}>Qty</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>Unit price</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "8%" }]}>Disc %</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>Total</Text>
             </View>
             {items.map((l, idx) => {
               if (l.kind !== "item") return null;
@@ -75,25 +114,33 @@ function KindTables({ lines, showTitles }: { lines: QuoteLine[]; showTitles: boo
               // disagreed with the editor and the saved grand total.
               const gross = lineGross(l);
               const disc = lineDiscount(l);
+              const pct = discountPct(l);
+              const partNo = l.partId ? partNumbers?.[l.partId] : undefined;
               return (
                 <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
-                    {disc > 0 ? money(disc) : l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "4%" }]}>{idx + 1}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>{l.description}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "16%", fontSize: 9 }]}>
+                    {partNo ?? "—"}
+                  </Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "7%" }]}>{l.quantity}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>{money(l.unitPrice || 0)}</Text>
+                  {/* The percentage off list, which is what gets checked against
+                      a contract. The dollars come off in the Total column. */}
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "8%" }]}>
+                    {pct > 0 ? `${pct.toFixed(2)}%` : "—"}
                   </Text>
                   {disc > 0 ? (
                     // Show the pre-discount price struck through above the
                     // discounted price so the customer sees the saving per line.
-                    <View style={{ width: "10%", paddingVertical: 6, paddingHorizontal: 8 }}>
+                    <View style={{ width: "12%", paddingVertical: 6, paddingHorizontal: 8 }}>
                       <Text style={{ fontSize: 8, textAlign: "right", color: "#888888", textDecoration: "line-through" }}>
                         {money(gross)}
                       </Text>
                       <Text style={{ fontSize: 10, textAlign: "right" }}>{money(lineNet(l))}</Text>
                     </View>
                   ) : (
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(lineNet(l))}</Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>{money(lineNet(l))}</Text>
                   )}
                 </View>
               );
@@ -171,6 +218,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   const docNumber = data.quoteNumber ?? `Q-${data.quoteId.slice(0, 8)}`;
   const dateLabel = isInvoice ? "Invoice date" : "Quote date";
   const generated = new Date();
+  const logo = brandLogo();
 
   return (
     <Document
@@ -179,46 +227,65 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
       creator={BRANDING.companyName}
       producer={BRANDING.companyName}
     >
-      <Page size="LETTER" style={styles.page}>
+      <Page size="LETTER" style={styles.pageWithRunningHeader}>
         {data.status === "draft" && !isInvoice && <Text style={styles.watermark}>DRAFT</Text>}
 
-        <View style={styles.header}>
+        {/* Masthead, repeated on every page: logo + company block on the left,
+            document number and the assigned sales person on the right. */}
+        <View style={styles.runningHeader} fixed>
           <View style={styles.brandBlock}>
-            <Text style={styles.brandName}>{BRANDING.companyName}</Text>
-            {BRANDING.tagline ? <Text style={styles.brandLine}>{BRANDING.tagline}</Text> : null}
+            {logo ? (
+              <Image src={logo} style={styles.logo} />
+            ) : (
+              // No logo file installed yet — set the company name as a wordmark
+              // rather than leaving a blank corner. See `brandLogo()`.
+              <Text style={styles.logoWordmark}>{BRANDING.companyName}</Text>
+            )}
+            {logo ? <Text style={styles.brandLine}>{BRANDING.companyName}</Text> : null}
             {BRANDING.address ? <Text style={styles.brandLine}>{BRANDING.address}</Text> : null}
             {BRANDING.phone ? <Text style={styles.brandLine}>{BRANDING.phone}</Text> : null}
             {BRANDING.email ? <Text style={styles.brandLine}>{BRANDING.email}</Text> : null}
+            {BRANDING.website ? <Text style={styles.brandLine}>{BRANDING.website}</Text> : null}
           </View>
-          <View>
+          <View style={styles.headerRight}>
             <Text style={styles.docTitle}>{docTitle}</Text>
             <Text style={styles.docMeta}>#{docNumber}</Text>
-            <Text style={styles.docMeta}>{dateLabel}: {data.createdAt.toLocaleDateString("en-US")}</Text>
+            <Text style={styles.docMeta}>
+              {dateLabel}: {data.createdAt.toLocaleDateString("en-US")}
+            </Text>
+            {data.salesPerson ? (
+              <Text style={styles.docRep}>Sales rep: {data.salesPerson}</Text>
+            ) : null}
           </View>
         </View>
 
         <View style={styles.twoCol}>
           <View style={{ width: "48%" }}>
-            <Text style={styles.sectionTitle}>{isInvoice ? "Bill to" : "Prepared for"}</Text>
+            <Text style={[styles.sectionTitle, { marginTop: 0 }]}>
+              {isInvoice ? "Bill to" : "Prepared for"}
+            </Text>
             <Text style={styles.blockValue}>{data.customerName ?? "—"}</Text>
-            {data.customerEmail ? <Text style={styles.blockLabel}>{data.customerEmail}</Text> : null}
             {data.customerAddress ? <Text style={styles.blockLabel}>{data.customerAddress}</Text> : null}
+            {data.customerPhone ? <Text style={styles.blockLabel}>{data.customerPhone}</Text> : null}
+            {data.customerEmail ? <Text style={styles.blockLabel}>{data.customerEmail}</Text> : null}
           </View>
           <View style={{ width: "48%" }}>
-            <Text style={styles.sectionTitle}>Status</Text>
-            <Text style={styles.blockValue}>{data.status.replace(/_/g, " ")}</Text>
-            {data.vehicleSummary || data.vin || data.unitNumber ? (
-              <>
-                <Text style={[styles.sectionTitle, { marginTop: 8 }]}>Vehicle</Text>
-                {data.vehicleSummary ? (
-                  <Text style={styles.blockValue}>{data.vehicleSummary}</Text>
-                ) : null}
-                {data.vin ? <Text style={styles.blockLabel}>VIN: {data.vin}</Text> : null}
-                {data.unitNumber ? (
-                  <Text style={styles.blockLabel}>Unit #: {data.unitNumber}</Text>
-                ) : null}
-              </>
+            {/* The vehicle this build is for. Engine and transmission are not
+                shown because the app does not record them — a blank line beats
+                an invented one on a document a customer signs. */}
+            <Text style={[styles.sectionTitle, { marginTop: 0 }]}>Vehicle</Text>
+            <Text style={styles.blockValue}>{data.vehicleSummary ?? "—"}</Text>
+            {data.vin ? <Text style={styles.blockLabel}>VIN: {data.vin}</Text> : null}
+            {data.unitNumber ? <Text style={styles.blockLabel}>Unit #: {data.unitNumber}</Text> : null}
+            {data.vehicleColor ? <Text style={styles.blockLabel}>Color: {data.vehicleColor}</Text> : null}
+            {data.vehicleMileage != null ? (
+              <Text style={styles.blockLabel}>
+                Mileage: {data.vehicleMileage.toLocaleString("en-US")}
+              </Text>
             ) : null}
+            <Text style={[styles.blockLabel, { marginTop: 4 }]}>
+              Status: {data.status.replace(/_/g, " ")}
+            </Text>
           </View>
         </View>
 
@@ -273,16 +340,19 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     >
                       <Text style={{ fontSize: 11, fontWeight: 700 }}>{title}</Text>
                     </View>
-                    <KindTables lines={gl} showTitles={false} />
+                    <KindTables lines={gl} showTitles={false} partNumbers={data.partNumbers} />
                   </View>
                 );
               })}
-              {loose.length > 0 && <KindTables lines={loose} showTitles={true} />}
+              {loose.length > 0 && <KindTables lines={loose} showTitles={true} partNumbers={data.partNumbers} />}
             </View>
           );
         })()}
 
-        <View style={styles.totals}>
+        {/* `wrap={false}` keeps the totals on one page. Without it a page break
+            landed between "Subtotal" and "Amount due", which is the last thing
+            you want split on an invoice. */}
+        <View style={styles.totals} wrap={false}>
           <View style={styles.totalRow}>
             <Text>Subtotal</Text>
             <Text>{money(subtotal)}</Text>
@@ -290,7 +360,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
           {discountTotal > 0 && (
             <View style={styles.totalRow}>
               <Text>Discount</Text>
-              <Text>−{money(discountTotal)}</Text>
+              <Text>-{money(discountTotal)}</Text>
             </View>
           )}
           {laborTotal > 0 && (
