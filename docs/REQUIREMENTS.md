@@ -3286,3 +3286,170 @@ open. A check that cannot fail is not a check — assert that the fixture exists
 When extending a feature, re-read this file first. When adding a NEW
 requirement during a build session, append it here in the same commit
 so future sessions pick it up.
+
+## Communication ingest — email now, phone next (user requirement, 2026-08-20)
+
+> "How can we feed email communications into the system to track our sales
+> communication? I also want to incorporate phone eventually too."
+> Follow-up: "I need this to be automated."
+
+This is Capability 2 from the lead-capture section (`## Leads` → Deferred),
+built out. Two decisions the user made up front:
+
+1. **Automated ingest**, not a BCC/forward dropbox. Rep discipline was
+   explicitly rejected as the mechanism.
+2. **Known contacts only** — a message is stored only when a participant
+   already matches a customer contact or a lead. Unmatched mail is not
+   written at all under the default scope.
+
+### The shape of it
+
+One channel-agnostic table with pluggable adapters. Email, calls, SMS and
+manual notes are all rows in `communications`; an adapter's only job is
+provider I/O plus normalization. **Adding phone means adding an adapter, not
+another module** — that's the whole reason the table isn't called `emails`.
+
+Everything writes through `src/lib/communications.ts`. Attribution is decided
+there, once, so no adapter re-invents it.
+
+### Attribution order (strongest signal first)
+
+1. **thread** — `thread_key` (Graph `conversationId`) already seen → inherit
+   that conversation's lead/customer/deal. This is what keeps a long reply
+   chain glued to one deal.
+2. **contact** — an external participant matches `customer_contacts` → that
+   customer; plus its single open deal when there's exactly one. With several
+   open deals the row is filed at the **account level** (`deal_id` null)
+   rather than guessed at.
+3. **lead** — participant matches `leads.email` → that lead, following
+   through to `converted_customer_id` / `converted_deal_id` if it's been
+   converted.
+4. **none** — `status='unassigned'`, lands in the `/communications` triage
+   queue. Under the default `known_contacts` scope this case isn't stored.
+
+Account-level rows show up on the deal page too, flagged "account-level", so
+a customer with two open deals doesn't show half a conversation on each.
+
+### Why app-only Graph rather than delegated OAuth
+
+The sync runs unattended on a cron with nobody signed in. A delegated refresh
+token that lapses stops one rep's mail from syncing *silently* — the inbox
+just looks quiet. One app credential, admin-consented once, has no such
+failure mode. The cost is that it's tenant-wide by default, so scoping it in
+Exchange is a required step, not an optional hardening one.
+
+Delta sync (not IMAP, not full re-reads): `internetMessageId` for dedup,
+`conversationId` for threading, both free in the payload. Long-lived IMAP
+connections don't fit Vercel's serverless model at all.
+
+### Schema additions (run `docs/sql/communications_phase1.sql` in Neon)
+
+- `customer_contacts` — every address/number per customer. `customers.email`
+  alone couldn't match a fleet manager who isn't the billing contact. The SQL
+  seeds it from `customers.email`.
+- `communications` — the timeline. `external_id` is UNIQUE, which is what
+  makes re-syncing idempotent. Phone-shaped columns
+  (`duration_seconds`, `recording_url`, `transcript`) are present now so the
+  call adapter is purely additive.
+- `communication_participants` — from/to/cc/bcc (caller/callee for phone),
+  with `is_internal` flagged.
+- `communication_attachments` — filename/size metadata; bytes are deferred.
+- `comm_accounts` — the opt-in list of synced mailboxes. **A mailbox absent
+  from this table is never read**, even though the credential could reach it.
+- `comm_sync_state` — Graph delta cursor per (account, folder).
+
+`customer_messages` is superseded. The SQL copies its rows across stamped
+`external_id = 'legacy:<old id>'`; the old table is left in place read-only
+rather than dropped.
+
+### What was built
+
+- [x] `src/lib/communications.ts` — normalization, the matcher, idempotent
+      `recordCommunication`, `assignCommunication` for triage, and
+      `learnContacts`.
+- [x] `src/lib/graph.ts` — app-only token (module-scoped cache), bounded
+      backfill, `$deltatoken=latest` handoff to incremental sync, delta
+      paging, attachment metadata, Graph → normalized mapping.
+- [x] `src/lib/mailSync.ts` — per-mailbox/per-folder orchestration. Errors
+      are recorded on the row and the loop continues: one mailbox with a
+      revoked permission must not stop the others.
+- [x] `GET /api/cron/mail-sync` (Vercel cron, `CRON_SECRET`) and
+      `POST` (manager+, the "Sync now" button) — same code path.
+- [x] `/communications` — triage queue, one-select filing (deal / customer /
+      lead), Ignore, mailbox sync-health table, add/pause mailbox.
+- [x] `src/components/CommunicationTimeline.tsx` — shared feed, used on
+      `/communications`, the deal page, and the customer page.
+- [x] Deal page "communication" tab reads `communications`; the manual log
+      form now writes through the same path as automated ingest.
+- [x] Customer page gains **Contacts** (the matcher's lookup table) and an
+      account-level **Communications** feed.
+- [x] `src/lib/communications.test.ts` — 18 standalone tests
+      (`npx tsx src/lib/communications.test.ts`) over the DB-free logic.
+
+### Setup the user must do (nothing syncs until these are done)
+
+1. Run `docs/sql/communications_phase1.sql` in Neon's SQL Editor.
+2. Entra ID → App registrations → New registration (single tenant, no
+   redirect URI — there is no interactive sign-in).
+3. API permissions → Microsoft Graph → **Application** permissions →
+   `Mail.Read` + `User.Read.All` → **Grant admin consent**.
+4. Certificates & secrets → new client secret (copy the *Value*).
+5. **Scope it.** In Exchange Online PowerShell, `New-ApplicationAccessPolicy`
+   restricting the app to a mail-enabled security group holding only the sales
+   mailboxes. Skipping this leaves a credential that can read every mailbox in
+   the tenant. Exact commands are in `.env.example`.
+6. Set `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`,
+   `CRON_SECRET` on Vercel (Production + Preview).
+7. `/communications` → Add mailbox, for each mailbox to sync.
+
+Optional: `INTERNAL_EMAIL_DOMAINS` (default `chiefspursuitsurplus.com`),
+`COMM_INGEST_SCOPE` (`known_contacts` default | `all_external`),
+`COMM_BACKFILL_DAYS` (default 30 — bounds the *first* run only).
+
+Note: `vercel.json` schedules the sync every 15 minutes. Sub-daily crons need
+a Vercel paid plan; on Hobby it degrades to daily and "Sync now" covers the
+gap.
+
+### Privacy guardrails built in
+
+- A thread whose every participant is internal is never ingested.
+- Default scope stores nothing for an unrecognized sender.
+- Mailboxes are opt-in per row and can be paused from the UI.
+- Bodies are fetched as plain text (`Prefer: outlook.body-content-type`),
+  so we don't warehouse megabytes of quoted HTML.
+- Triage prefers `ignored` over delete — deleting is manager+, because the
+  row is a record of a customer interaction.
+
+### Phone (the "eventually", deliberately unblocked)
+
+The table, the participant roles, and the matcher are already channel-neutral,
+so phone is an adapter plus a UI badge. Two routes, in preference order:
+
+1. **Teams Phone via the same Graph credential** —
+   `/communications/callRecords` (needs `CallRecords.Read.All`). No second
+   vendor, no second bill, and the participant matcher works unchanged on
+   phone numbers via `normalizePhone` (last-10-digit matching, already
+   written and tested).
+2. **A telephony provider** (Twilio / RingCentral / Dialpad / OpenPhone) —
+   webhook → `recordCommunication` with `channel='call'`, plus
+   `recording_url` and `transcript`. Worth it if click-to-call and
+   transcription matter more than staying on one vendor.
+
+Decide by asking what the reps actually dial today. If it's Teams, route 1.
+
+### Deferred (next PRs, in rough priority order)
+
+- **Outbound send from the deal page** (reply in-thread via Graph
+  `sendMail`). Closes the loop — replies come back already matched by
+  `conversationId`. Biggest remaining win for sales.
+- **Graph change notifications** (webhook subscriptions, ~3-day max lifetime,
+  renewal cron) for near-real-time arrival instead of a 15-minute poll. Delta
+  polling stays as the safety net.
+- **Attachment bytes** into Vercel Blob, so a quote PDF a rep sent is
+  readable from the timeline.
+- **Phone adapter** — see above.
+- **Per-mailbox folder selection** (some reps may want a "CRM" folder only).
+- **Retention / redaction policy.** This table accumulates customer PII and,
+  once phone lands, recordings. Needs an explicit policy and a purge job.
+- **Notifications** on inbound mail for a deal the recipient owns (reuse
+  `src/lib/notifications.ts`).

@@ -1,9 +1,9 @@
 import { notFound, redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq, desc, and, gte, lte, ilike, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, gte, lte, ilike, inArray, ne } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { customers, deals, quotes, workOrders, notes, users, customerDocuments, dealCredentials, dealActivity, documentAuditLog } from "@/db/schema";
+import { customers, deals, quotes, workOrders, notes, users, customerDocuments, dealCredentials, dealActivity, documentAuditLog, communications, communicationParticipants, customerContacts } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import {
@@ -15,6 +15,8 @@ import {
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
 import { headers } from "next/headers";
 import { SubmitButton } from "@/components/SubmitButton";
+import { CommunicationTimeline } from "@/components/CommunicationTimeline";
+import { normalizeEmail } from "@/lib/communications";
 
 export const dynamic = "force-dynamic";
 
@@ -155,11 +157,66 @@ export default async function CustomerEntityPage({
     docsByCategory.set(d.category, list);
   }
 
+  // Contacts are the matcher's lookup table: every address here is mail that
+  // files itself to this account instead of landing in triage.
+  const [contactRows, commRows] = await Promise.all([
+    db
+      .select()
+      .from(customerContacts)
+      .where(and(eq(customerContacts.customerId, id), eq(customerContacts.active, true)))
+      .orderBy(desc(customerContacts.isPrimary), asc(customerContacts.name)),
+    db
+      .select()
+      .from(communications)
+      .where(and(eq(communications.customerId, id), ne(communications.status, "ignored")))
+      .orderBy(desc(communications.occurredAt))
+      .limit(50),
+  ]);
+
+  const commParticipants = commRows.length
+    ? await db
+        .select({
+          communicationId: communicationParticipants.communicationId,
+          role: communicationParticipants.role,
+          name: communicationParticipants.name,
+          email: communicationParticipants.email,
+        })
+        .from(communicationParticipants)
+        .where(inArray(communicationParticipants.communicationId, commRows.map((r) => r.id)))
+    : [];
+
   const authorIds = Array.from(new Set(noteRows.map((n) => n.authorId).filter(Boolean) as string[]));
   const authorRows = authorIds.length
     ? await db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.active, true))
     : [];
   const authorMap = new Map(authorRows.map((a) => [a.id, a.name ?? a.email]));
+
+  async function addContact(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const email = normalizeEmail(String(formData.get("email") ?? ""));
+    const phone = String(formData.get("phone") ?? "").trim() || null;
+    if (!email && !phone) return;
+    await db.insert(customerContacts).values({
+      customerId: id,
+      name: String(formData.get("name") ?? "").trim() || null,
+      title: String(formData.get("title") ?? "").trim() || null,
+      email,
+      phone,
+    });
+    revalidatePath(`/crm/${id}`);
+  }
+
+  async function deleteContact(formData: FormData) {
+    "use server";
+    const session = await auth();
+    if (!session?.user) return;
+    const contactId = String(formData.get("contactId") ?? "");
+    if (!contactId) return;
+    await db.delete(customerContacts).where(eq(customerContacts.id, contactId));
+    revalidatePath(`/crm/${id}`);
+  }
 
   async function addNote(formData: FormData) {
     "use server";
@@ -541,6 +598,52 @@ export default async function CustomerEntityPage({
             </tbody>
           </table>
         )}
+      </Section>
+
+      <Section title="Contacts">
+        <p className="text-[11px] text-zinc-500 font-body mb-2">
+          Email addresses and phone numbers we know for this account. Mail from any of these files
+          itself here automatically — anything else waits in{" "}
+          <a href="/communications" className="text-amber-400 hover:text-amber-300">Communications</a>.
+        </p>
+        {contactRows.length === 0 ? (
+          <p className="text-xs text-zinc-500 font-body mb-3">No contacts yet.</p>
+        ) : (
+          <table className="w-full text-xs font-body mb-3">
+            <thead><tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500"><th className="px-2 py-1">Name</th><th className="px-2 py-1">Title</th><th className="px-2 py-1">Email</th><th className="px-2 py-1">Phone</th><th className="px-2 py-1"></th></tr></thead>
+            <tbody className="text-zinc-200">
+              {contactRows.map((ct) => (
+                <tr key={ct.id} className="border-t border-white/5">
+                  <td className="px-2 py-1">{ct.name ?? "—"}{ct.isPrimary ? <span className="ml-1.5 text-[9px] uppercase tracking-wider text-amber-300">primary</span> : null}</td>
+                  <td className="px-2 py-1 text-zinc-400">{ct.title ?? "—"}</td>
+                  <td className="px-2 py-1 break-all">{ct.email ?? "—"}</td>
+                  <td className="px-2 py-1 whitespace-nowrap">{ct.phone ?? "—"}</td>
+                  <td className="px-2 py-1 text-right">
+                    <form action={deleteContact} className="inline">
+                      <input type="hidden" name="contactId" value={ct.id} />
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Remove</SubmitButton>
+                    </form>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        <form action={addContact} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+          <input name="name" placeholder="Name" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <input name="title" placeholder="Title" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <input name="email" type="email" placeholder="Email" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <input name="phone" placeholder="Phone" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add contact</SubmitButton>
+        </form>
+      </Section>
+
+      <Section title="Communications">
+        <CommunicationTimeline
+          rows={commRows}
+          participants={commParticipants}
+          emptyText="No communication recorded for this account yet."
+        />
       </Section>
 
       <Section title="Work orders">

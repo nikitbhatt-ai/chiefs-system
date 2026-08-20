@@ -1,12 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or } from "drizzle-orm";
 import { put } from "@vercel/blob";
 import { db } from "@/db";
-import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments, dealTasks, customerMessages, workOrders } from "@/db/schema";
+import { deals, customers, users, dealActivity, partners, partnerContacts, dealCredentials, quotes, customerDocuments, dealTasks, communications, communicationParticipants, workOrders } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { CommunicationTimeline } from "@/components/CommunicationTimeline";
+import { recordCommunication } from "@/lib/communications";
+import { canDelete } from "@/lib/rbac";
 import { STAGE_COLORS, getPipeline, stageLabel } from "@/lib/pipelines";
 import {
   CREDENTIAL_TYPES,
@@ -50,6 +53,11 @@ export default async function DealEntityPage({
   const [d] = await db.select().from(deals).where(eq(deals.id, id));
   if (!d) notFound();
 
+  // Read at render time so the Delete control isn't shown to someone whose
+  // click the action would refuse (synced records are manager+).
+  const viewer = await auth();
+  const viewerCanDeleteSynced = canDelete(viewer);
+
   const [customerRow, assigneeRow, activity, partnerRow, contactRow, credentials, dealQuotes, dealFiles, taskRows, messageRows, userRows, dealWorkOrders, stageMap] = await Promise.all([
     d.customerId ? db.select().from(customers).where(eq(customers.id, d.customerId)).limit(1) : Promise.resolve([]),
     d.assignedTo ? db.select().from(users).where(eq(users.id, d.assignedTo)).limit(1) : Promise.resolve([]),
@@ -60,7 +68,24 @@ export default async function DealEntityPage({
     db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber, workflowStage: quotes.workflowStage }).from(quotes).where(eq(quotes.dealId, id)).orderBy(desc(quotes.updatedAt)),
     db.select().from(customerDocuments).where(and(eq(customerDocuments.associatedDealId, id), eq(customerDocuments.isCurrentVersion, true))).orderBy(desc(customerDocuments.uploadedAt)),
     db.select().from(dealTasks).where(eq(dealTasks.dealId, id)).orderBy(asc(dealTasks.completedAt), asc(dealTasks.dueDate)),
-    db.select().from(customerMessages).where(eq(customerMessages.dealId, id)).orderBy(desc(customerMessages.createdAt)),
+    // This deal's communications plus account-level ones (matched to the
+    // customer but not pinned to a deal), so a rep reads the whole thread with
+    // the account rather than a fragment of it.
+    db
+      .select()
+      .from(communications)
+      .where(
+        d.customerId
+          ? and(
+              ne(communications.status, "ignored"),
+              or(
+                eq(communications.dealId, id),
+                and(eq(communications.customerId, d.customerId), isNull(communications.dealId)),
+              ),
+            )
+          : and(ne(communications.status, "ignored"), eq(communications.dealId, id)),
+      )
+      .orderBy(desc(communications.occurredAt)),
     db.select({ id: users.id, name: users.name, email: users.email }).from(users).where(eq(users.active, true)),
     db.select({ id: workOrders.id, woNumber: workOrders.woNumber, status: workOrders.status }).from(workOrders).where(eq(workOrders.dealId, id)).orderBy(desc(workOrders.updatedAt)).limit(1),
     loadStageMapping(),
@@ -70,6 +95,18 @@ export default async function DealEntityPage({
   const partner = partnerRow[0] ?? null;
   const contact = contactRow[0] ?? null;
   const latestQuote = dealQuotes[0] ?? null;
+
+  const messageParticipants = messageRows.length
+    ? await db
+        .select({
+          communicationId: communicationParticipants.communicationId,
+          role: communicationParticipants.role,
+          name: communicationParticipants.name,
+          email: communicationParticipants.email,
+        })
+        .from(communicationParticipants)
+        .where(inArray(communicationParticipants.communicationId, messageRows.map((m) => m.id)))
+    : [];
 
   const authorIds = Array.from(new Set(activity.map((a) => a.authorId).filter(Boolean) as string[]));
   const authorMap = new Map<string, string>();
@@ -335,22 +372,39 @@ export default async function DealEntityPage({
     const direction = String(formData.get("direction") ?? "").trim();
     const body = String(formData.get("body") ?? "").trim();
     if (!channel || !direction || !body) return;
-    await db.insert(customerMessages).values({
-      dealId: id,
+    // Same write path as automated ingest, so a hand-logged call and a synced
+    // email are the same kind of row downstream.
+    await recordCommunication({
       channel,
       direction,
+      source: "manual",
       subject: String(formData.get("subject") ?? "").trim() || null,
-      body,
+      bodyText: body,
       sentBy: session.user.id,
+      participants: [],
+      target: { dealId: id, customerId: d.customerId ?? null },
     });
     revalidatePath(`/deals/${id}`);
   }
 
   async function deleteMessage(formData: FormData) {
     "use server";
+    const s = await auth();
+    if (!s?.user) return;
     const msgId = String(formData.get("msgId") ?? "");
     if (!msgId) return;
-    await db.delete(customerMessages).where(eq(customerMessages.id, msgId));
+
+    // A manually logged note is the author's to remove. A synced email is a
+    // record of a real customer interaction, so destroying it is manager+.
+    const [row] = await db
+      .select({ source: communications.source })
+      .from(communications)
+      .where(eq(communications.id, msgId))
+      .limit(1);
+    if (!row) return;
+    if (row.source !== "manual" && !canDelete(s)) return;
+
+    await db.delete(communications).where(eq(communications.id, msgId));
     revalidatePath(`/deals/${id}`);
   }
 
@@ -804,7 +858,16 @@ export default async function DealEntityPage({
 
       {tab === "communication" && (
       <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
-        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Communication log</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Communication log</h3>
+          <a href="/communications" className="text-[11px] text-amber-400 hover:text-amber-300 font-body">
+            All communications →
+          </a>
+        </div>
+        <p className="text-[11px] text-zinc-500 font-body">
+          Synced email lands here automatically. Use the form to log anything that happens off-system —
+          a phone call, a walk-in, a meeting.
+        </p>
         <form action={logMessage} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
           <select name="channel" required defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
             <option value="" disabled>— Channel * —</option>
@@ -824,27 +887,20 @@ export default async function DealEntityPage({
           <textarea name="body" required rows={2} placeholder="Body / notes *" className="md:col-span-4 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
           <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Log message</SubmitButton>
         </form>
-        {messageRows.length === 0 ? (
-          <p className="text-xs text-zinc-500 font-body">No communication logged yet.</p>
-        ) : (
-          <ul className="space-y-2">
-            {messageRows.map((m) => (
-              <li key={m.id} className="bg-black/30 border border-white/5 rounded-md p-2.5 text-xs font-body">
-                <div className="flex items-center justify-between mb-1 text-[10px] uppercase tracking-wider text-zinc-500">
-                  <span>
-                    {m.channel} · {m.direction} · {(m.sentBy && (userRows.find((u) => u.id === m.sentBy)?.name ?? userRows.find((u) => u.id === m.sentBy)?.email)) ?? "—"} · {new Date(m.createdAt).toLocaleString()}
-                  </span>
-                  <form action={deleteMessage} className="inline">
-                    <input type="hidden" name="msgId" value={m.id} />
-                    <SubmitButton className="text-zinc-500 hover:text-red-400">Delete</SubmitButton>
-                  </form>
-                </div>
-                {m.subject && (<div className="text-white font-semibold">{m.subject}</div>)}
-                {m.body && (<div className="whitespace-pre-wrap text-zinc-200 mt-1">{m.body}</div>)}
-              </li>
-            ))}
-          </ul>
-        )}
+        <CommunicationTimeline
+          rows={messageRows}
+          participants={messageParticipants}
+          contextDealId={id}
+          emptyText="No communication recorded yet."
+          actions={(row) =>
+            row.source === "manual" || viewerCanDeleteSynced ? (
+              <form action={deleteMessage} className="inline">
+                <input type="hidden" name="msgId" value={row.id} />
+                <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</SubmitButton>
+              </form>
+            ) : null
+          }
+        />
       </div>
       )}
     </AppShell>

@@ -1380,3 +1380,172 @@ export const usersRelations = relations(users, ({ many }) => ({ deals: many(deal
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
 export const workOrdersRelations = relations(workOrders, ({ one, many }) => ({ customer: one(customers, { fields: [workOrders.customerId], references: [customers.id] }), vehicle: one(vehicles, { fields: [workOrders.vehicleId], references: [vehicles.id] }), qcChecklists: many(qcChecklists), timeEntries: many(timeEntries) }));
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Communications (email / call / SMS timeline)
+// ─────────────────────────────────────────────────────────────────────────────
+// One channel-agnostic row per interaction with a lead, customer, or deal.
+// Manual logs, Microsoft Graph mail sync, and (later) telephony all write here
+// through `src/lib/communications.ts`, so the timeline and the triage inbox
+// never need to know which adapter produced a row. Adding a channel means
+// adding an adapter, not a table.
+//
+// Supersedes `customer_messages` (deal-only, manual-only, no dedup key). The
+// phase-1 SQL backfills those rows in; the old table is left in place
+// read-only rather than dropped.
+
+// Every email address / phone number we know for a customer. Matching keys
+// off this table, so a fleet manager who isn't the billing contact still
+// resolves to the right account. `customers.email` alone couldn't do that.
+export const customerContacts = pgTable("customer_contacts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  customerId: uuid("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+  name: text("name"),
+  title: text("title"),
+  // Stored lowercased/trimmed on write so the plain index below is enough to
+  // match on — no functional index or ilike scan needed in the matcher.
+  email: text("email"),
+  phone: text("phone"),
+  isPrimary: boolean("is_primary").notNull().default(false),
+  active: boolean("active").notNull().default(true),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("customer_contacts_customer_idx").on(t.customerId),
+  index("customer_contacts_email_idx").on(t.email),
+  index("customer_contacts_phone_idx").on(t.phone),
+]);
+
+export const communications = pgTable("communications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // email | call | sms | meeting | in_person | note | other
+  channel: text("channel").notNull(),
+  // inbound | outbound | internal
+  direction: text("direction").notNull(),
+  // matched   — attached to a lead/customer/deal
+  // unassigned — ingested but the matcher couldn't decide; sits in triage
+  // ignored   — a human said this isn't sales activity; never auto-resurfaces
+  status: text("status").notNull().default("matched"),
+  // manual | graph | dropbox | telephony
+  source: text("source").notNull().default("manual"),
+  // How the row got its target — shown in triage so a rep can see whether a
+  // human or the matcher decided, and lets us audit bad auto-matches.
+  matchedBy: text("matched_by"),
+  // All three nullable: sales email starts before there's a deal, often
+  // before there's a customer. At least one is set unless status is
+  // 'unassigned'. ON DELETE SET NULL (not cascade) — a communication is a
+  // record of something that happened and outlives the deal it was filed on.
+  leadId: uuid("lead_id").references(() => leads.id, { onDelete: "set null" }),
+  customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+  subject: text("subject"),
+  bodyText: text("body_text"),
+  bodyHtml: text("body_html"),
+  // First ~280 chars of the plain-text body, denormalized for list views so
+  // the inbox doesn't ship full message bodies to render one line each.
+  snippet: text("snippet"),
+  // Provider's own id — internetMessageId for Graph mail, call SID for
+  // telephony. UNIQUE (Postgres allows repeated NULLs), which is what makes
+  // re-syncing a mailbox idempotent.
+  externalId: text("external_id"),
+  // Graph conversationId / telephony correlation id. The matcher's strongest
+  // signal: a reply inherits whatever deal its thread was already filed on.
+  threadKey: text("thread_key"),
+  // When the interaction happened per the provider, not when we ingested it.
+  occurredAt: timestamp("occurred_at").notNull().defaultNow(),
+  // Phone-shaped fields, unused by email. Here now so the call adapter is
+  // purely additive later.
+  durationSeconds: integer("duration_seconds"),
+  recordingUrl: text("recording_url"),
+  transcript: text("transcript"),
+  // Which synced mailbox / line produced the row.
+  mailboxAddress: text("mailbox_address"),
+  // Internal user who sent or logged it, when we can resolve one.
+  sentBy: uuid("sent_by").references(() => users.id),
+  assignedBy: uuid("assigned_by").references(() => users.id),
+  assignedAt: timestamp("assigned_at"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  uniqueIndex("communications_external_id_idx").on(t.externalId),
+  index("communications_deal_idx").on(t.dealId),
+  index("communications_customer_idx").on(t.customerId),
+  index("communications_lead_idx").on(t.leadId),
+  index("communications_thread_idx").on(t.threadKey),
+  index("communications_status_idx").on(t.status),
+  index("communications_occurred_idx").on(t.occurredAt),
+]);
+
+// from | to | cc | bcc for mail; caller | callee for phone.
+export const communicationParticipants = pgTable("communication_participants", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  communicationId: uuid("communication_id").notNull().references(() => communications.id, { onDelete: "cascade" }),
+  role: text("role").notNull(),
+  name: text("name"),
+  email: text("email"),
+  phone: text("phone"),
+  // True when the address is on our own domain — the test that keeps
+  // internal-only threads out of the CRM.
+  isInternal: boolean("is_internal").notNull().default(false),
+  customerContactId: uuid("customer_contact_id").references(() => customerContacts.id, { onDelete: "set null" }),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("communication_participants_comm_idx").on(t.communicationId),
+  index("communication_participants_email_idx").on(t.email),
+]);
+
+export const communicationAttachments = pgTable("communication_attachments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  communicationId: uuid("communication_id").notNull().references(() => communications.id, { onDelete: "cascade" }),
+  filename: text("filename").notNull(),
+  mimeType: text("mime_type"),
+  sizeBytes: bigint("size_bytes", { mode: "number" }),
+  // Vercel Blob URL once fetched; null while only the provider has the bytes.
+  blobUrl: text("blob_url"),
+  externalId: text("external_id"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("communication_attachments_comm_idx").on(t.communicationId)]);
+
+// Which mailboxes (and later phone lines) we sync. Rows are opt-in: a mailbox
+// that isn't here is never touched, even though the Graph app credential
+// could technically reach it.
+export const commAccounts = pgTable("comm_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // mailbox | phone_line
+  kind: text("kind").notNull().default("mailbox"),
+  // Email address or E.164 number, lowercased.
+  address: text("address").notNull().unique(),
+  label: text("label"),
+  // Whose mailbox this is, when it maps to one of our users.
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  // graph | telephony
+  provider: text("provider").notNull().default("graph"),
+  // Entra object id. Preferred over the address for Graph calls so a rename
+  // or alias change doesn't silently break the sync.
+  graphUserId: text("graph_user_id"),
+  active: boolean("active").notNull().default(true),
+  syncEnabled: boolean("sync_enabled").notNull().default(true),
+  lastSyncedAt: timestamp("last_synced_at"),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Graph delta cursor, one row per (account, folder). Holding the deltaLink is
+// what makes each cron run incremental instead of a full mailbox re-read.
+export const commSyncState = pgTable("comm_sync_state", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  accountId: uuid("account_id").notNull().references(() => commAccounts.id, { onDelete: "cascade" }),
+  // Well-known folder name: 'inbox' or 'sentitems'.
+  folder: text("folder").notNull(),
+  deltaLink: text("delta_link"),
+  lastRunAt: timestamp("last_run_at"),
+  lastError: text("last_error"),
+  // Rows ingested on the last run — cheap signal that a sync is alive.
+  lastIngested: integer("last_ingested"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("comm_sync_state_account_folder_idx").on(t.accountId, t.folder)]);
