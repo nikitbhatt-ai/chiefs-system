@@ -191,10 +191,14 @@ export function PartSearchCombobox({
       <AnchoredPopover
         anchorRef={anchorRef}
         open={open && (results.length > 0 || loading || creating || (allowCreate && text.trim() !== ""))}
+        // The "Add new part" form needs a real width; the results list matches
+        // the (often narrow) search box. Without this the create form is clipped.
+        width={creating ? 340 : "anchor"}
+        maxHeight={creating ? 360 : undefined}
         className="bg-surface border border-white/10 rounded-md shadow-lg"
       >
         {creating ? (
-          <div className="p-3 space-y-2 w-72" onMouseDown={(e) => e.preventDefault()}>
+          <div className="p-3 space-y-2 w-full" onMouseDown={(e) => e.preventDefault()}>
             <div className="text-[11px] font-body font-semibold text-white uppercase tracking-wider">Add new part</div>
             <input
               autoFocus
