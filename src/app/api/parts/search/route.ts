@@ -16,13 +16,25 @@ export async function GET(req: Request) {
 
   const url = new URL(req.url);
   const q = (url.searchParams.get("q") ?? "").trim();
-  const limit = Math.min(25, Math.max(1, Number(url.searchParams.get("limit")) || 15));
+  const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 25));
 
   const filters = [eq(parts.archived, false)];
   if (q) {
-    const like = `%${q}%`;
-    const orCond = or(ilike(parts.sku, like), ilike(parts.name, like), ilike(parts.mfgPartNumber, like));
-    if (orCond) filters.push(orCond);
+    // Match every whitespace-separated token (AND), each against any field
+    // (sku, name, description, manufacturer part #, category). So "push bumper"
+    // finds a part whose name/description contains both words, and a partial
+    // SKU or a description keyword both work — not just SKU/name/mfg#.
+    for (const tok of q.split(/\s+/).filter(Boolean)) {
+      const like = `%${tok}%`;
+      const orCond = or(
+        ilike(parts.sku, like),
+        ilike(parts.name, like),
+        ilike(parts.description, like),
+        ilike(parts.mfgPartNumber, like),
+        ilike(parts.category, like),
+      );
+      if (orCond) filters.push(orCond);
+    }
   }
 
   const rows = await db
