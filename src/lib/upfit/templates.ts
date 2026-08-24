@@ -63,19 +63,25 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     slug: "tahoe",
     label: "Chevrolet Tahoe (2021–25)",
     imageUrl: "/upfit-templates/tahoe/driver.jpg",
-    views: sideViews("tahoe"),
+    // Passenger-side and rear source photos were saved under swapped
+    // filenames; map each view to the file that actually shows that side.
+    views: sideViews("tahoe", { passenger: "rear.jpg", rear: "passenger.jpg" }),
   },
   tahoe_2026: {
     slug: "tahoe_2026",
     label: "Chevrolet Tahoe (2026+)",
     imageUrl: "/upfit-templates/tahoe_2026/driver.jpg",
-    views: sideViews("tahoe_2026"),
+    // Passenger-side and rear source photos were saved under swapped
+    // filenames; map each view to the file that actually shows that side.
+    views: sideViews("tahoe_2026", { passenger: "rear.jpg", rear: "passenger.jpg" }),
   },
   tahoe_1520: {
     slug: "tahoe_1520",
     label: "Chevrolet Tahoe (2015–20)",
     imageUrl: "/upfit-templates/tahoe_1520/driver.jpg",
-    views: sideViews("tahoe_1520"),
+    // Passenger-side and rear source photos were saved under swapped
+    // filenames; map each view to the file that actually shows that side.
+    views: sideViews("tahoe_1520", { passenger: "rear.jpg", rear: "passenger.jpg" }),
   },
   suburban: {
     slug: "suburban",
