@@ -6,8 +6,8 @@ import {
   COLOR_SCHEMES,
   PIN_SIZES,
   PIN_SIZE_ORDER,
-  PUSHBAR_RECTS,
-  PUSHBAR_VIEWBOX,
+  getPushbarStyle,
+  isPushbarShape,
   colorSchemesByGroup,
   getColorScheme,
   getPinSize,
@@ -365,7 +365,8 @@ export function UpfitBuilder({
             >
               <option value="rect">Rectangle</option>
               <option value="circle">Circle</option>
-              <option value="pushbar">Push bumper</option>
+              <option value="pushbar">Push bumper (grille guard)</option>
+              <option value="pushbar_wrap">Push bumper (full wrap)</option>
             </select>
           </label>
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
@@ -756,10 +757,10 @@ function PinPreview({
     strip: { long: 56, short: 10 },
   };
   const { long, short } = sidebarDims[sz.key] ?? sidebarDims.medium;
-  if (shape === "pushbar") {
+  if (isPushbarShape(shape)) {
     return (
       <span className="inline-block shrink-0" style={{ width: 26, height: 14 }}>
-        <PushbarGlyph />
+        <PushbarGlyph shape={shape} />
       </span>
     );
   }
@@ -817,7 +818,7 @@ function PlacedPin({
   const scheme = getColorScheme(pin.colorScheme);
   const sz = getPinSize(pin.size);
   const isCircle = pin.shape === "circle";
-  const isPushbar = pin.shape === "pushbar";
+  const isPushbar = isPushbarShape(pin.shape);
   // A drag-resize override is stored as LITERAL width/height fractions of
   // the diagram box (screen-x → width, screen-y → height). Used directly
   // so vertical pins resize the same way horizontal ones do. Without an
@@ -884,7 +885,7 @@ function PlacedPin({
         }}
       >
         {isPushbar ? (
-          <PushbarGlyph />
+          <PushbarGlyph shape={pin.shape} />
         ) : (
           <div
             className="flex w-full h-full"
@@ -948,14 +949,15 @@ function PlacedPin({
 // rounded rects on a shared viewBox with preserveAspectRatio="none" so
 // it stretches to whatever size the pin is resized to. Geometry is
 // shared with the PDF renderer via templates.ts.
-function PushbarGlyph() {
+function PushbarGlyph({ shape }: { shape?: string }) {
+  const style = getPushbarStyle(shape);
   return (
     <svg
-      viewBox={`0 0 ${PUSHBAR_VIEWBOX.w} ${PUSHBAR_VIEWBOX.h}`}
+      viewBox={`0 0 ${style.viewBox.w} ${style.viewBox.h}`}
       preserveAspectRatio="none"
       className="w-full h-full"
     >
-      {PUSHBAR_RECTS.map((r, i) => (
+      {style.rects.map((r, i) => (
         <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
       ))}
     </svg>
