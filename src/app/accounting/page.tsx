@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { fmtCents } from "@/lib/accounting";
 import { inventoryReconciliation } from "@/lib/inventoryValuation";
 import { listJobCosts } from "@/lib/jobCosting";
+import { listCategoryMappings } from "@/lib/cogsCategories";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +44,20 @@ export default async function AccountingHomePage() {
     db.select({ n: sql<number>`count(*)`.mapWith(Number) }).from(payments),
   ]);
 
-  const [recon, jobs] = await Promise.all([inventoryReconciliation(), listJobCosts()]);
+  const [recon, jobs, categoryMappings] = await Promise.all([
+    inventoryReconciliation(),
+    listJobCosts(),
+    listCategoryMappings(),
+  ]);
   const openWip = jobs.reduce((s, j) => s + j.wipBalanceCents, 0);
+  // An unmapped category isn't an error — its material settles to 5100
+  // Uncategorized — but it is the reason a component COGS account looks empty.
+  const unmappedCategories = categoryMappings.filter((c) => !c.accountId).length;
   const ties = bal.debit === bal.credit;
 
   const cards = [
     { href: "/accounting/accounts", title: "Chart of Accounts", desc: "View and add ledger accounts", stat: `${acct.n} accounts` },
+    { href: "/accounting/cogs-categories", title: "COGS by part category", desc: "Which COGS account each part category settles into", stat: unmappedCategories === 0 ? "All categories mapped" : `${unmappedCategories} unmapped` },
     { href: "/accounting/journal", title: "Journal", desc: "Create and review journal entries", stat: `${entryCounts.posted} posted · ${entryCounts.draft} draft` },
     { href: "/accounting/invoices", title: "Invoices (AR)", desc: "Bill quotes; posts to Accounts Receivable", stat: `${ar.openCount} open · ${fmtCents(ar.openTotal)} billed` },
     { href: "/accounting/receipts", title: "Receipts", desc: "Record cash received against AR", stat: `${receiptAgg.n} recorded` },
@@ -56,6 +65,10 @@ export default async function AccountingHomePage() {
     { href: "/accounting/payments", title: "Payments", desc: "Record cash paid against AP", stat: `${paymentAgg.n} recorded` },
     { href: "/accounting/inventory", title: "Inventory", desc: "FIFO subledger reconciled to the ledger", stat: recon.ties ? `${fmtCents(recon.subledgerCents)} · reconciled` : `off by ${fmtCents(Math.abs(recon.differenceCents))}` },
     { href: "/accounting/job-costing", title: "Job costing", desc: "Materials + labor per work order", stat: `${jobs.length} jobs · ${fmtCents(openWip)} in WIP` },
+    { href: "/accounting/reports", title: "Reports", desc: "P&L, balance sheet, AR/AP aging", stat: "Financial statements" },
+    { href: "/accounting/agents", title: "AR / AP agents", desc: "Claude drafts reminders & payment plans", stat: "Draft · you approve" },
+    { href: "/accounting/tax", title: "Tax", desc: "Sales-tax liability & filing summary", stat: "Configurable rates" },
+    { href: "/accounting/quickbooks", title: "QuickBooks", desc: "Connect Intuit, map accounts, reconcile payroll", stat: "Sandbox-first sync" },
   ];
 
   return (
@@ -83,7 +96,7 @@ export default async function AccountingHomePage() {
           <Link
             key={c.href}
             href={c.href}
-            className="block bg-[#161624] border border-white/5 rounded-lg p-5 hover:border-amber-500/40 transition-colors"
+            className="block bg-surface border border-white/5 rounded-lg p-5 hover:border-amber-500/40 transition-colors"
           >
             <div className="text-white font-display font-semibold">{c.title}</div>
             <div className="text-xs text-zinc-500 font-body mt-1">{c.desc}</div>
@@ -93,10 +106,9 @@ export default async function AccountingHomePage() {
       </div>
 
       <p className="text-[11px] text-zinc-500 font-body">
-        Phases 1–5 live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
-        accounting, and Job costing (materials from WIP + labor from the time clock; settle WIP → COGS
-        on close). P&amp;L reporting, the AR/AP agents, tax tracking, and QuickBooks sync come in later
-        phases.
+        All nine phases live: the core ledger, Accounts Receivable, Accounts Payable, Inventory cost
+        accounting, Job costing, Financial reports, the AR/AP agents, Tax tracking, and the QuickBooks
+        Online integration (connect Intuit, map accounts, reconcile payroll — sandbox first).
       </p>
     </AppShell>
   );

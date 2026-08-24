@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { db } from "@/db";
 import { users } from "@/db/schema";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -110,7 +111,7 @@ export default async function SetupPage({
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6 py-10">
-      <div className="w-full max-w-md bg-[#161624] border border-white/5 rounded-xl p-8 space-y-6">
+      <div className="w-full max-w-md bg-surface border border-white/5 rounded-xl p-8 space-y-6">
         <div>
           <div className="text-[10px] text-amber-400 font-body font-semibold uppercase tracking-wider">
             First-time setup
@@ -226,12 +227,11 @@ function FormBlock({
           />
         </div>
 
-        <button
-          type="submit"
+        <SubmitButton
           className="w-full bg-amber-500 text-black hover:bg-amber-400 font-body text-sm font-semibold h-10 rounded-lg transition-colors"
         >
           Create admin and continue
-        </button>
+        </SubmitButton>
       </form>
     </>
   );

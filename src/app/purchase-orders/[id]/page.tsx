@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
@@ -6,6 +7,8 @@ import { purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
 import { receivePurchaseOrder } from "@/lib/inventory";
+import { listPromos } from "@/lib/promos";
+import { poStatusLabel } from "@/lib/poStatus";
 
 async function saveDraft(formData: FormData) {
   "use server";
@@ -15,16 +18,34 @@ async function saveDraft(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const expectedAt = String(formData.get("expectedAt") ?? "").trim();
   const linesJson = String(formData.get("lines") ?? "[]");
-  const lines = JSON.parse(linesJson) as POLineItem[];
+  const lines = (JSON.parse(linesJson) as POLineItem[]).map((l) => ({
+    ...l,
+    // Every persisted line carries a stable id so receiving keys on identity,
+    // not array position, and can build an idempotent receipt key.
+    id: l.id ?? randomUUID(),
+  }));
   const total = lines.reduce(
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,
   );
+  // Manual status (Pending/Ordered) — but never override an auto received/
+  // fulfilled state from a plain save; those are driven by receiving.
+  const [cur] = await db
+    .select({ status: purchaseOrders.status })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, id));
+  const submitted = String(formData.get("status") ?? "");
+  const receivedStates = ["partially_received", "received", "fulfilled"];
+  const status =
+    (submitted === "pending" || submitted === "ordered") && !receivedStates.includes(cur?.status ?? "")
+      ? submitted
+      : cur?.status;
   await db
     .update(purchaseOrders)
     .set({
       vendorId,
       notes,
+      status: status as typeof purchaseOrders.$inferSelect.status,
       lineItems: lines as never,
       total: total.toFixed(2),
       expectedAt: expectedAt ? new Date(expectedAt) : null,
@@ -72,15 +93,18 @@ export default async function POPage({
   const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
   if (!po) notFound();
 
-  const vendorRows = await db
-    .select({ id: vendors.id, name: vendors.name })
-    .from(vendors)
-    .orderBy(vendors.name);
+  const [vendorRows, allPromos] = await Promise.all([
+    db.select({ id: vendors.id, name: vendors.name }).from(vendors).orderBy(vendors.name),
+    listPromos(),
+  ]);
+  const activePromos = allPromos
+    .filter((p) => p.status === "active")
+    .map((p) => ({ id: p.id, name: p.name, vendorId: p.vendorId }));
 
   const initial = (po.lineItems as POLineItem[]) ?? [];
 
   return (
-    <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${po.status.replace(/_/g, " ")}`}>
+    <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${poStatusLabel(po.status)}`}>
       <div className="flex justify-end">
         <a
           href={`/api/pdf/purchase-orders/${po.id}`}
@@ -98,6 +122,7 @@ export default async function POPage({
         expectedAt={po.expectedAt ? new Date(po.expectedAt).toISOString().slice(0, 10) : ""}
         initialLines={initial}
         vendors={vendorRows}
+        promos={activePromos}
         status={po.status}
         saveDraft={saveDraft}
         receivePO={receivePO}

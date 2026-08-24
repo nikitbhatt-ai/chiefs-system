@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { quotes, customers } from "@/db/schema";
 import { PrintTrigger } from "./PrintTrigger";
+import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
 type Line =
@@ -13,6 +14,8 @@ type Line =
       unitPrice: number;
       discount: number;
       discountKind: "pct" | "amt";
+      /** Allocated from a package/promo bundle price; line discount is on top. */
+      bundleDiscount?: number;
       partId?: string;
     } & LineGroup)
   | ({
@@ -56,14 +59,16 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
             </thead>
             <tbody>
               {items.map((l, i) => {
-                const gross = (l.quantity || 0) * (l.unitPrice || 0);
-                const disc =
-                  l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+                // Shared money module: a bundle/promo allocation lives in its own
+                // field, so recomputing the discount here printed a different
+                // number from the one on screen.
+                const gross = lineGross(l);
+                const disc = lineDiscount(l);
                 const discLabel =
-                  l.discount > 0
-                    ? l.discountKind === "pct"
+                  disc > 0
+                    ? l.discountKind === "pct" && !l.bundleDiscount
                       ? `${l.discount}% (−${fmt(disc)})`
-                      : `−${fmt(l.discount)}`
+                      : `−${fmt(disc)}`
                     : "—";
                 return (
                   <tr key={`item-${i}`}>
@@ -71,7 +76,18 @@ function PrintKindSections({ lines, showTitles }: { lines: Line[]; showTitles: b
                     <td className="right">{l.quantity}</td>
                     <td className="right">{fmt(l.unitPrice)}</td>
                     <td className="right">{discLabel}</td>
-                    <td className="right">{fmt(gross - disc)}</td>
+                    <td className="right">
+                      {disc > 0 ? (
+                        <>
+                          <div style={{ textDecoration: "line-through", color: "#888", fontSize: "9pt" }}>
+                            {fmt(gross)}
+                          </div>
+                          <div style={{ fontWeight: "bold" }}>{fmt(lineNet(l))}</div>
+                        </>
+                      ) : (
+                        fmt(lineNet(l))
+                      )}
+                    </td>
                   </tr>
                 );
               })}
@@ -152,20 +168,14 @@ export default async function PrintQuotePage({
   const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
   const fees = lines.filter((l): l is Extract<Line, { kind: "fee" }> => l.kind === "fee");
 
-  let subtotal = 0;
-  let discountTotal = 0;
-  for (const l of items) {
-    const gross = (l.quantity || 0) * (l.unitPrice || 0);
-    const disc =
-      l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
-    subtotal += gross;
-    discountTotal += disc;
-  }
-  const laborTotal = labor.reduce((s, l) => s + (l.hours || 0) * (l.rate || 0), 0);
-  const feeTotal = fees.reduce((s, l) => s + (l.amount || 0), 0);
+  // Round each line before summing (shared helper) so the rows foot to grand.
+  const t = quoteTotals(lines, 0);
+  const subtotal = t.subtotal;
+  const discountTotal = t.discountTotal;
+  const laborTotal = t.laborTotal;
+  const feeTotal = t.feeTotal;
   const tax = Number(q.taxTotal) || 0;
-  const grand =
-    Number(q.grandTotal) || subtotal - discountTotal + laborTotal + feeTotal + tax;
+  const grand = round2(subtotal - discountTotal + laborTotal + feeTotal + tax);
 
   return (
     <div className="print-doc">

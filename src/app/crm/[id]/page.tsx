@@ -14,6 +14,7 @@ import {
 } from "@/lib/customerDocuments";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
 import { headers } from "next/headers";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -303,17 +304,16 @@ export default async function CustomerEntityPage({
     <AppShell title={c.name} subtitle={`${c.type} customer`}>
       <div className="flex flex-wrap gap-2">
         <form action={generateQuote}>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
           >
             + Generate quote
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Email:</span>{c.email ?? "—"}</div>
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Phone:</span>{c.phone ?? "—"}</div>
           <div><span className="text-zinc-500 uppercase tracking-wider text-[10px] mr-2">Address:</span>{c.address ?? "—"}</div>
@@ -324,7 +324,7 @@ export default async function CustomerEntityPage({
             <a href="/crm" className="text-[11px] text-zinc-400 hover:text-white">Back to list</a>
           </div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-3 text-center">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-3 text-center">
           <Stat label="Total deals" value={totalDeals} />
           <Stat label="Active deals" value={activeDeals} />
           <div className="col-span-2">
@@ -378,7 +378,7 @@ export default async function CustomerEntityPage({
         </div>
       )}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Customer folder</h3>
           <span className="text-[10px] font-body text-zinc-500">
@@ -408,7 +408,7 @@ export default async function CustomerEntityPage({
           </label>
           <div className="flex gap-2">
             <input name="notes" placeholder="Notes (optional)" className="flex-1 bg-black/40 border border-white/10 rounded-md px-2 py-1.5 text-xs text-white placeholder:text-zinc-500" />
-            <button type="submit" className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1.5">Upload</button>
+            <SubmitButton className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1.5">Upload</SubmitButton>
           </div>
         </form>
 
@@ -468,7 +468,7 @@ export default async function CustomerEntityPage({
                           <span>{new Date(d.uploadedAt).toLocaleDateString()}</span>
                           <form action={deleteCustomerDoc} className="inline">
                             <input type="hidden" name="docId" value={d.id} />
-                            <button type="submit" className="hover:text-red-400">Delete</button>
+                            <SubmitButton className="hover:text-red-400">Delete</SubmitButton>
                           </form>
                         </div>
                       </li>
@@ -484,7 +484,7 @@ export default async function CustomerEntityPage({
       <Section title="Internal notes">
         <form action={addNote} className="flex gap-2 mb-3">
           <textarea name="body" rows={2} placeholder="Add an internal note (visible to staff only)…" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs font-body text-white placeholder:text-zinc-500" />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 self-start">Post</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 self-start">Post</SubmitButton>
         </form>
         {noteRows.length === 0 ? (<p className="text-xs text-zinc-500 font-body">No notes yet.</p>) : (
           <ul className="space-y-2">
@@ -494,7 +494,7 @@ export default async function CustomerEntityPage({
                   <span className="text-zinc-400">{(n.authorId && authorMap.get(n.authorId)) ?? "—"} · {new Date(n.createdAt).toLocaleString()}</span>
                   <form action={deleteNote} className="inline">
                     <input type="hidden" name="noteId" value={n.id} />
-                    <button type="submit" className="text-[10px] text-zinc-500 hover:text-red-400">Delete</button>
+                    <SubmitButton className="text-[10px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                   </form>
                 </div>
                 <div className="whitespace-pre-wrap text-white">{n.body}</div>
@@ -620,7 +620,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-2">
+    <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2">
       <div className="flex items-center justify-between gap-2">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">{title}</h3>
         {action}

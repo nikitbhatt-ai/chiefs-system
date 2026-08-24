@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { FormField } from "@/components/FormField";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export function PartAddForm({
   action,
@@ -31,7 +32,7 @@ export function PartAddForm({
   }
 
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+    <div className="bg-surface border border-white/5 rounded-lg p-4">
       <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
         Add part
       </h3>
@@ -132,7 +133,7 @@ export function PartAddForm({
             className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
           />
         </FormField>
-        <FormField label="Internal cost" hint="$">
+        <FormField label="Average cost" hint="$ · opening value; auto-updated on receipt">
           <input
             name="cost"
             type="number"
@@ -207,12 +208,11 @@ export function PartAddForm({
           />
         </FormField>
         <div className="md:col-span-3 flex justify-end">
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save part
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </div>

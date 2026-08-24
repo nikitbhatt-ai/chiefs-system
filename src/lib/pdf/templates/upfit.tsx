@@ -1,5 +1,6 @@
 import { Document, Page, Text, View, Image as PdfImage, Svg, Rect } from "@react-pdf/renderer";
 import React from "react";
+import { lineGross, lineDiscount, lineNet } from "@/lib/quoteTotals";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import { sharedStyles } from "../styles";
@@ -361,10 +362,8 @@ function QuoteSections({ data }: { data: UpfitPdfData }) {
   let feeTotal = 0;
   for (const l of lines) {
     if (l.kind === "item") {
-      const gross = (l.quantity || 0) * (l.unitPrice || 0);
-      const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
-      subtotal += gross;
-      discountTotal += disc;
+      subtotal += lineGross(l);
+      discountTotal += lineDiscount(l);
     } else if (l.kind === "labor") {
       laborTotal += (l.hours || 0) * (l.rate || 0);
     } else {
@@ -400,17 +399,17 @@ function QuoteSections({ data }: { data: UpfitPdfData }) {
             {items.map((l, idx) => {
               if (l.kind !== "item") return null;
               const last = idx === items.length - 1;
-              const gross = (l.quantity || 0) * (l.unitPrice || 0);
-              const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
+              const gross = lineGross(l);
+              const disc = lineDiscount(l);
               return (
                 <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
                   <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.unitPrice || 0)}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>
-                    {l.discountKind === "pct" ? `${l.discount || 0}%` : money(l.discount || 0)}
+                    {disc > 0 ? money(disc) : "—"}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(gross - disc)}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{money(lineNet(l))}</Text>
                 </View>
               );
             })}

@@ -3,6 +3,7 @@ import {
   text,
   uuid,
   timestamp,
+  date,
   boolean,
   integer,
   bigint,
@@ -14,14 +15,18 @@ import {
   uniqueIndex,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 export const userRole = pgEnum("user_role", ["admin","manager","sales","warehouse","tech","accountant"]);
 export const customerType = pgEnum("customer_type", ["government","commercial","retail","walk_in_credentialed"]);
 export const dealStage = pgEnum("deal_stage", ["prospect","quote_sent","po_received","in_production","delivered","lost","credential_verification","deposit_received"]);
 export const leadStatus = pgEnum("lead_status", ["new","contacted","converted","lost"]);
 export const quoteStatus = pgEnum("quote_status", ["draft","sent","approved","converted"]);
-export const purchaseOrderStatus = pgEnum("purchase_order_status", ["pending","pending_review","po_received","partially_received","received"]);
+// Workflow the user wants: pending (needs ordering) → ordered (placed) →
+// partially_received (some parts in, shown as "Received") → fulfilled (all parts
+// & quantities received). "ordered" and "fulfilled" are added additively; the
+// legacy values (pending_review, po_received, received) stay valid for old rows.
+export const purchaseOrderStatus = pgEnum("purchase_order_status", ["pending","pending_review","po_received","partially_received","received","ordered","fulfilled"]);
 export const vehicleStatus = pgEnum("vehicle_status", ["new","received","ready_for_pickup","delivered","sold"]);
 export const commType = pgEnum("comm_type", ["call","email","in_person","note"]);
 
@@ -241,7 +246,17 @@ export const quotes = pgTable("quotes", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export type QuoteLineItem = { description: string; quantity: number; unitPrice: number; total: number; partId?: string; };
+export type QuoteLineItem = {
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  total: number;
+  partId?: string;
+  // Weighted-average cost snapshotted at invoice conversion (Phase 2), so the
+  // internal margin view reflects cost at the time of sale rather than today's
+  // moving average. Absent on quotes not yet invoiced.
+  avgCostSnap?: number;
+};
 
 export const parts = pgTable("parts", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -255,6 +270,12 @@ export const parts = pgTable("parts", {
   quantityOnOrder: integer("quantity_on_order").notNull().default(0),
   reorderPoint: integer("reorder_point"),
   cost: numeric("cost", { precision: 12, scale: 2 }),
+  // Weighted-average cost — the authoritative costing basis for work orders
+  // (Phase 2). numeric(12,4): the average is a derived rate, not a posted
+  // amount, and 2dp would decay under repeated receipts. Maintained by the
+  // receive transaction as a moving average; `cost` above follows it at 2dp
+  // (= ROUND(avg_cost, 2)). Null until the part's first receipt / opening layer.
+  avgCost: numeric("avg_cost", { precision: 12, scale: 4 }),
   price: numeric("price", { precision: 12, scale: 2 }),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   manufacturerId: uuid("manufacturer_id").references(() => vendors.id),
@@ -266,17 +287,157 @@ export const parts = pgTable("parts", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("parts_sku_idx").on(t.sku)]);
 
+// Provenance of a cost layer / issue. `individual` = full-price single-SKU buy,
+// `package` = part of a vendor promo (Phase 3/4, carries promo_id), `backfill`
+// = a reorder-point or reserved-override replacement PO (Phase 6), `opening` =
+// an opening-balance layer seeded for stock that predates the layer table
+// (Phase 2). Phase 7's savings report keys off this to tell package cost from
+// full-price cost even under weighted-average, which smears the two together.
+export const inventorySourceKind = pgEnum("inventory_source_kind", ["package", "individual", "backfill", "opening"]);
+
+// Active costing method — an auditable accounting policy, not a per-call flag.
+// weighted_average is primary (the work-order costing basis); fifo stays
+// available as a second valuation. Switching applies forward only.
+export const costingMethod = pgEnum("costing_method", ["weighted_average", "fifo"]);
+
+// A cost layer. Each receipt (package, individual, backfill, or an opening
+// balance) creates one with its own unit_cost and provenance; on-hand is the
+// sum of remaining_qty across a part's layers. This IS the brief's
+// `inventory_cost_layer` — extended in place rather than duplicated.
 export const partReceipts = pgTable("part_receipts", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
   purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
   vendorId: uuid("vendor_id").references(() => vendors.id),
+  // Provenance. Defaults to `individual` so pre-Phase-2 rows read correctly.
+  sourceKind: inventorySourceKind("source_kind").notNull().default("individual"),
+  // Set only for `package` layers, for Phase 7 reporting. FK to vendor_promo.
+  promoId: uuid("promo_id").references((): AnyPgColumn => vendorPromo.id, { onDelete: "set null" }),
   quantityReceived: integer("quantity_received").notNull(),
   quantityRemaining: integer("quantity_remaining").notNull(),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
+  // Idempotency key for a receipt event (Phase 4). Unique when set; null for
+  // opening-balance and legacy layers.
+  receiptKey: text("receipt_key"),
   receivedAt: timestamp("received_at").notNull().defaultNow(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
-}, (t) => [index("part_receipts_part_idx").on(t.partId), index("part_receipts_received_at_idx").on(t.receivedAt)]);
+}, (t) => [
+  index("part_receipts_part_idx").on(t.partId),
+  index("part_receipts_received_at_idx").on(t.receivedAt),
+  index("part_receipts_promo_idx").on(t.promoId),
+  uniqueIndex("part_receipts_receipt_key_uq").on(t.receiptKey).where(sql`${t.receiptKey} IS NOT NULL`),
+]);
+
+// One row per layer-slice consumed. `qty` units of `part_id` drawn from a
+// single `layer_id` at that layer's `unit_cost` (provenance). A single logical
+// issue of N units can span several layers → several rows. The cost CHARGED to
+// the job (the ledger) is method-dependent (avg vs FIFO) and lives in the
+// journal; these rows are the quantity+provenance subledger Phase 7 reads.
+export const inventoryIssue = pgTable("inventory_issue", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  layerId: uuid("layer_id").references(() => partReceipts.id, { onDelete: "set null" }),
+  qty: integer("qty").notNull(),
+  unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
+  issuedAt: timestamp("issued_at").notNull().defaultNow(),
+}, (t) => [
+  index("inventory_issue_part_idx").on(t.partId),
+  index("inventory_issue_work_order_idx").on(t.workOrderId),
+  index("inventory_issue_layer_idx").on(t.layerId),
+]);
+
+// Single-row costing policy. The active method applies to every job costed
+// after it is set; it never rewrites posted entries. Read via
+// src/lib/costing.ts :: getCostingMethod (defaults to weighted_average if the
+// row is absent).
+export const costingPolicy = pgTable("costing_policy", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  method: costingMethod("method").notNull().default("weighted_average"),
+  changedBy: uuid("changed_by").references(() => users.id),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+});
+
+// Reservations — Phase 5. A sold, committed build claims the parts it needs
+// against on-hand without moving anything physically. Available-to-pull =
+// on-hand − Σ active reservations; every picking/pull screen reads available,
+// never raw on-hand, so a walk-in job can't raid a sold build's parts.
+//
+// Lifecycle: created `active` when a work order enters `confirmed`; flipped to
+// `fulfilled` when its parts are issued (consumed) so on-hand and the claim
+// don't double-count; `released` when the build is walked back out of the
+// committed stages. Only `active` rows count toward reserved.
+export const reservationStatus = pgEnum("reservation_status", ["active", "fulfilled", "released"]);
+
+export const inventoryReservation = pgTable("inventory_reservation", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workOrderId: uuid("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
+  partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+  // Denormalized for reporting / available-by-sku; parts.sku is unique so this
+  // is 1:1 with part_id.
+  sku: text("sku"),
+  qtyReserved: integer("qty_reserved").notNull(),
+  status: reservationStatus("status").notNull().default("active"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("inventory_reservation_part_idx").on(t.partId),
+  index("inventory_reservation_work_order_idx").on(t.workOrderId),
+  index("inventory_reservation_status_idx").on(t.status),
+]);
+
+// Reorder points + backfill — Phase 6. Replenish before you're squeezed, and
+// make any borrow from reserved stock a logged, self-tracking act.
+export const backfillTrigger = pgEnum("backfill_trigger", ["reorder_point", "reserved_override"]);
+export const backfillStatus = pgEnum("backfill_status", ["open", "ordered", "received"]);
+
+// Per-part reorder thresholds. Distinct from the legacy parts.reorder_point
+// scalar: this pair drives the auto-backfill (raise a requisition for
+// reorder_to_qty − available when available hits min_qty).
+export const reorderPoint = pgTable("reorder_point", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  partId: uuid("part_id").notNull().unique().references(() => parts.id, { onDelete: "cascade" }),
+  sku: text("sku"),
+  minQty: integer("min_qty").notNull().default(0),
+  reorderToQty: integer("reorder_to_qty").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("reorder_point_part_idx").on(t.partId)]);
+
+// Audit of every deliberate pull from reserved stock. Pulling reserved stock is
+// impossible without one of these (who + why), and each raises its own backfill.
+export const stockOverrideLog = pgTable("stock_override_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  partId: uuid("part_id").references(() => parts.id, { onDelete: "set null" }),
+  sku: text("sku"),
+  qty: integer("qty").notNull(),
+  reason: text("reason").notNull(),
+  userId: uuid("user_id").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("stock_override_log_part_idx").on(t.partId)]);
+
+// A request to replenish a SKU. Ordinary path: a reorder point fired. Override
+// path: someone pulled reserved stock and must replace it by the reserved
+// build's need_by date. Becomes an individual PO with source_kind = backfill on
+// receipt (Phase 4).
+export const backfillRequisition = pgTable("backfill_requisition", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  partId: uuid("part_id").references(() => parts.id, { onDelete: "set null" }),
+  sku: text("sku"),
+  qty: integer("qty").notNull(),
+  triggeredBy: backfillTrigger("triggered_by").notNull(),
+  sourceOverrideId: uuid("source_override_id").references(() => stockOverrideLog.id, { onDelete: "set null" }),
+  needBy: date("need_by"),
+  status: backfillStatus("status").notNull().default("open"),
+  // The PO raised to fulfil this requisition, once created.
+  purchaseOrderId: uuid("purchase_order_id").references(() => purchaseOrders.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("backfill_requisition_part_idx").on(t.partId),
+  index("backfill_requisition_status_idx").on(t.status),
+]);
 
 export const partCostHistory = pgTable("part_cost_history", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -285,6 +446,88 @@ export const partCostHistory = pgTable("part_cost_history", {
   recordedAt: timestamp("recorded_at").notNull().defaultNow(),
   source: text("source"),
 });
+
+// Promo packages — Phase 1: vendor à la carte price list.
+//
+// One trustworthy source for what each part costs when bought individually
+// from a given vendor. This à la carte cost is the allocation basis for
+// package purchases (Phase 3) AND the pre-fill for individual PO lines
+// (Phase 4) — deliberately NOT parts.cost, which under average costing drifts
+// below à la carte once discounted package stock is received.
+//
+// Prices are date-ranged, never overwritten: changing a price closes the
+// current row (stamps effective_to) and inserts a new one, so a historical PO
+// stays explainable against the price that was live when it was placed. The
+// "current" price for a SKU+vendor is the row whose [effective_from,
+// effective_to) window covers today (effective_to null = still current).
+//
+// Keyed by (vendor_id, sku) rather than a parts FK: a price file can be loaded
+// before the part exists in inventory, and the same manufacturer SKU can carry
+// different net pricing from different distributors.
+export const vendorPartPrice = pgTable("vendor_part_price", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id, { onDelete: "cascade" }),
+  sku: text("sku").notNull(),
+  alacarteUnitCost: numeric("alacarte_unit_cost", { precision: 12, scale: 2 }).notNull(),
+  effectiveFrom: date("effective_from").notNull().default(sql`CURRENT_DATE`),
+  effectiveTo: date("effective_to"),
+  sourceNote: text("source_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("vendor_part_price_vendor_sku_idx").on(t.vendorId, t.sku),
+  index("vendor_part_price_sku_idx").on(t.sku),
+  // At most one current (effective_to IS NULL) price per vendor+sku. Enforced
+  // as a partial unique index so history rows (effective_to set) don't collide.
+  uniqueIndex("vendor_part_price_current_uq")
+    .on(t.vendorId, t.sku)
+    .where(sql`${t.effectiveTo} IS NULL`),
+]);
+
+// Promo packages — Phase 3: vendor promos and the allocation engine's data.
+//
+// A vendor_promo is one price for a fixed basket of parts (e.g. Whelen's
+// "Inner Edge Regional Promo"). The single package price is spread across the
+// lines in proportion to each line's à la carte cost (src/lib/promoAllocation.ts)
+// so every part carries a fair share of the discount. Allocation is the ONLY
+// place that logic lives, and it runs for a package purchase only — never for an
+// individual PO line.
+//
+// Snapshot rule: each line snapshots its à la carte cost (alacarte_cost_snap)
+// from vendor_part_price at save time, so a later price-list edit never
+// retroactively changes an already-defined promo. The allocated cost itself is
+// computed by the engine and snapshotted onto the PO line at PO creation
+// (Phase 4), not stored here.
+export const vendorPromoStatus = pgEnum("vendor_promo_status", ["active", "retired"]);
+
+export const vendorPromo = pgTable("vendor_promo", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  packagePrice: numeric("package_price", { precision: 12, scale: 2 }).notNull(),
+  // Optional freight on the package. Folded into package_price before
+  // allocation so it spreads across the parts the same way.
+  freight: numeric("freight", { precision: 12, scale: 2 }),
+  effectiveFrom: date("effective_from").notNull().default(sql`CURRENT_DATE`),
+  effectiveTo: date("effective_to"),
+  status: vendorPromoStatus("status").notNull().default("active"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("vendor_promo_vendor_idx").on(t.vendorId),
+  index("vendor_promo_status_idx").on(t.status),
+]);
+
+export const vendorPromoLine = pgTable("vendor_promo_line", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  promoId: uuid("promo_id").notNull().references(() => vendorPromo.id, { onDelete: "cascade" }),
+  sku: text("sku").notNull(),
+  quantity: integer("quantity").notNull().default(1),
+  // Allocation basis, snapshotted from vendor_part_price at save time.
+  alacarteCostSnap: numeric("alacarte_cost_snap", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("vendor_promo_line_promo_idx").on(t.promoId)]);
 
 // Inventory packages (a.k.a. kits / canned services). A reusable bundle of
 // parts + labor + fees the sales team can drop onto a quote in one click.
@@ -300,7 +543,22 @@ export type PackageComponent =
       kind: "item";
       description: string;
       quantity: number;
-      unitPrice: number;
+      unitPrice: number; // sell (retail) price per unit
+      // Internal cost per unit (e.g. the promo cost, which differs from the
+      // part's normal average cost). Drives margin and the markup→sell math.
+      // Optional: hand-built packages may leave it unset.
+      cost?: number | null;
+      // Per-line discount authored ON the package, independent of the package's
+      // bundle price: the bundle price sets the deal, this comes off on top of
+      // it. Neither overrides the other, so a promo can be quoted at its
+      // negotiated price AND a line still discounted further when a build needs
+      // it. Percentages are taken off the bundle-allocated price, not list.
+      discount?: number | null;
+      discountKind?: "pct" | "amt" | null;
+      // Provenance when this line was pulled in from another package or a
+      // vendor promo. Display only — the line is a full copy and editing it
+      // never touches the source.
+      fromLabel?: string | null;
       partId?: string | null;
       sku?: string | null;
     }
@@ -315,6 +573,25 @@ export const packages = pgTable("packages", {
   category: text("category"),
   description: text("description"),
   components: jsonb("components").$type<PackageComponent[]>().notNull().default([]),
+  // Optional sell-side bundle/deal price for the PARTS in this package (e.g. a
+  // manufacturer promo the customer is quoted at). Null = no deal price; the
+  // package quotes at à la carte line prices. When set, dropping the package on
+  // a quote allocates this total across the part lines as per-line discounts so
+  // the line totals sum to it. Sell-side only — distinct from vendor_promo,
+  // which is the purchase-side allocation (PROMO_PACKAGES.md §0: keep separate).
+  packagePrice: numeric("package_price", { precision: 12, scale: 2 }),
+  // Default markup applied to each line's internal cost to derive its sell price
+  // (the "vendor margin we set", e.g. 40 → sell = cost × 1.40). Stored so the
+  // builder can re-apply it; sells stay individually adjustable after. Null =
+  // no default markup configured.
+  markupPct: numeric("markup_pct", { precision: 5, scale: 2 }),
+  // How markupPct is interpreted: "markup" (% on cost, sell = cost × (1+p)) or
+  // "margin" (% off list / of sell, sell = cost ÷ (1−p)). Null = markup.
+  pricingMode: text("pricing_mode"),
+  // Provenance: set when this sales package was generated from a vendor promo
+  // (buy side). Lets "Add to Packages" upsert in place on re-sync without
+  // clobbering a manually-set bundle price. Null for hand-built packages.
+  sourcePromoId: uuid("source_promo_id").references(() => vendorPromo.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("packages_name_idx").on(t.name)]);
@@ -335,7 +612,30 @@ export const purchaseOrders = pgTable("purchase_orders", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
-export type POLineItem = { partId?: string; description: string; quantity: number; quantityReceived: number; unitCost: number; };
+// Purchase-order line. Stored in purchase_orders.line_items (jsonb). Phase 4
+// adds: a stable `id` (so receiving keys on identity, not array position, and
+// can build an idempotent receipt key), `sku`, and the package-buy fields.
+// `unitCost` is the ALLOCATED cost for a package line and the actual price paid
+// for an individual line — always a 2-decimal value (money math goes through
+// dollarsToCents, which rounds, so the JSON float never drifts).
+export type POLineItem = {
+  id?: string;
+  partId?: string;
+  sku?: string;
+  description: string;
+  quantity: number;
+  quantityReceived: number;
+  unitCost: number;
+  // Set = this line is part of a package buy; carries the promo whose engine
+  // produced unitCost. Null / absent = an individual (full-price) line.
+  sourcePromoId?: string | null;
+  // À la carte basis captured at PO time, for audit. Package lines only.
+  alacarteCostSnap?: number | null;
+  // Explicit provenance override for the cost layer written on receipt.
+  // Defaults to 'package' when sourcePromoId is set, else 'individual';
+  // Phase 6 sets 'backfill' on lines generated from a backfill requisition.
+  sourceKind?: "package" | "individual" | "backfill";
+};
 
 export const workOrders = pgTable("work_orders", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -707,9 +1007,26 @@ export const upfitConfigs = pgTable("upfit_configs", {
 // docs/sql/accounting_phase1.sql), not just app code.
 // ───────────────────────────────────────────────────────────────────────────
 
-export const glAccountType = pgEnum("gl_account_type", ["asset", "liability", "equity", "revenue", "expense"]);
+// `cogs` is a first-class type, not an expense subgroup, so Cost of Goods Sold
+// gets its own P&L section above Gross Profit. Anything switching on this type
+// must handle `cogs` — notably the balance sheet in src/lib/reports.ts, where
+// missing it would drop COGS out of net income and unbalance the sheet.
+export const glAccountType = pgEnum("gl_account_type", ["asset", "liability", "equity", "revenue", "expense", "cogs"]);
 // Drives how the P&L (Phase 6) groups each account. Balance-sheet accounts use "none".
-export const glReportGroup = pgEnum("gl_report_group", ["revenue", "labor", "other_expense", "none"]);
+// Drives how the P&L groups each account. Balance-sheet accounts use "none".
+// `labor` and `other_expense` are the pre-Phase-11 values, kept because
+// Postgres cannot drop enum values; nothing is assigned to them any more.
+export const glReportGroup = pgEnum("gl_report_group", [
+  "revenue",
+  "cogs_parts",
+  "cogs_labor",
+  "cogs_other",
+  "admin_labor",
+  "operating_expense",
+  "none",
+  "labor",
+  "other_expense",
+]);
 export const glNormalBalance = pgEnum("gl_normal_balance", ["debit", "credit"]);
 export const journalSource = pgEnum("journal_source", ["manual", "ar", "ap", "system"]);
 export const journalStatus = pgEnum("journal_status", ["draft", "posted", "void"]);
@@ -738,6 +1055,23 @@ export const glAccounts = pgTable("gl_accounts", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("gl_accounts_type_idx").on(t.type)]);
+
+// Part category → COGS account. This is what makes the split COGS accounts
+// (5110 Wire & Cable, 5120 Emergency Lights, …) actually fill in: when a job's
+// WIP settles to COGS, the material is apportioned across accounts by the
+// category of the parts that were issued instead of landing in one lump.
+//
+// Matched case-insensitively on `parts.category` (free text), so "Emergency
+// Lights" and "emergency lights" are one mapping. A category with no row here
+// falls to 5100 Vehicle Parts — Uncategorized; /accounting/cogs-categories
+// lists those so they don't stay uncategorized by accident.
+export const partCategoryAccounts = pgTable("part_category_accounts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  category: text("category").notNull(),
+  accountId: uuid("account_id").notNull().references(() => glAccounts.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [uniqueIndex("part_category_accounts_category_uidx").on(sql`lower(${t.category})`)]);
 
 export const journalEntries = pgTable("journal_entries", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -927,7 +1261,123 @@ export const laborRates = pgTable("labor_rates", {
   rateCents: bigint("rate_cents", { mode: "number" }).notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (t) => [uniqueIndex("labor_rates_user_uidx").on(t.userId)]);
+}, (t) => [
+  uniqueIndex("labor_rates_user_uidx").on(t.userId),
+  // Postgres treats NULLs as distinct, so the index above never constrained the
+  // shop-default row and several could exist — which made "the" default rate
+  // non-deterministic. This partial index is the actual one-default rule. See
+  // "Labor cost per build" in docs/REQUIREMENTS.md for the SQL to add it to an
+  // existing database.
+  uniqueIndex("labor_rates_single_default_uidx")
+    .on(sql`(${t.userId} IS NULL)`)
+    .where(sql`${t.userId} IS NULL`),
+]);
+
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 7: AR/AP agents (draft-only)
+//
+// Server-side Claude calls DRAFT content — an AR overdue-reminder email, or an
+// AP payment-schedule / anomaly analysis — and never act externally. Every
+// draft lands here as `pending` and a human Approves, Edits, or Rejects it,
+// with the decision + reviewer logged. Nothing is ever sent or paid by the
+// agent; approval is an internal sign-off, not an external action.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const agentKind = pgEnum("agent_kind", ["ar_reminder", "ap_schedule"]);
+export const agentDraftStatus = pgEnum("agent_draft_status", ["pending", "approved", "rejected"]);
+
+export const agentDrafts = pgTable("agent_drafts", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  kind: agentKind("kind").notNull(),
+  status: agentDraftStatus("status").notNull().default("pending"),
+  title: text("title").notNull(),
+  // The model's draft, and (once a human edits it) the edited version they signed off on.
+  content: text("content").notNull(),
+  editedContent: text("edited_content"),
+  // What the draft was generated from (invoice id, bill snapshot, etc.) for audit.
+  context: jsonb("context"),
+  // Optional link to the AR invoice a reminder is about.
+  invoiceId: uuid("invoice_id").references(() => arInvoices.id),
+  model: text("model"),
+  createdBy: uuid("created_by").references(() => users.id),
+  reviewedBy: uuid("reviewed_by").references(() => users.id),
+  reviewedAt: timestamp("reviewed_at"),
+  reviewNote: text("review_note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("agent_drafts_kind_idx").on(t.kind),
+  index("agent_drafts_status_idx").on(t.status),
+]);
+
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 8: Tax / government tracking
+//
+// Tax liability lives in the ledger (Sales Tax Payable, account 2100): quotes
+// that carry tax credit it when invoiced (Phase 2), and remitting tax to the
+// government debits it. This phase adds a **configurable** rate table (no
+// hardcoded rates — the team enters jurisdictions + rates) and period filing
+// summaries computed from the 2100 ledger activity. Not tax advice — the UI
+// carries a "confirm with a qualified accountant" disclaimer.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const taxRates = pgTable("tax_rates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  jurisdiction: text("jurisdiction").notNull(),
+  // Percent, e.g. 8.25 — stored as entered; never hardcoded in code.
+  ratePct: numeric("rate_pct", { precision: 6, scale: 3 }).notNull().default("0"),
+  isActive: boolean("is_active").notNull().default(true),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("tax_rates_active_idx").on(t.isActive)]);
+
+// ───────────────────────────────────────────────────────────────────────────
+// ACCOUNTING MODULE — Phase 9: QuickBooks Online integration (LAST)
+//
+// Connect to Intuit via OAuth 2.0, map our chart of accounts to QBO accounts,
+// pull payroll labor totals for P&L reconciliation, and one-direction sync into
+// a QBO SANDBOX first — production requires an explicit, separate confirmation.
+// Every attempt writes a `qbo_sync_log` row. Intuit credentials come from env
+// (QBO_CLIENT_ID / QBO_CLIENT_SECRET / QBO_REDIRECT_URI); until they're set the
+// screens are inert and say so.
+// ───────────────────────────────────────────────────────────────────────────
+
+export const qboEnvironment = pgEnum("qbo_environment", ["sandbox", "production"]);
+
+// Single-row connection/config record (id is a fixed sentinel in app code).
+export const qboSettings = pgTable("qbo_settings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  environment: qboEnvironment("environment").notNull().default("sandbox"),
+  realmId: text("realm_id"),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  connectedAt: timestamp("connected_at"),
+  // Random string tying an in-flight OAuth authorize request to its callback.
+  authState: text("auth_state"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Maps one of our gl_accounts to a QBO account (by QBO id + name).
+export const qboAccountMap = pgTable("qbo_account_map", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  glAccountId: uuid("gl_account_id").notNull().unique().references(() => glAccounts.id, { onDelete: "cascade" }),
+  qboAccountId: text("qbo_account_id"),
+  qboAccountName: text("qbo_account_name"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("qbo_account_map_gl_idx").on(t.glAccountId)]);
+
+export const qboSyncLog = pgTable("qbo_sync_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  action: text("action").notNull(), // e.g. "connect", "payroll_import", "coa_map"
+  direction: text("direction"), // "auth" | "from_qbo" | "to_qbo" | null
+  status: text("status").notNull(), // "ok" | "error" | "info"
+  message: text("message"),
+  createdBy: uuid("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("qbo_sync_log_created_idx").on(t.createdAt)]);
 
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));

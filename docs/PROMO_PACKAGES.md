@@ -1,0 +1,684 @@
+# Promo packages, cost layers, reservations & backfill
+
+Build brief accepted 2026-08-03. Seven phases, one at a time, approval
+between each. This file is the running map + decision log for that work;
+the requirement summary lives in `docs/REQUIREMENTS.md`.
+
+---
+
+## Phase 0 — Inventory audit (complete, no code changes)
+
+### 0.1 Tables that already touch parts / inventory / vendors / POs / work orders
+
+| Table | Purpose today | Relevance |
+| --- | --- | --- |
+| `parts` | The part master. `sku` is `unique not null` — the natural key the brief calls "SKU". Carries `quantity_on_hand`, `quantity_on_order`, `reorder_point`, `cost` (internal cost), `price` (sell), `vendor_id` (supplier), `manufacturer_id`, `lead_time_days`, `restricted`, `archived`. | **This is the one SKU / one bin table.** No promo/individual split exists — good, nothing to undo. |
+| `part_receipts` | **Already a FIFO cost-layer table.** `(part_id, purchase_order_id, vendor_id, quantity_received, quantity_remaining, unit_cost numeric(12,2), received_at)`. Indexed on `part_id` and `received_at`. | This *is* the brief's `inventory_cost_layer`. Phase 2 should extend it, not create a parallel table. |
+| `part_cost_history` | Append-only `(part_id, cost, recorded_at, source)`, written on every receipt with `source = po_number`. | Audit trail of cost movement; not a layer. |
+| `purchase_orders` | Vendor-side PO. `(po_number unique, vendor_id, status, total numeric(12,2), expected_at, received_at, line_items jsonb, notes)`. | **There is no `purchase_order_line` table.** Lines are a jsonb array. See 0.4. |
+| `packages` | Sales-side kits ("canned services"). `components jsonb` of item / labor / fee, itemized roll-up pricing onto a quote. | **Not** a vendor promo. This is what we *sell*, `vendor_promo` is what we *buy*. Keep them separate. |
+| `vendors` | `(name, contact_name, email, phone, address, notes, discount_pct numeric(5,2))`. Doubles as manufacturer list. | `vendor_id` target for the price list and promos. Note `discount_pct` is a blunt vendor-wide field, unused by costing. |
+| `work_orders` | `(wo_number, customer_id, vehicle_id, quote_id, deal_id, status, parts_consumed bool, target_build_start_date, safety_buffer_days, cogs_journal_entry_id, …)`. | Reservation owner (Phase 5) and issue target (Phase 2). `parts_consumed` is the current all-or-nothing consumption latch. |
+| `quotes` | `line_items jsonb` of `{description, quantity, unitPrice, total, partId?}`. | The de-facto bill of materials for a work order — consumption and procurement both roll up from here, not from a WO parts table. |
+| `bills` / `bill_lines` / `payments` | AP module, integer cents. `bills.purchase_order_id` already links a bill to a PO. | Where a real vendor liability lands. Receiving currently bypasses it (0.6). |
+| `journal_entries` / `journal_lines` | GL, `status ∈ draft/posted/void`, integer cents. | Posted entries are immutable — brief's "don't touch posted entries" rule already holds here. |
+
+Not present, must be built: `vendor_part_price`, `vendor_promo`,
+`vendor_promo_line`, `inventory_issue`, `inventory_reservation`,
+`reorder_point` (as a table), `stock_override_log`,
+`backfill_requisition`.
+
+### 0.2 Money columns and their SQL types
+
+Two conventions coexist, both exact — **no `real`, `float`, or `double precision`
+anywhere in the schema.**
+
+**Operational side — `numeric(12,2)`:**
+`vehicles.purchase_price`, `vehicles.list_price`, `quotes.subtotal`,
+`quotes.tax_total`, `quotes.grand_total`, `parts.cost`, `parts.price`,
+`part_receipts.unit_cost`, `part_cost_history.cost`, `purchase_orders.total`.
+Plus non-money `numeric`: `vendors.discount_pct (5,2)`,
+`tax_rates.rate_pct (6,3)`, timeclock lat/lng.
+
+**Accounting side — `bigint` integer cents:**
+`journal_lines.debit_cents` / `credit_cents`, `ar_invoices.*_cents`,
+`receipts.amount_cents`, `bills.total_cents`, `bill_lines.amount_cents`,
+`payments.amount_cents`, `labor_rates.rate_cents`.
+Bridged by `dollarsToCents()` in `src/lib/accounting.ts`.
+
+**The one real exposure: money inside `jsonb`.** `purchase_orders.line_items`
+and `quotes.line_items` store `unitCost` / `unitPrice` / `total` as JSON
+numbers, i.e. IEEE-754 doubles round-tripped through
+`JSON.parse`/`stringify`. They are read back with `Number(...)` and
+multiplied by quantity in several places
+(`src/app/purchase-orders/[id]/page.tsx:20`,
+`POEditor.tsx:37`, `src/lib/inventory.ts:223`). Values are small and
+2-decimal so nothing has drifted yet, but this is the floating-point money
+the brief warns about, and the allocation engine must not inherit it.
+→ **Recommendation for Phase 4:** promote PO lines to a real
+`purchase_order_line` table with `numeric(12,2)` columns rather than adding
+`source_promo_id` / `alacarte_cost_snap` as more jsonb fields. Details in 0.4.
+
+### 0.3 On-hand: stored *and* computed — they can drift
+
+Both exist:
+- **Stored:** `parts.quantity_on_hand integer`. Incremented on receipt,
+  decremented on consumption (`src/lib/inventory.ts`), and directly editable
+  on the part form and via CSV import.
+- **Computed:** `Σ part_receipts.quantity_remaining`. Used by
+  `src/lib/inventoryValuation.ts` as the inventory subledger, and displayed
+  per-part on `/inventory/[id]` as a FIFO layer table with a cost preview.
+
+They are **not** reconciled to each other. Two known drift sources:
+1. `consumeWorkOrderParts` floors on-hand at zero
+   (`GREATEST(0, qty_on_hand - qty)`) and separately records a `shortages[]`
+   when the layers can't cover the draw — so a short build leaves stored
+   on-hand and layer sum disagreeing by the shortfall.
+2. Any part created or imported with an opening `quantity_on_hand` has no
+   layers at all — on-hand > 0 with zero layer coverage. Since the à la carte
+   CSV import is the documented way inventory was loaded, this is likely
+   true for most of the catalog today.
+
+`inventoryValuation.ts` reconciles the **layer sum ↔ GL account 1200** and can
+post the difference to equity, but nothing reconciles **stored on-hand ↔ layer
+sum**. Phase 2 has to pick one as authoritative (the brief says derive from
+layers) and add an opening-balance backfill for layerless stock.
+
+`parts.quantity_on_order` is never maintained by code — it is only set by the
+part form and CSV import. Receiving does not decrement it. Treat it as
+untrusted for Phase 6.
+
+### 0.4 How a PO line records unit cost, and what receiving already does
+
+**PO lines are jsonb, not rows.** `purchase_orders.line_items` is
+`POLineItem[] = { partId?, description, quantity, quantityReceived, unitCost }`
+(`src/db/schema.ts:338`). The editor (`POEditor.tsx`) pre-fills `unitCost` from
+`parts.cost` when a part is picked from the autocomplete, and the operator can
+override it. `purchase_orders.total` is recomputed as `Σ qty × unitCost` on save.
+
+**Receiving already exists and is good.** `receivePurchaseOrder(poId, Map<lineIndex, qty>)`
+in `src/lib/inventory.ts:197`:
+- One `db.transaction`, locks the `purchase_orders` row `FOR UPDATE` and
+  re-reads `line_items` inside the transaction.
+- Clamps each receipt to the line's outstanding quantity.
+- Per received line: inserts a `part_receipts` layer at the line's `unitCost`,
+  bumps `parts.quantity_on_hand`, writes a `part_cost_history` row.
+- Rolls the PO status to `partially_received` / `received`.
+- Calls `postInventoryReceipt` → Dr 1200 Inventory / Cr 2000 AP.
+
+Consumption and reversal also exist: `consumeWorkOrderParts` drains layers
+oldest-first (`ORDER BY received_at ASC … FOR UPDATE`), charges WIP at real
+drained FIFO cost, and latches on `work_orders.parts_consumed`;
+`restoreWorkOrderParts` refills the same layers and reverses the entry.
+
+**Gaps against the brief:**
+- *Idempotency is lock-based, not key-based.* Two concurrent receives
+  serialize correctly, but there is no unique constraint or receipt key on
+  `part_receipts`. A retried request after a committed transaction, or a
+  replayed server action, can create a second layer. The brief asks for a
+  constraint — add a `receipt_key` unique index in Phase 4.
+- *No per-issue record.* Consumption decrements layers but writes no
+  `inventory_issue` rows, so there is no line-level record of which layer fed
+  which build at what cost — only the rolled-up WIP journal entry. Phase 2
+  must add it.
+- *Consumption is whole-work-order, all-or-nothing.* Driven off the linked
+  quote's line items and latched by one boolean. There is no partial issue,
+  no issue of an arbitrary quantity, and no walk-in / non-WO pull path. Phase 2
+  and Phase 5 both need a general `issue(sku, qty, workOrderId?)`.
+- *Receiving credits AP directly, no bill.* `postInventoryReceipt` posts
+  Dr Inventory / Cr AP without creating a `bills` row, even though
+  `bills.purchase_order_id` exists for exactly that link. Nothing three-way
+  matches receipt → bill → payment. Flagging it; out of scope unless asked.
+- *No line index stability.* `receiveByIndex` keys on array position, so
+  editing a PO's lines between receipts can misapply a receipt. Another point
+  for promoting lines to rows.
+
+### 0.5 Vendor PO vs customer PO — already separate, no collision
+
+`purchase_orders` is unambiguously vendor-side: `vendor_id` FK, receiving,
+AP posting, no customer or deal link. A government customer's PO *to us* is
+not an entity at all — it is represented as the `po_received` **deal stage**
+plus an uploaded document
+(`kind = pipeline_doc:government_po_intake`, category `purchase_orders`) in
+`customer_documents`. Confusingly the `purchase_order_status` enum also has a
+`po_received` value, but it is a vendor-PO status and unrelated. **Decision 4
+is already satisfied** — no work needed, and the promo work must not add a
+customer-PO meaning to this table.
+
+### 0.6 Conventions the new code must follow
+
+- Server components for list/detail, server actions for mutations,
+  `AppShell` chrome, `FormField` captions on every form field.
+- `import { db } from "@/db"`, tables from `@/db/schema`.
+- API route pairs `/api/{section}/route.ts` + `/api/{section}/[id]/route.ts`,
+  each re-checking `auth()` and returning 401.
+- Schema changes ship as hand-run SQL in `docs/sql/` — never `drizzle-kit push`.
+  Existing files are named `accounting_phaseN.sql`; these will be
+  `promo_phaseN.sql`.
+- Accounting hooks are **non-fatal**: if the chart of accounts isn't seeded,
+  resolve-all-then-bail rather than throw. New postings must match that.
+
+### 0.7 Net assessment
+
+The costing spine the brief asks for in Phase 2 is roughly 70% built —
+`part_receipts` is a working FIFO layer table with transactional,
+lock-protected receive and consume. Phase 2 becomes *extend and generalize*
+(add `source_kind` / `promo_id` / issue rows / a general issue function /
+opening-balance layers) rather than *build from scratch*. Phases 1, 3, 5, 6, 7
+are all new ground. The riskiest structural decision is Phase 4's:
+whether to keep PO lines as jsonb or promote them to a table.
+
+---
+
+## Decision log
+
+Answered by Nikit 2026-08-03:
+
+1. **Costing method — weighted average is primary, FIFO secondary.**
+   Overrides the brief's FIFO-only assumption. Average cost is the basis for
+   cost accounting on all work orders; FIFO stays available as a second
+   valuation. Design consequences in §0.8 below.
+2. **Reservation trigger — when the work order enters `confirmed`.** The
+   customer PO is received and the team moves the build into the confirmed
+   workflow stage. See §0.9.
+3. **Whelen rebates — none.** Whelen does not pay backend or growth
+   incentives, so Phase 4 needs no rebate-to-cost mechanism. If another
+   vendor ever does, it reopens as a new decision.
+4. **Customer POs vs vendor POs** — already separate, see §0.5. No work.
+
+6. **`parts.cost` vs average cost — distinct fields, same number.**
+   `parts.cost` auto-updates *from* `avg_cost` on receipt (=
+   `ROUND(avg_cost, 2)`); `avg_cost` `numeric(12,4)` is the authoritative
+   average, `parts.cost` `numeric(12,2)` its operational reflection. Both
+   update **at receipt, not PO entry**. Average cost shows on an
+   **internal-only** margin view, never on the customer PDF. Full mechanics
+   and the PO-pre-fill trap in §0.10. (Supersedes the earlier "last cost"
+   reading.)
+
+Resolved:
+
+5. **PO lines: jsonb or a `purchase_order_line` table** — raised by the audit
+   (§0.4); recommendation had been to promote. **Resolved 2026-08-05 (Phase 4):
+   kept jsonb, extended the `POLineItem` shape.** The promotion is a multi-file,
+   high-risk refactor (PO editor, list/detail, receiving, PO PDF, AP bill
+   linkage) and every Phase 4 "Done when" is achievable without it: lines gained
+   a stable `id` (receiving now keys on identity, not array position, and builds
+   an idempotent `receipt_key`), plus `sku` / `source_promo_id` /
+   `alacarte_cost_snap` / `source_kind`. Money in the jsonb stays 2-decimal and
+   only ever moves through `dollarsToCents` (which rounds), so no float drift.
+   If a future phase needs relational PO-line queries, promotion can still
+   happen then — the shape already names the columns a table would use.
+
+---
+
+## 0.8 Costing method: weighted average primary, FIFO secondary
+
+### What stays the same
+
+Cost layers are still the foundation, and Phase 2 still builds them. Layers
+remain the subledger of record for **quantity and provenance** — which
+receipt, which PO, which promo, at what actual cost — under both methods.
+Average cost is derived *from* layers, not instead of them. Nothing about
+Phases 1, 3, 4 changes.
+
+### What changes
+
+**A per-part moving average, maintained on receipt.** Add `parts.avg_cost`
+as `numeric(12,4)` (4dp: the average is a derived rate, not a posted amount,
+and 2dp would decay under repeated receipts — same reasoning as
+`tax_rates.rate_pct`). Recomputed inside the existing receive transaction:
+
+```
+new_avg = (on_hand × old_avg + received_qty × receipt_unit_cost)
+          / (on_hand + received_qty)
+```
+
+**Issue splits quantity from cost.** Issuing N units drains layers
+oldest-first exactly as today — that preserves provenance and keeps on-hand
+honest — but the cost charged to the job is `N × avg_cost` under weighted
+average, or the summed layer cost under FIFO. This is a one-line lever:
+`postInventoryIssue`'s `totalCents` is the only thing job costing reads, since
+`src/lib/jobCosting.ts` takes a job's material cost from the WIP (1300) GL
+balance tagged with `work_order_id`. Change what gets debited and every
+work-order cost, WIP settlement, and COGS figure follows automatically.
+
+**The active method is an auditable policy setting**, not a per-call flag —
+a one-row `costing_policy` table `(method, changed_at, changed_by)`
+defaulting to `weighted_average`. Switching methods is a change in accounting
+policy: it applies forward only, never retroactively, and it must never
+rewrite posted entries.
+
+**Valuation and reconciliation follow the active method.**
+`src/lib/inventoryValuation.ts` currently hard-codes the FIFO subledger
+(`Σ remaining_qty × unit_cost`) and reconciles it to GL 1200. It becomes
+method-aware: under weighted average the subledger is
+`Σ on_hand × avg_cost`. The GL ties to whichever method is active; the other
+is computed alongside as the comparison view — that is what "FIFO a second
+option" buys us.
+
+Worth knowing: **the two methods agree whenever a SKU fully turns over.** At
+on-hand zero both valuations are zero. They differ only while stock is on the
+shelf, and the difference is timing, never a permanent gap.
+
+### The one thing to watch
+
+Under weighted average a discounted package receipt pulls the average down
+for *everyone* — the promo saving is smeared across all units of that SKU
+rather than sitting visibly in one layer. That is the correct economics and
+it is exactly why average costing is the right primary for work-order costing
+here: a build's cost reflects what the shelf actually costs, not which crate
+a bracket happened to come from.
+
+But it means **Phase 7's promo-vs-backfill report cannot be built from job
+costing** — the saving is invisible there by construction. It must key off
+the layer table's `source_kind` and per-layer `unit_cost`, which retain the
+package-vs-full-price distinction regardless of the active method. Phase 2
+must therefore keep layers even though average costing alone wouldn't
+strictly need them. Noted so a later session doesn't "simplify" them away.
+
+Separately: `parts.cost` today is the internal/list cost that pre-fills PO
+lines and drives the margin calculators on the part form. It is *not* the
+same number as `avg_cost` and should stay distinct — one is what we expect to
+pay, the other what we actually paid. Whether the margin display should
+switch to `avg_cost` is a real question, but out of scope here.
+
+## 0.10 Three cost fields, and what maintains each
+
+Confirmed 2026-08-03 (revised): `parts.cost` and average cost stay **distinct
+fields with distinct roles**, but they carry the **same number at different
+precision**. `parts.cost` is auto-updated *from* `avg_cost` on every receipt.
+
+| Field | Role | Precision | Maintained by |
+| --- | --- | --- | --- |
+| `parts.avg_cost` | **Weighted average** — authoritative costing basis for work orders | `numeric(12,4)` | Auto, on receipt (moving average from layers) |
+| `parts.cost` | **Internal cost** — the operational value everything already reads (margins, displays, quote defaults) | `numeric(12,2)` | Auto, on receipt = `ROUND(avg_cost, 2)` |
+| `parts.price` | Sell price | `numeric(12,2)` | Manual |
+
+Why keep two fields if they hold the same value: `avg_cost` is the 4-decimal
+accounting truth that must not decay under repeated receipts and that GL /
+WIP / COGS reconcile against; `parts.cost` is its 2-decimal reflection that
+the rest of the app was already built to read. The costing engine writes
+`avg_cost`; `parts.cost` follows it. (**Assumption:** `parts.cost =
+ROUND(avg_cost, 2)`. If instead you want `parts.cost` truncated, or to lag
+avg_cost in some way, say so — it's a one-line change in Phase 2.)
+
+**Both update at receipt, never at PO entry.** Entering a PO records the
+line's `unit_cost` and snapshots the promo allocation, but moves nothing in
+costing. Only goods actually landing recompute `avg_cost` and refresh
+`parts.cost` from it — so a cancelled or never-shipped PO can't leave a cost
+with nothing behind it. Both writes happen inside the existing receive
+transaction alongside the layer write.
+
+### Trap: average cost must not contaminate PO pre-fill
+
+`POEditor.tsx:133` currently pre-fills a new PO line's `unitCost` from
+`parts.cost`. Once `parts.cost` tracks `avg_cost`, a package receipt pulls the
+average **down** (the discount is smeared across all units of the SKU — §0.8),
+so `parts.cost` sits **below** à la carte for as long as any package stock
+influences the average. The next *individual* PO for that SKU would then
+pre-fill at that below-market number — we'd be raising a full-price order at a
+promo-influenced price Whelen will not honour.
+
+This is worse than the last-cost model would have been: last cost at least
+snaps back to full price on the next individual receipt, whereas a smeared
+average stays low. So the fix is load-bearing, and it's why Phase 1 comes
+first: **individual PO lines pre-fill from
+`vendor_part_price.alacarte_unit_cost`, not from `parts.cost`.** `parts.cost`
+stays an honest record of what the shelf costs on average; the price list is
+what we quote a new order at. Phase 4 wires the pre-fill to the price list
+when it touches the PO editor.
+
+### The margin calculators move on their own now
+
+The part add/edit forms compute margin and markup from `cost` vs `price`, and
+`cost` will now change under them (following `avg_cost`) without anyone editing
+it. Keep the field editable — parts never yet received, and opening values,
+still need a way in — but relabel it "Average cost (auto-updated on receipt)"
+so nobody mistakes a moved number for someone's edit. Phase 2 does the relabel
+when it adds the auto-update.
+
+### Internal margin view on the invoice
+
+Average cost displays on an **internal-only** view: the on-screen
+quote/invoice page and an internal PDF variant, with per-line avg cost,
+extended cost, margin $ and margin %, plus an invoice-level summary. The
+customer-facing PDF is unchanged — `src/lib/pdf/templates/quote.tsx` carries
+no cost data today and must keep carrying none, since these documents go to
+government agencies.
+
+One design point this raises: margin on an invoice should reflect cost **at
+the time of sale**, not today's average. Per the brief's snapshot rule,
+Phase 2 should stamp `avg_cost` onto the quote's line items when the quote
+converts to an invoice, and the internal view reads that snapshot. Reading
+`parts.avg_cost` live would make last quarter's margins silently rewrite
+themselves every time we buy more stock.
+
+## 0.9 Reservation trigger: the `confirmed` transition
+
+Reservations fire when a work order enters `confirmed` — the point where the
+customer's PO is in hand and the team commits the build to the shop.
+
+Conveniently this is one event in the existing system, not two. For
+government deals the Won bucket is `po_received`; for commercial and walk-in
+it is `deposit_received`. Both run `maybePromoteWonDeal`
+(`src/lib/dealTriggers.ts:35`), which inside a single transaction promotes the
+quote to `workflowStage = 'confirmed'` and creates or updates the work order
+to `status = 'confirmed'`. That transaction is the reservation hook.
+
+Phase 5 will therefore add one `reserveForWorkOrder(tx, woId)` called from
+every path that moves a WO into `confirmed` — `maybePromoteWonDeal`, plus
+`syncWorkflowToDeal` for a card dragged into Confirmed directly on
+`/workflow`. It must be idempotent (the existing promote path already guards
+against double-firing via `already_past_confirmed`, but the board path needs
+its own latch), and reservations release as parts are issued or when a build
+is walked back out of `confirmed`.
+
+---
+
+## Phase 1 — DELIVERED 2026-08-03
+
+- **Schema:** `vendor_part_price (id, vendor_id→vendors, sku, alacarte_unit_cost
+  numeric(12,2), effective_from date, effective_to date null, source_note,
+  created_at, updated_at)` in `src/db/schema.ts`. Indexes on `(vendor_id, sku)`
+  and `(sku)`, plus a **partial unique index** on `(vendor_id, sku) WHERE
+  effective_to IS NULL` — the DB guarantee that a SKU resolves to exactly one
+  current price. Keyed by `(vendor_id, sku)` not a parts FK, so a price file
+  loads before the part exists and the same SKU can carry different net pricing
+  per distributor.
+- **SQL:** `docs/sql/promo_phase1.sql` — table + indexes (idempotent) and a
+  seed that inserts only the two à la carte costs the brief states verbatim
+  (XI3JC 112.00, TCRWX6 1282.80), joined to a vendor named `Whelen`. The
+  remaining ~15 lines are **not invented** — a fabricated basis would make
+  Phase 3's $6,840 reconciliation wrong; load them via the screen.
+- **Resolver:** `src/lib/vendorPricing.ts` — `currentAlacarteCost(vendorId,
+  sku)`, `currentPriceRow`, `priceHistory`, and a transactional
+  `setCurrentPrice` that no-ops on an unchanged cost, else closes the current
+  row (`effective_to = CURRENT_DATE`) under a `FOR UPDATE` lock and appends the
+  new one. `normalizeCost` keeps raw floats out of the numeric column.
+- **API:** `/api/vendor-part-prices` (GET with `vendorId`/`sku`/`current=1`
+  filters; POST = set current price via the resolver) and `/[id]` (GET; PATCH
+  for in-place corrections of cost/source note only, deliberately not a way to
+  change the live price; DELETE gated on `canDelete`). Both re-check `auth()`.
+- **UI:** `/vendor-pricing` — set-price form (vendor, SKU, cost, source note)
+  with a "never overwrites" note, plus Current-prices / Full-history tabs
+  (closed rows dimmed, current marked). Wired into the Operations nav group and
+  breadcrumbs.
+- **Verification:** `tsc --noEmit` clean across the project; `next build`
+  compiles and type-checks successfully. (The build's static-prerender step
+  can't complete in this container because it has no database — it fails on the
+  pre-existing `/vendors` page, not on any Phase 1 code; `/vendor-pricing` is
+  dynamic via `auth()` and isn't prerendered.)
+
+**To activate:** run `docs/sql/promo_phase1.sql` in Neon, then load the Whelen
+F-150 sheet through `/vendor-pricing` (or extend the seed VALUES and re-run).
+
+---
+
+## Phase 2 — DELIVERED
+
+Cost layers + weighted-average/FIFO costing spine. Weighted average is the
+primary work-order costing basis (decision #1); FIFO stays available as a second
+valuation. Layers remain the quantity + provenance subledger under both methods
+so Phase 7 can still see package vs full-price cost.
+
+- **Schema** (`src/db/schema.ts`):
+  - `parts.avg_cost numeric(12,4)` — the authoritative moving average.
+  - `part_receipts` gains `source_kind` (`inventory_source_kind` enum:
+    package/individual/backfill/opening, default `individual`), `promo_id`
+    (bare uuid; FK to `vendor_promo` added in Phase 3), and `receipt_key`
+    (partial unique index, nulls exempt — the key-based idempotency the audit
+    asked for; wired up in Phase 4).
+  - `inventory_issue` — per-layer-slice consumption subledger
+    `(part_id, work_order_id, layer_id, qty, unit_cost, issued_at)`.
+  - `costing_policy` — single-row policy `(method, changed_by, changed_at)`,
+    default `weighted_average`.
+- **SQL:** `docs/sql/promo_phase2.sql` — enums, column adds, `inventory_issue`,
+  `costing_policy` seed (all idempotent), plus an **optional opening-balance
+  backfill**: seeds one `opening` layer per part for `quantity_on_hand −
+  Σ layers` at `parts.cost`, dated `2000-01-01` so FIFO drains it first, then
+  seeds `avg_cost` from the resulting layers. This closes the stored-on-hand ↔
+  layer-sum drift the Phase 0 audit flagged (§0.3). Review before running:
+  NULL-cost parts get a $0 opening layer.
+- **Costing library** (`src/lib/costing.ts`):
+  - `getCostingMethod` / `getCostingMethodTx` / `setCostingMethod` (policy).
+  - `recordReceiptLayer(tx, …)` — inserts the layer, rolls the moving average
+    (`new_avg = (on_hand·old_avg + qty·unit_cost)/(on_hand+qty)`), sets
+    `parts.cost = ROUND(avg_cost, 2)`, and writes cost history. One place, so
+    Phase 4 package/backfill receiving reuses it.
+  - `drainLayersTx` / `reverseIssuesTx` — oldest-first drain writing
+    `inventory_issue` rows, and its exact inverse.
+  - `chargeCents(method, …)` — the job charge: `qty × avg_cost` under weighted
+    average, summed layer cost under FIFO (falls back to FIFO if avg unknown).
+  - `issueStock({partId|sku, qty, workOrderId?})` — the general
+    `issue(sku, qty, workOrderId?)` the brief asks for. STRICT: a shortfall
+    throws and rolls back. Phases 5/6 call it for reserved/override pulls.
+- **Wiring** (`src/lib/inventory.ts`): `receivePurchaseOrder` now rolls the
+  average via `recordReceiptLayer` (ledger still values receipts at actual PO
+  cost); `consumeWorkOrderParts` / `restoreWorkOrderParts` write/reverse
+  `inventory_issue` rows, decrement on-hand by what actually left the layers,
+  and charge WIP at the active method. Restore has a legacy fallback (quote
+  rollup) for work orders consumed before Phase 2 that carry no issue rows.
+- **Valuation** (`src/lib/inventoryValuation.ts`): method-aware. FIFO =
+  Σ remaining × layer cost; weighted = Σ on_hand × avg_cost. The GL ties to the
+  active method; the other shows as a comparison. `/accounting/inventory`
+  surfaces both, a per-part FIFO-vs-avg table, and an auditable method switch.
+- **`parts.cost` relabel:** the part add/edit forms now label the field
+  "Average cost" (auto-updated on receipt), still editable for opening values.
+- **Invoice snapshot** (`src/lib/ar.ts`): `issueInvoiceFromQuote` stamps each
+  line's `avg_cost` onto `quotes.line_items` as `avgCostSnap`, so a later
+  internal margin view reads cost at sale, not today's average. The
+  customer-facing PDF is untouched (carries no cost — these go to gov agencies).
+- **Verification:** `tsc --noEmit` clean across the project.
+
+**To activate:** run `docs/sql/promo_phase2.sql` in Neon. The opening-balance
+section is optional but recommended — without it, parts loaded via CSV keep
+`on_hand > Σ layers` until their first real receipt.
+
+**Deferred to a later phase (noted, not built):** the full internal margin
+*view* (on-screen invoice cost breakdown + internal-only PDF variant) that
+consumes `avgCostSnap` — §0.10. Phase 2 writes the snapshot data; rendering it
+is a small follow-up that doesn't block Phases 3–7.
+
+---
+
+## Phase 3 — DELIVERED
+
+`vendor_promo` / `vendor_promo_line` + the allocation engine. Allocation lives
+in exactly one place and is reachable only with a promo.
+
+- **Schema** (`src/db/schema.ts`): `vendor_promo (vendor_id, name,
+  package_price, freight?, effective_from/to, status active|retired, notes)` and
+  `vendor_promo_line (promo_id, sku, quantity, alacarte_cost_snap)`. Phase 2's
+  `part_receipts.promo_id` now carries its FK to `vendor_promo`.
+- **SQL:** `docs/sql/promo_phase3.sql` — enum, both tables, and the
+  `part_receipts_promo_id_fk` constraint (all idempotent).
+- **Allocation engine** (`src/lib/promoAllocation.ts`) — PURE, deterministic,
+  no I/O/clock/randomness, integer-cents throughout:
+  1. `extended_basis = alacarte_cost_snap × qty`; `total_basis = Σ`.
+  2. freight folds into the package price first.
+  3. proportional split, then a **rounding plug** puts the residual cent(s) on
+     the single largest-basis line so allocated line totals sum to the package
+     price EXACTLY.
+  4. **sanity assertion:** every allocated unit cost ≤ its à la carte snapshot,
+     else it throws `PromoAllocationError` (a package dearer than its basket is
+     a data-entry mistake).
+- **Tests** (`src/lib/promoAllocation.test.ts`, run `npx tsx …`) — 7 cases
+  covering the tie, the rounding plug, freight, qty>1, the refusal, determinism,
+  and an F-150-shape check ($9,430 basis → $6,840 package, ties exactly, ~$2,590
+  saving). All green. (No framework in the repo; standalone under tsx.)
+- **DB layer** (`src/lib/promos.ts`): `createPromo` snapshots each line's à la
+  carte cost from `vendor_part_price` and runs the engine to VALIDATE before it
+  persists (an impossible promo is refused at save, not on a later PO);
+  `listPromos`, `getPromoWithLines`, `allocationForPromo`, `setPromoStatus`,
+  `deletePromo`.
+- **API:** `/api/vendor-promos` (GET list, POST create — 422 on allocation
+  failure) and `/[id]` (GET promo+lines+live allocation, PATCH status, DELETE).
+- **Admin screen** `/vendor-promos`: a client `PromoBuilder` (imports the pure
+  engine for a **live** preview — allocated unit/extended costs + saving vs à la
+  carte as you type, cost auto-filled from the price list) plus a table of
+  defined promos with basis/package/saving and retire/activate/delete. Wired
+  into the Operations nav + breadcrumbs.
+- **Verification:** `tsc --noEmit` clean; allocation tests pass.
+
+**To activate:** run `docs/sql/promo_phase3.sql` in Neon. Define the real F-150
+Whelen package on `/vendor-promos` once the full 17-line à la carte sheet is
+loaded on `/vendor-pricing` — the engine will tie it to $6,840 exactly and show
+the ~$2,590 saving.
+
+---
+
+## Phase 4 — DELIVERED
+
+POs apply the package; receiving writes layers. Allocation runs once at PO
+build time; individual POs never call it.
+
+- **PO line shape** (`POLineItem`, jsonb — decision #5 kept jsonb): added `id`
+  (stable line identity), `sku`, `source_promo_id`, `alacarte_cost_snap`, and an
+  optional `source_kind`. **No new SQL** — the `part_receipts` columns
+  (`source_kind` / `promo_id` / `receipt_key`) shipped in Phase 2 and the promo
+  FK in Phase 3; PO lines are jsonb, so nothing to migrate.
+- **Package PO** (`src/lib/promos.ts :: buildPackagePOLines`): runs the
+  allocation engine ONCE and stamps allocated `unit_cost`, `source_promo_id`,
+  and `alacarte_cost_snap` onto each line. Exposed at
+  `GET /api/vendor-promos/[id]/po-lines`. The PO editor's "Apply a promo
+  package" control fetches it, replaces the lines, and pins the vendor. Promo
+  lines render a `pkg` badge and their unit cost is read-only (edit the promo to
+  change it).
+- **Individual PO pre-fill fix** (the §0.10 trap): the PO editor now pre-fills a
+  picked part's unit cost from `vendor_part_price` (à la carte) for the PO's
+  vendor, falling back to `parts.cost` only when there's no price-list entry —
+  so a full-price order never inherits the promo-depressed average.
+- **Receiving** (`src/lib/inventory.ts :: receivePurchaseOrder`): each received
+  line writes a layer via `recordReceiptLayer` with `source_kind` = the line's
+  kind (`package` when `source_promo_id` is set, `backfill` when the line says
+  so — Phase 6, else `individual`) and `promo_id` = `source_promo_id`.
+  Idempotency is now key-based as well as lock-based: a stable
+  `receipt_key = {poId}:{lineId}:{cumulativeReceived}` is checked before insert
+  and enforced by the partial unique index. `saveDraft` assigns a line `id` to
+  any line missing one.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** nothing new to run — Phase 2 + Phase 3 SQL already cover the
+columns. Create a PO, click **Apply a promo package**, save, and receive: 17
+layers land at their allocated costs; an individual PO for the same SKUs lands
+at à la carte, both under one SKU / one on-hand.
+
+---
+
+## Phase 5 — DELIVERED
+
+Reservations + available-to-pull. A sold, committed build claims its parts
+against on-hand without a second bin.
+
+- **Schema:** `inventory_reservation (work_order_id, part_id, sku, qty_reserved,
+  status active|fulfilled|released)` + `reservation_status` enum.
+  `docs/sql/promo_phase5.sql`.
+- **Library** (`src/lib/reservations.ts`): `reservedForPart` /
+  `availableForPart` (on-hand − Σ active reserved, with an optional
+  `excludeWorkOrderId` so a build can draw its own claim), `reservedByPart` (set
+  map for lists), and the lifecycle — `reserveForWorkOrder(Tx)` (idempotent +
+  reactivating, matches the WO's current quote BOM),
+  `fulfillReservationsForWorkOrder`, `releaseReservationsForWorkOrder`.
+- **Trigger** (decision §0.9 — the `confirmed` transition):
+  `reserveForWorkOrderTx` runs inside `maybePromoteWonDeal` (deal → Won), and
+  the single quote-workflow move path (`/api/quotes/[id]/workflow-stage`, used
+  by both the /workflow board and the /quotes strip) now drives the whole
+  lifecycle: reserve on confirmed/awaiting_parts/next_in_line, fulfill on
+  in_progress (right after consumption, so on-hand and the claim never
+  double-count), release on the walk-back to estimate.
+- **Available-to-pull gate:** `issueStock` (the general pull path) refuses to
+  draw more than available (on-hand − reserved by *other* builds) unless
+  `allowReserved` is set — the hook the Phase 6 override uses. The part detail
+  page (`/inventory/[id]`) now shows Reserved and Available alongside On hand.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** run `docs/sql/promo_phase5.sql` in Neon. Reservations then
+accrue automatically as deals/builds cross into confirmed.
+
+---
+
+## Phase 6 — DELIVERED
+
+Reorder points, reserved-stock override, and auto-backfill.
+
+- **Schema:** `reorder_point (part_id unique, min_qty, reorder_to_qty)`,
+  `stock_override_log (work_order_id, part_id, qty, reason, user_id)`,
+  `backfill_requisition (part_id, qty, triggered_by reorder_point|
+  reserved_override, source_override_id, need_by, status open|ordered|received,
+  purchase_order_id)` + the two enums. `docs/sql/promo_phase6.sql`.
+- **Library** (`src/lib/backfill.ts`):
+  - `setReorderPoint` / `listReorderPoints` (with live available).
+  - `maybeRaiseReorder(partId)` — raises an OPEN requisition for
+    `reorder_to_qty − available` when available ≤ min_qty, deduped to one open
+    reorder-point requisition per part. `checkReordersForWorkOrder` /
+    `scanAllReorderPoints` drive it.
+  - `overridePull(...)` — issues reserved stock via `issueStock({allowReserved})`
+    (the Phase 5 hook), writes a `stock_override_log` row, and raises a
+    `reserved_override` requisition with `need_by` = the soonest scheduled date
+    among the builds whose reservation was raided.
+  - `createPOFromRequisition` — turns an open requisition into an individual PO
+    whose single line carries `source_kind = 'backfill'` (so the received layer
+    is tagged backfill for Phase 7) and pre-fills unit cost from the à la carte
+    price list; links the PO and flips the requisition to `ordered`.
+- **Wiring:** the workflow-stage move path calls `checkReordersForWorkOrder`
+  after reserve/consume (available just dropped); `receivePurchaseOrder` flips a
+  linked requisition to `received` when its PO is fully received.
+- **Screen** `/backfill`: set reorder points, an override-pull form (part, qty,
+  reason), the requisition list with **Create PO** / **Mark received**, a
+  reorder-points table flagging at/below-min parts, and a **Scan reorder points
+  now** button. APIs: `POST /api/reorder-points`, `POST /api/backfill/override`.
+  Wired into Operations nav + breadcrumbs.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** run `docs/sql/promo_phase6.sql` in Neon.
+
+---
+
+## Phase 7 — DELIVERED
+
+Promo vs backfill savings report — the number that says whether the discount is
+real. Built from the LAYER table's `source_kind` + per-layer `unit_cost`, NOT
+from job costing (under weighted average the saving is smeared into the average
+and invisible there — §0.8).
+
+- **Library** (`src/lib/promoReport.ts`): `promoSavingsReport({ from, to })`.
+  Per SKU over the period: package units + allocated cost + à la carte basis
+  (joined from the promo line) → package saving; individual + backfill units +
+  actual cost; units consumed (from `inventory_issue`). Derived per SKU:
+  `backfillPremium` = extra paid per backfilled unit over the package unit cost,
+  `netSaving` = packageSaving − backfillPremium, and a `reconsider` flag when
+  backfill volume ≥ 50% of package volume.
+- **Screen** `/promo-savings`: date-range picker (defaults to the last 90 days),
+  a headline net-saving card ("Package discount captured − extra spent
+  backfilling"), summary tiles, and a per-SKU table with the reconsider flag.
+  Wired into Operations nav + breadcrumbs.
+- **Verification:** `tsc --noEmit` clean.
+
+**To activate:** no SQL — reads existing tables. Meaningful once package and
+backfill/individual receipts exist.
+
+---
+
+## Activation checklist (run in Neon, in order)
+
+All schema changes ship as hand-run SQL (never `drizzle-kit push`). Run these in
+Neon's SQL Editor in order; each is idempotent:
+
+1. `docs/sql/promo_phase1.sql` — vendor_part_price (+ seed the two known costs).
+2. `docs/sql/promo_phase2.sql` — cost-layer columns, inventory_issue,
+   costing_policy, **and the optional opening-balance backfill** (review the
+   NULL-cost note before running that section).
+3. `docs/sql/promo_phase3.sql` — vendor_promo / vendor_promo_line + the
+   part_receipts.promo_id FK.
+4. Phase 4 — **nothing to run** (PO lines are jsonb; columns already added).
+5. `docs/sql/promo_phase5.sql` — inventory_reservation.
+6. `docs/sql/promo_phase6.sql` — reorder_point, stock_override_log,
+   backfill_requisition.
+7. Phase 7 — **nothing to run.**
+
+Then: load the à la carte sheet on `/vendor-pricing`, define the F-150 promo on
+`/vendor-promos`, set reorder points on `/backfill`, and the rest flows through
+the PO editor, the workflow board, and the reports.
+
+Costing is **weighted-average by default**; FIFO is a second valuation toggled
+on `/accounting/inventory`.

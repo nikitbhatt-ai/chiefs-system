@@ -3,17 +3,24 @@
 // Two operations, each of which BOTH writes a subledger row and posts a
 // balanced journal entry, atomically:
 //
-//   Create bill (what we owe a vendor):  Dr <expense/asset account>  per line
+//   Create bill, NOT against a PO:       Dr <expense/asset account>  per line
+//                                          Cr Accounts Payable         total
+//   Create bill AGAINST a PO:            Dr Accrued Purchases 2050   received
+//                                        Dr Price Variance 5900      any excess
 //                                          Cr Accounts Payable         total
 //   Record payment (cash out):           Dr Accounts Payable         amount
 //                                          Cr Cash                     amount
 //
+// A PO bill relieves the accrual that receiving created rather than debiting an
+// expense — the goods are already capitalised in Inventory, so expensing them
+// here would book the same cost twice. That double-count is what this replaced.
+//
 // Chart-of-accounts codes are the ones seeded by accounting_phase1.sql; we
 // resolve them by code at runtime.
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { glAccounts, bills, billLines, payments } from "@/db/schema";
+import { glAccounts, bills, billLines, payments, partReceipts } from "@/db/schema";
 import {
   dollarsToCents,
   postJournalEntryTx,
@@ -28,6 +35,8 @@ type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 const ACCOUNT_CODES = {
   ap: "2000", // Accounts Payable
   cash: "1000", // Cash
+  accrued: "2050", // Accrued Purchases (goods received, not yet invoiced)
+  variance: "5900", // Purchase Price Variance
 } as const;
 
 // AP uses the same net-terms vocabulary as AR.
@@ -54,6 +63,56 @@ async function accountIdByCode(tx: Tx, code: string): Promise<string> {
 async function nextNumber(tx: Tx, prefix: string, count: () => Promise<number>): Promise<string> {
   const n = await count();
   return `${prefix}-${String(n + 1).padStart(4, "0")}`;
+}
+
+// ── Three-way match: PO → received → billed ───────────────────────────────────
+
+/**
+ * How much accrual is still outstanding on a purchase order, in cents:
+ * value actually received, less what previous bills have already relieved.
+ *
+ * "Received" comes from `part_receipts`, not from the PO's line items — receipts
+ * are append-only and record the unit cost at the moment goods arrived, whereas
+ * PO lines stay editable, so a later price edit would otherwise change history.
+ * This sum is exactly what `postInventoryReceipt` credited to 2050.
+ *
+ * "Already relieved" is the 2050 debits on prior non-void bills for the same PO,
+ * rather than those bills' totals — a bill that ran over the received value only
+ * relieved part of its total, with the rest going to variance.
+ */
+export async function accruedRemainingForPo(tx: Tx, purchaseOrderId: string): Promise<number> {
+  const [received] = await tx
+    .select({
+      cents: sql<number>`COALESCE(SUM(${partReceipts.quantityReceived} * ROUND(${partReceipts.unitCost} * 100)), 0)`.mapWith(
+        Number,
+      ),
+    })
+    .from(partReceipts)
+    .where(eq(partReceipts.purchaseOrderId, purchaseOrderId));
+
+  const [relieved] = await tx
+    .select({ cents: sql<number>`COALESCE(SUM(${billLines.amountCents}), 0)`.mapWith(Number) })
+    .from(billLines)
+    .innerJoin(bills, eq(bills.id, billLines.billId))
+    .innerJoin(glAccounts, eq(glAccounts.id, billLines.accountId))
+    .where(
+      and(
+        eq(bills.purchaseOrderId, purchaseOrderId),
+        sql`${bills.status} <> 'void'`,
+        eq(glAccounts.code, ACCOUNT_CODES.accrued),
+      ),
+    );
+
+  return Math.max(0, (received?.cents ?? 0) - (relieved?.cents ?? 0));
+}
+
+/** Split a bill total against a PO's outstanding accrual. */
+export function splitAgainstAccrual(billTotalCents: number, accruedRemainingCents: number) {
+  // Bill within the accrual: relieve it all, leave the remainder accrued — a
+  // partial bill against a partly-received PO is normal, not a variance.
+  // Bill over the accrual: relieve what was received, the excess is a variance.
+  const relieveCents = Math.min(billTotalCents, accruedRemainingCents);
+  return { relieveCents, varianceCents: billTotalCents - relieveCents };
 }
 
 // ── Create a bill ─────────────────────────────────────────────────────────────
@@ -108,14 +167,62 @@ export async function createBill(input: CreateBillInput) {
       return n;
     });
 
-    // Dr each expense/asset line; Cr Accounts Payable for the total.
-    const jeLines: JournalLineInput[] = input.lines.map((l) => ({
-      accountId: l.accountId,
-      debitCents: Math.round(l.amountCents),
-      departmentId: l.departmentId ?? null,
-      workOrderId: l.workOrderId ?? null,
-      memo: l.description ?? `${billNumber}`,
-    }));
+    // A bill against a PO is settling goods already received and capitalised
+    // into Inventory, so its GL side must relieve the accrual — NOT debit an
+    // expense account, which would book the same cost a second time. The
+    // caller's line accounts are overridden for exactly that reason; their
+    // descriptions and amounts are still kept as bill detail.
+    //
+    // A bill with no PO (rent, software, a sublet invoice) is unchanged: it
+    // debits whatever accounts the caller picked.
+    let jeLines: JournalLineInput[];
+    let recordedLines: BillLineInput[];
+
+    if (input.purchaseOrderId) {
+      const accruedId = await accountIdByCode(tx, ACCOUNT_CODES.accrued);
+      const accruedRemaining = await accruedRemainingForPo(tx, input.purchaseOrderId);
+      const { relieveCents, varianceCents } = splitAgainstAccrual(totalCents, accruedRemaining);
+
+      jeLines = [];
+      recordedLines = [];
+      if (relieveCents > 0) {
+        jeLines.push({
+          accountId: accruedId,
+          debitCents: relieveCents,
+          memo: `${billNumber} — relieve accrued purchases`,
+        });
+        recordedLines.push({
+          accountId: accruedId,
+          amountCents: relieveCents,
+          description: input.lines[0]?.description ?? "Goods received against PO",
+        });
+      }
+      if (varianceCents > 0) {
+        // Billed more than was received. Surfacing the difference is the point:
+        // absorbing it silently is how vendor overbilling gets paid.
+        const varianceId = await accountIdByCode(tx, ACCOUNT_CODES.variance);
+        jeLines.push({
+          accountId: varianceId,
+          debitCents: varianceCents,
+          memo: `${billNumber} — price variance vs received`,
+        });
+        recordedLines.push({
+          accountId: varianceId,
+          amountCents: varianceCents,
+          description: "Billed over received value (price variance)",
+        });
+      }
+    } else {
+      jeLines = input.lines.map((l) => ({
+        accountId: l.accountId,
+        debitCents: Math.round(l.amountCents),
+        departmentId: l.departmentId ?? null,
+        workOrderId: l.workOrderId ?? null,
+        memo: l.description ?? `${billNumber}`,
+      }));
+      recordedLines = input.lines;
+    }
+
     jeLines.push({ accountId: apId, creditCents: totalCents, memo: `${billNumber} — payable` });
 
     const je = await postJournalEntryTx(tx, {
@@ -145,7 +252,7 @@ export async function createBill(input: CreateBillInput) {
       .returning();
 
     await tx.insert(billLines).values(
-      input.lines.map((l) => ({
+      recordedLines.map((l) => ({
         billId: bill.id,
         accountId: l.accountId,
         description: l.description ?? null,

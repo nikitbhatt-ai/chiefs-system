@@ -6,6 +6,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { leads } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -74,7 +75,7 @@ export default async function LeadCaptureTestPage({
   if (role !== "admin") {
     return (
       <AppShell title="Lead-capture test" subtitle="Admin only">
-        <div className="bg-[#161624] border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
+        <div className="bg-surface border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
           This page is admin-only.
         </div>
       </AppShell>
@@ -113,7 +114,7 @@ export default async function LeadCaptureTestPage({
 
   return (
     <AppShell title="Lead-capture test" subtitle="Send a synthetic lead to /api/leads/capture and confirm the round-trip">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3 max-w-3xl">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3 max-w-3xl">
         <div className="text-xs font-body text-zinc-300 leading-relaxed">
           Click the button to POST a synthetic lead to the public capture
           endpoint with the server&apos;s <code className="bg-black/40 px-1 rounded">LEAD_CAPTURE_SECRET</code>{" "}
@@ -131,13 +132,12 @@ export default async function LeadCaptureTestPage({
           )}
         </div>
         <form action={action}>
-          <button
-            type="submit"
+          <SubmitButton
             disabled={!secretSet}
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black rounded-md px-4 py-2"
           >
             Send a test lead
-          </button>
+          </SubmitButton>
         </form>
 
         {lastResult && (
@@ -159,7 +159,7 @@ export default async function LeadCaptureTestPage({
         )}
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-2 max-w-3xl">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-2 max-w-3xl">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
           Recent test leads
         </h3>

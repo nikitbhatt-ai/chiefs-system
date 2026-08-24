@@ -1,12 +1,43 @@
 @import "tailwindcss";
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   THEMING
+   Three themes, selected by `data-theme` on <html>:
+     dark  — the original look (default), deep navy-black
+     black — true black, soft-toned foregrounds, heaviest weights
+     day   — tan/cream paper with black-navy ink
+
+   How this re-skins ~106 component files with no component edits: Tailwind v4
+   compiles every palette utility to `var(--color-…)`, including opacity
+   variants (which become `color-mix(… var(--color-white) 5% …)`). Redefining
+   those variables under a `[data-theme]` selector therefore changes the whole
+   app at once.
+
+   The consequence is that the palette is used SEMANTICALLY, and day mode
+   inverts it:
+     text-white          → primary foreground   (navy ink on cream)
+     text-zinc-200…700   → the muted ramp; INVERTED in day, so a lower number
+                           still means "more prominent" (darker, not lighter)
+     bg-white/5, /10     → subtle raised surfaces + hairline borders
+     bg-black/20, /40    → recessed surfaces (inputs)
+     bg-surface          → card background (replaces the old bg-surface)
+     amber-*             → brand accent; darkened in day to survive cream
+
+   Before adding a colour to a component, use the semantic slot that already
+   exists rather than a literal hex — a hex will not follow the theme.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 @theme {
   --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
   --font-body: "DM Sans", ui-sans-serif, system-ui, sans-serif;
 
+  /* Declared here so Tailwind generates bg-surface / border-surface / etc.
+     The per-theme blocks below only change the values. */
   --color-bg: #0e0e1a;
   --color-surface: #161624;
+  --color-surface-2: #0f0f1a;
   --color-surface-elevated: #1a1a2e;
+
   --color-border-subtle: rgb(255 255 255 / 0.05);
   --color-border: rgb(255 255 255 / 0.1);
 
@@ -17,14 +48,165 @@
   --color-brand-600: #d97706;
 }
 
+/* ── Type scale ─────────────────────────────────────────────────────────────
+   Type up ~2pt overall. 2pt ≈ 2.67px, applied ADDITIVELY so the existing
+   hierarchy keeps its proportions instead of the big headings running away.
+   Tailwind's line-heights are unitless ratios (`calc(1 / 0.75)`), so they
+   follow the new size automatically. */
 :root {
+  --type-bump: 2.67px;
+
+  --text-xs: calc(0.75rem + var(--type-bump));
+  --text-sm: calc(0.875rem + var(--type-bump));
+  --text-base: calc(1rem + var(--type-bump));
+  --text-lg: calc(1.125rem + var(--type-bump));
+  --text-xl: calc(1.25rem + var(--type-bump));
+  --text-2xl: calc(1.5rem + var(--type-bump));
+}
+
+/* 584 places set a literal px size (text-[10px], text-[11px], …), but across
+   only five distinct values — so five rules scale them all. Unlayered, so they
+   win against Tailwind's own utility declarations. */
+.text-\[8px\] { font-size: calc(8px + var(--type-bump)); }
+.text-\[9px\] { font-size: calc(9px + var(--type-bump)); }
+.text-\[10px\] { font-size: calc(10px + var(--type-bump)); }
+.text-\[11px\] { font-size: calc(11px + var(--type-bump)); }
+.text-\[12px\] { font-size: calc(12px + var(--type-bump)); }
+
+/* ── Theme: dark (default) ──────────────────────────────────────────────────
+   Colours exactly as they were; only the type weight moves. */
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
+
+  --color-bg: #0e0e1a;
+  --color-surface: #161624;
+  --color-surface-2: #0f0f1a;
+
+  /* "bolded a little more" — every font-* utility reads these. */
+  --font-weight-normal: 500;
+  --font-weight-medium: 600;
+  --font-weight-semibold: 680;
+  --font-weight-bold: 780;
+}
+
+/* ── Theme: black ───────────────────────────────────────────────────────────
+   True black ground. Foregrounds sit just off pure white with a slight cool
+   tint — "soft toned" rather than glaring #fff on #000 — and weights are
+   heaviest here to hold up against that contrast. */
+:root[data-theme="black"] {
+  color-scheme: dark;
+
+  --color-bg: #000000;
+  --color-surface: #0a0a0c;
+  --color-surface-2: #050506;
+
+  --color-white: #f4f6fa;
+
+  /* Soft-toned muted ramp: cool grey-blue instead of neutral grey. */
+  --color-zinc-100: #eef1f6;
+  --color-zinc-200: #dde2ea;
+  --color-zinc-300: #c6cdd9;
+  --color-zinc-400: #aab3c2;
+  --color-zinc-500: #8d97a8;
+  /* 600/700 are lifted off a "natural" ramp to clear 4.5:1 on the near-black
+     card. Measured: #6f7988 landed at 4.49 and #555d6a at 2.96 — legible-looking
+     but failing, on labels that carry real content. */
+  --color-zinc-600: #7b8594;
+  --color-zinc-700: #727c8b;
+  --color-zinc-800: #1a1c22;
+  --color-zinc-950: #06060a;
+
+  --font-weight-normal: 550;
+  --font-weight-medium: 640;
+  --font-weight-semibold: 720;
+  --font-weight-bold: 820;
+}
+
+/* ── Theme: day ─────────────────────────────────────────────────────────────
+   Tan/cream paper, black-navy ink. This is where the palette inverts: `white`
+   becomes the ink and `black` becomes the paper, so every `text-white`,
+   `bg-white/5` and `bg-black/40` in the app flips correctly untouched. */
+:root[data-theme="day"] {
+  color-scheme: light;
+
+  --color-bg: #f2ead8;        /* tan/cream page */
+  --color-surface: #fbf6ea;   /* card — a shade lighter than the page */
+  --color-surface-2: #efe6d1;
+
+  /* The inversion. */
+  --color-white: #0d1b33;     /* primary ink: near-black navy */
+  --color-black: #fffdf6;     /* recessed fills (bg-black/40) read as paper */
+
+  /* Muted ramp, INVERTED: lower number = darker = more prominent, matching how
+     the app already uses it (zinc-500 is its label colour — 581 uses). */
+  --color-zinc-100: #0d1b33;
+  --color-zinc-200: #16294a;
+  --color-zinc-300: #22375c;
+  --color-zinc-400: #3c4a66;
+  /* The faint end of the ramp is compressed rather than continuing to lighten:
+     on cream, "faint" runs out of contrast fast. Measured, #788496 gave 3.52:1
+     and #949cab worse — both failing AA on labels that carry real content, so
+     500/600/700 all sit in the 4.6–5.5 band. Less visual separation between the
+     three faintest tiers is the deliberate trade for legibility. */
+  --color-zinc-500: #5a6478;
+  --color-zinc-600: #656f85;
+  --color-zinc-700: #656f85;
+  --color-zinc-800: #e4dbc4;  /* used as a section-banner fill */
+  --color-zinc-950: #fffdf6;  /* dropdown panel ground */
+
+  /* Accent: stock ambers vanish on cream, so pull them toward burnt amber.
+     These carry double duty — as text on cream (text-amber-300/400, 317 uses)
+     AND as button fills under `text-black`, which is now paper (bg-amber-400/500,
+     194 uses). Both directions are held at >= 4.5:1 against cream; the first
+     pass sat at 3.5:1 on the primary button, which fails AA for body text. */
+  --color-amber-100: #603804;
+  --color-amber-200: #6d4105;
+  --color-amber-300: #7d4b05;
+  --color-amber-400: #985905;
+  --color-amber-500: #9a5c04;
+  --color-amber-600: #834e05;
+
+  /* Status colours: the app uses the light 200–400 steps against a dark
+     ground, so darken them to read on cream. */
+  --color-green-200: #14532d;
+  --color-green-300: #166534;
+  --color-green-400: #15803d;
+  --color-green-500: #16a34a;
+  --color-emerald-300: #065f46;
+  --color-emerald-400: #047857;
+  --color-emerald-500: #059669;
+  --color-red-100: #7f1d1d;
+  --color-red-200: #8a1c1c;
+  --color-red-300: #991b1b;
+  --color-red-400: #b91c1c;
+  --color-red-500: #dc2626;
+  --color-blue-200: #1e3a8a;
+  --color-blue-300: #1d4ed8;
+  --color-blue-400: #2563eb;
+  --color-purple-300: #6b21a8;
+  --color-violet-300: #5b21b6;
+  --color-violet-400: #6d28d9;
+  --color-orange-300: #9a3412;
+  --color-orange-400: #c2410c;
+  --color-yellow-300: #854d0e;
+  --color-yellow-400: #a16207;
+  --color-teal-300: #115e59;
+  --color-cyan-300: #155e75;
+  --color-fuchsia-300: #86198f;
+
+  /* Lighter than the dark themes: dark ink on cream already reads heavy, and
+     700+ everywhere turns muddy. */
+  --font-weight-normal: 480;
+  --font-weight-medium: 560;
+  --font-weight-semibold: 640;
+  --font-weight-bold: 740;
 }
 
 html,
 body {
   background: var(--color-bg);
-  color: white;
+  color: var(--color-white);
   font-family: var(--font-body);
   min-height: 100vh;
   /* The page itself must never scroll sideways on mobile. Wide content
@@ -33,8 +215,27 @@ body {
   overflow-x: hidden;
 }
 
+/* Syne is a VARIABLE font with a 400–800 weight axis, and its glyphs widen
+   sharply along it — measured at the same size, weight 780 renders ~35% wider
+   than 700 ("Chiefs Pursuit Surplus" 332px vs 246px). So the app-wide weight
+   bump, which is right for the body face, stretched every heading and made
+   figures like "PO-4640938 · $13,531.25" hard to read.
+
+   Display weights are therefore capped here, independent of the theme: the
+   utilities on a `.font-display` element read these local values instead of the
+   `:root` ones, because a custom property resolves from the element it is used
+   on. 650/600 keeps Syne's character while staying compact — narrower even than
+   the original 700 — and the slight negative tracking firms up its wide
+   counters. Safe to set letter-spacing here: no `.font-display` element uses a
+   `tracking-*` utility, so nothing is being overridden.
+   To dial it: raise/lower these three numbers, or set letter-spacing to 0. */
 .font-display {
   font-family: var(--font-display);
+  --font-weight-normal: 520;
+  --font-weight-medium: 560;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 650;
+  letter-spacing: -0.02em;
 }
 
 .font-body {
@@ -46,7 +247,199 @@ body {
   align-items: center;
   border-radius: 9999px;
   padding: 0.125rem 0.5rem;
-  font-size: 10px;
+  font-size: calc(10px + var(--type-bump));
   font-weight: 600;
   font-family: var(--font-body);
+}
+
+/* ── Button feedback ────────────────────────────────────────────────────────
+   Every button in this app (207 of them, across 79 files) had NO press state:
+   no :active, no focus ring, nothing between "I clicked" and the page changing.
+   The buttons felt dead even when the action worked.
+
+   This is deliberately global rather than a utility class, because it has to
+   reach every button — icon buttons in table rows, tabs, the theme toggle — not
+   just the ones anybody remembers to opt in. It is unlayered, so it wins over
+   Tailwind's utility layer; that is the point, but it also means the transition
+   below has to RESTATE the colour properties, otherwise it would override
+   `transition-colors` and kill the hover fades those buttons already had.
+
+   `filter: brightness()` rather than a hard-coded pressed colour: it works on
+   amber fills, ghost buttons and dark chrome alike, in all three themes. */
+button,
+[role="button"] {
+  transition:
+    transform 190ms cubic-bezier(0.2, 0.9, 0.3, 1),
+    filter 190ms ease-out,
+    opacity 120ms ease,
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+/* The press itself.
+   The asymmetric timing matters more than the numbers: a click can be 30ms, so
+   at a symmetric 90ms the button barely moved before it was back — measurably
+   applied, but not something you would notice. Going DOWN is near-instant and
+   coming back UP takes 190ms, so even the quickest click leaves a visible
+   settle. The `transition` here overrides the base one only while held. */
+button:not(:disabled):active,
+[role="button"]:not([aria-disabled="true"]):active {
+  transform: scale(0.94) translateY(1px);
+  filter: brightness(0.82);
+  transition:
+    transform 40ms ease-out,
+    filter 40ms ease-out;
+}
+
+/* Plenty of controls are anchors wearing button clothes ("Export CSV", "Import
+   CSV", the Reset on every filter bar). They can't scale — an inline text link
+   that jumps on click looks broken — but they can darken, which is the half of
+   the press feedback that reads on text. */
+a:active {
+  filter: brightness(0.88);
+}
+
+/* Keyboard users got nothing at all before this. */
+button:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--color-amber-400);
+  outline-offset: 2px;
+}
+
+/* In `base`, not unlayered, unlike everything else here: 46 buttons already
+   carry a deliberate `disabled:opacity-40` / `-30` / `-60`, and an unlayered
+   rule would silently overrule every one of them. This is the default for the
+   buttons that never said anything; a utility still wins. */
+@layer base {
+  button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+}
+
+/* Working. `pointer-events: none` is the double-submit guard: `disabled` already
+   blocks the click, this stops the hover state flickering under a stuck cursor. */
+button[data-pending] {
+  cursor: wait;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+/* Done — the "did it work?" answer. A ring rather than a colour change, so it
+   reads the same on an amber fill as on a ghost button. */
+@keyframes btn-saved {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--color-emerald-400) 70%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+button[data-saved] {
+  animation: btn-saved 1.2s ease-out;
+}
+
+/* The spinner is CSS, not an element, so ANY button marked `data-pending` gets
+   one — the form submits handled by SubmitButton and the client-side fetch
+   buttons handled by useBusy alike. One mechanism, no chance of the two drifting
+   apart, and nothing to remember when adding a button. */
+button[data-pending]::after {
+  content: "";
+  display: inline-block;
+  width: 0.85em;
+  height: 0.85em;
+  margin-left: 0.45em;
+  vertical-align: -0.1em;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 9999px;
+  animation: btn-spin 0.6s linear infinite;
+}
+@keyframes btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Motion is feedback here, not decoration, so the press still registers — the
+   movement is what goes away. */
+@media (prefers-reduced-motion: reduce) {
+  button,
+  [role="button"] {
+    transition: filter 90ms ease, opacity 120ms ease;
+  }
+  button:not(:disabled):active,
+  [role="button"]:not([aria-disabled="true"]):active {
+    transform: none;
+    filter: brightness(0.8);
+    transition: filter 40ms ease-out;
+  }
+  button[data-saved] {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--color-emerald-400);
+  }
+  button[data-pending]::after {
+    animation-duration: 1.5s;
+  }
+}
+
+/* Page-level working bar (src/components/WorkIndicator.tsx). Fixed to the top of
+   the viewport so it is visible wherever you are scrolled, and above the header.
+   The inner span sweeps rather than showing real progress — the duration of a
+   server action is not knowable in advance, and a fake percentage would be a
+   worse lie than an honest "still going". */
+.work-indicator {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  z-index: 9999;
+  background: color-mix(in oklab, var(--color-amber-400) 18%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+}
+.work-indicator > span {
+  display: block;
+  height: 100%;
+  width: 40%;
+  background: var(--color-amber-400);
+  animation: work-sweep 1.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes work-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(350%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .work-indicator > span {
+    width: 100%;
+    animation: none;
+    opacity: 0.85;
+  }
+}
+
+/* The upfit diagram is a spec sheet that gets printed and handed to techs, so
+   its canvas is white paper in every theme — never the themed ink colour. */
+.upfit-canvas {
+  background: #ffffff;
+}
+
+/* Printed output is ink-on-paper whatever theme is active on screen. */
+@media print {
+  html,
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
 }

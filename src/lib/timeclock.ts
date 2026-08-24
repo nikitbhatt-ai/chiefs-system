@@ -7,7 +7,12 @@ import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { timeEntries, workOrders } from "@/db/schema";
 import { distanceMeters, withinGeofence, ENFORCE, RADIUS_METERS } from "@/config/shopLocation";
-import { DEFAULT_LABOR_RATE_USD_PER_HOUR } from "@/config/labor";
+import {
+  CLOCKED_SECONDS_SQL,
+  laborCostCents,
+  loadLaborRates,
+  rateForUser,
+} from "@/lib/laborRates";
 
 export type Coords = { lat: number; lng: number };
 
@@ -104,39 +109,83 @@ export async function getOpenEntry(userId: string) {
   return open ?? null;
 }
 
-// Per-work-order labor roll-up: total clocked hours and labor $ for closed
-// shifts, ordered by spend. Open shifts are excluded (no end time yet).
+// Per-work-order labor roll-up: clocked hours and labor cost per build, ordered
+// by spend. Open shifts are excluded (no end time yet, so nothing to value).
+//
+// Cost is derived from the ACTUAL punches booked against each work order,
+// valued per technician at that person's rate from `labor_rates` (their own
+// override, else the shop default) — see src/lib/laborRates.ts. Grouping by
+// technician as well as work order is what makes per-person rates meaningful;
+// the previous version grouped by work order only and multiplied by one
+// hardcoded shop rate, so a senior tech and an apprentice on the same build
+// cost the same.
 export type WorkOrderLabor = {
   workOrderId: string;
   woNumber: string | null;
-  minutes: number;
+  seconds: number;
   hours: number;
-  laborCost: number;
+  costCents: number;
+  /**
+   * True when some of these hours had no rate to value them at, so `costCents`
+   * understates the real cost. Surfaced in the UI rather than silently
+   * reporting a too-low number.
+   */
+  missingRate: boolean;
 };
 
-export async function laborByWorkOrder(): Promise<WorkOrderLabor[]> {
-  const rows = await db
-    .select({
-      workOrderId: timeEntries.workOrderId,
-      woNumber: workOrders.woNumber,
-      minutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntries.clockedOutAt} - ${timeEntries.clockedInAt})) / 60), 0)`,
-    })
-    .from(timeEntries)
-    .leftJoin(workOrders, eq(workOrders.id, timeEntries.workOrderId))
-    .where(sql`${timeEntries.workOrderId} IS NOT NULL AND ${timeEntries.clockedOutAt} IS NOT NULL`)
-    .groupBy(timeEntries.workOrderId, workOrders.woNumber);
+/**
+ * Roll up labor per build. Pass `workOrderId` to cost a single build instead of
+ * loading every one — the work-order detail page needs exactly one, and scanning
+ * the whole shop to display it was wasteful.
+ */
+export async function laborByWorkOrder(workOrderId?: string): Promise<WorkOrderLabor[]> {
+  const filters = [
+    sql`${timeEntries.workOrderId} IS NOT NULL`,
+    sql`${timeEntries.clockedOutAt} IS NOT NULL`,
+  ];
+  if (workOrderId) filters.push(eq(timeEntries.workOrderId, workOrderId));
 
-  return rows
-    .map((r) => {
-      const minutes = Math.round(Number(r.minutes) || 0);
-      const hours = minutes / 60;
-      return {
-        workOrderId: r.workOrderId as string,
+  const [rows, rates] = await Promise.all([
+    db
+      .select({
+        workOrderId: timeEntries.workOrderId,
+        userId: timeEntries.userId,
+        woNumber: workOrders.woNumber,
+        seconds: CLOCKED_SECONDS_SQL,
+      })
+      .from(timeEntries)
+      .leftJoin(workOrders, eq(workOrders.id, timeEntries.workOrderId))
+      .where(and(...filters))
+      // Per technician per build, so each person's hours are costed at their rate.
+      .groupBy(timeEntries.workOrderId, timeEntries.userId, workOrders.woNumber),
+    loadLaborRates(),
+  ]);
+
+  const byWo = new Map<string, WorkOrderLabor>();
+  for (const r of rows) {
+    if (!r.workOrderId) continue;
+    const seconds = Number(r.seconds) || 0;
+    const hours = seconds / 3600;
+    const { rateCents, source } = rateForUser(rates, r.userId);
+
+    const cur =
+      byWo.get(r.workOrderId) ??
+      {
+        workOrderId: r.workOrderId,
         woNumber: r.woNumber ?? null,
-        minutes,
-        hours: Math.round(hours * 100) / 100,
-        laborCost: Math.round(hours * DEFAULT_LABOR_RATE_USD_PER_HOUR * 100) / 100,
+        seconds: 0,
+        hours: 0,
+        costCents: 0,
+        missingRate: false,
       };
-    })
-    .sort((a, b) => b.laborCost - a.laborCost);
+    cur.seconds += seconds;
+    cur.hours += hours;
+    // Round per technician, then sum — so the per-tech rows on a job add up to
+    // the job's total exactly.
+    cur.costCents += laborCostCents(hours, rateCents);
+    if (source === "unset" && seconds > 0) cur.missingRate = true;
+    byWo.set(r.workOrderId, cur);
+  }
+
+  return Array.from(byWo.values()).sort((a, b) => b.costCents - a.costCents);
 }

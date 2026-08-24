@@ -10,6 +10,7 @@ import { SortHeader } from "@/components/SortHeader";
 import { parsePagination } from "@/lib/pagination";
 import { normalizeInventorySort, inventoryOrderBy } from "@/lib/inventorySort";
 import { PartAddForm } from "./PartAddForm";
+import { SubmitButton } from "@/components/SubmitButton";
 
 async function createPart(formData: FormData) {
   "use server";
@@ -170,7 +171,7 @@ export default async function InventoryPage({
     <AppShell title="Inventory" subtitle="Parts and supplies">
       <PartAddForm action={createPart} vendors={vendorRows} />
 
-      <form className="bg-[#161624] border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
+      <form className="bg-surface border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
         {/* Preserve the active sort (and tag filter) when applying search/filters. */}
         <input type="hidden" name="sort" value={sort} />
         <input type="hidden" name="dir" value={dir} />
@@ -240,7 +241,7 @@ export default async function InventoryPage({
         </a>
       </form>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -321,21 +322,19 @@ export default async function InventoryPage({
                       <form action={archivePart} className="inline mr-3">
                         <input type="hidden" name="id" value={p.id} />
                         <input type="hidden" name="archive" value={p.archived ? "0" : "1"} />
-                        <button
-                          type="submit"
+                        <SubmitButton
                           className="text-[11px] text-zinc-500 hover:text-white"
                         >
                           {p.archived ? "Unarchive" : "Archive"}
-                        </button>
+                        </SubmitButton>
                       </form>
                       <form action={deletePart} className="inline">
                         <input type="hidden" name="id" value={p.id} />
-                        <button
-                          type="submit"
+                        <SubmitButton
                           className="text-[11px] text-zinc-500 hover:text-red-400"
                         >
                           Delete
-                        </button>
+                        </SubmitButton>
                       </form>
                     </td>
                   </tr>

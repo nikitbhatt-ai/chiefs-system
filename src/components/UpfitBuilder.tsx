@@ -271,7 +271,7 @@ export function UpfitBuilder({
   return (
     <div className="space-y-4">
       {/* Vehicle identity */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 items-end">
+      <div className="bg-surface border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 items-end">
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
           Vehicle template
           <select
@@ -299,7 +299,7 @@ export function UpfitBuilder({
       </div>
 
       {/* Equipment toolbar */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-3 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
             Pick a part from inventory
@@ -462,7 +462,7 @@ export function UpfitBuilder({
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         {/* Diagram */}
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-3">
           <div className="mb-2">
             <div className="text-xs font-body font-semibold text-white">
               {vehicleLabel.trim() || "Vehicle (unset)"}
@@ -505,7 +505,7 @@ export function UpfitBuilder({
           <div
             ref={boxRef}
             onClick={handleBoxClick}
-            className="relative w-full bg-white rounded border border-white/10 overflow-hidden select-none"
+            className="upfit-canvas relative w-full rounded border border-white/10 overflow-hidden select-none"
             style={{ cursor: pendingSelection ? "crosshair" : "default", touchAction: "none" }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -532,7 +532,7 @@ export function UpfitBuilder({
 
         {/* Pin list / sidebar */}
         <div className="space-y-3">
-          <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+          <div className="bg-surface border border-white/5 rounded-lg p-3">
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
               Placed pins ({pins.length})
             </div>
@@ -720,7 +720,7 @@ export function UpfitBuilder({
               onChange={(e) => setNotes(e.target.value)}
               rows={5}
               placeholder="Wiring notes, mounting preferences, customer requests…"
-              className="mt-1 w-full bg-[#161624] border border-white/10 rounded p-2 text-xs text-white font-body"
+              className="mt-1 w-full bg-surface border border-white/10 rounded p-2 text-xs text-white font-body"
             />
           </label>
         </div>

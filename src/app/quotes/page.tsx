@@ -12,6 +12,7 @@ import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
 import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const QUOTE_STATUSES = ["draft", "sent", "approved", "converted"];
 
@@ -126,7 +127,7 @@ export default async function QuotesPage({
 
   return (
     <AppShell title="Quotes" subtitle="Estimates and quotes for customers">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New quote
         </h3>
@@ -143,12 +144,11 @@ export default async function QuotesPage({
               </option>
             ))}
           </select>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Create draft
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -166,7 +166,7 @@ export default async function QuotesPage({
         </form>
         <ListFilters basePath="/quotes" view={view} tag={tag} carry={{ q, status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -217,12 +217,11 @@ export default async function QuotesPage({
                     </a>
                     <form action={deleteQuote} className="inline">
                       <input type="hidden" name="id" value={q.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                       >
                         Delete
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

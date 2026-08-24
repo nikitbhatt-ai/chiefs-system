@@ -27,6 +27,7 @@ import { categoryForKind } from "@/lib/customerDocuments";
 import { parseMentions } from "@/lib/mentions";
 import { notify, notifyMany } from "@/lib/notifications";
 import { loadStageMapping, mapCrmToWorkflow, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -360,7 +361,7 @@ export default async function DealEntityPage({
 
   return (
     <AppShell title={`Deal ${d.id.slice(0, 8)}`} subtitle={`${pipeline.label} pipeline`}>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Parallel tracks</h3>
           {latestQuote ? (
@@ -431,7 +432,7 @@ export default async function DealEntityPage({
 
       {tab === "details" && (<>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 md:col-span-2 space-y-2 text-xs font-body text-zinc-300">
           <div className="flex items-center gap-3 mb-2 flex-wrap">
             <span className={`inline-block text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${STAGE_COLORS[d.stage] ?? "bg-zinc-500/10 text-zinc-400 border-zinc-500/30"}`}>{stageLabel(d.stage)}</span>
             {(() => {
@@ -470,13 +471,13 @@ export default async function DealEntityPage({
             <a href="/deals" className="text-[11px] text-zinc-400 hover:text-white">Back to list</a>
           </div>
         </div>
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-2 text-center">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 gap-2 text-center">
           <Stat label="Activity" value={activity.length} />
           <Stat label="Open tasks" value={taskRows.filter((tk) => !tk.completedAt).length} />
         </div>
       </div>
       {pipeline.hardGate ? (
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Credentials</h3>
             <span className="text-[10px] font-body text-zinc-500">
@@ -518,12 +519,12 @@ export default async function DealEntityPage({
                         {!c.verifiedAt && (
                           <form action={verifyCredential} className="inline">
                             <input type="hidden" name="credId" value={c.id} />
-                            <button type="submit" className="text-[10px] text-green-400 hover:text-green-300">Verify</button>
+                            <SubmitButton className="text-[10px] text-green-400 hover:text-green-300">Verify</SubmitButton>
                           </form>
                         )}
                         <form action={deleteCredential} className="inline">
                           <input type="hidden" name="credId" value={c.id} />
-                          <button type="submit" className="text-[10px] text-zinc-500 hover:text-red-400">Delete</button>
+                          <SubmitButton className="text-[10px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                         </form>
                       </div>
                     </div>
@@ -568,7 +569,7 @@ export default async function DealEntityPage({
               </div>
             </fieldset>
             <div className="md:col-span-3 flex justify-end">
-              <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add credential</button>
+              <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add credential</SubmitButton>
             </div>
           </form>
         </div>
@@ -587,7 +588,7 @@ export default async function DealEntityPage({
           ? `/deals/${d.id}/documents/${docSpec.slug.replace(/^pipeline_doc:/, "")}/print`
           : null;
         return (
-          <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+          <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
             <div className="flex items-center justify-between">
               <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Documents</h3>
               {docSpec ? (
@@ -622,9 +623,9 @@ export default async function DealEntityPage({
                   <form action={uploadDocument} encType="multipart/form-data" className="flex items-center gap-2">
                     <input type="hidden" name="kind" value={docSpec.slug} />
                     <input type="file" name="file" required className="text-[11px] font-body text-zinc-300 file:bg-black/40 file:border file:border-white/10 file:rounded file:px-2 file:py-1 file:text-zinc-300 file:mr-2" />
-                    <button type="submit" className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1">
+                    <SubmitButton className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded px-3 py-1">
                       Upload signed copy
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
                 {pipelineDocs.length > 0 ? (
@@ -636,7 +637,7 @@ export default async function DealEntityPage({
                           <span>{new Date(f.uploadedAt).toLocaleDateString()}</span>
                           <form action={deleteFile} className="inline">
                             <input type="hidden" name="fileId" value={f.id} />
-                            <button type="submit" className="hover:text-red-400">Delete</button>
+                            <SubmitButton className="hover:text-red-400">Delete</SubmitButton>
                           </form>
                         </div>
                       </li>
@@ -652,7 +653,7 @@ export default async function DealEntityPage({
                 <form action={uploadDocument} encType="multipart/form-data" className="flex items-center gap-2">
                   <input type="hidden" name="kind" value="deal_attachment" />
                   <input type="file" name="file" required className="text-[11px] font-body text-zinc-300 file:bg-black/40 file:border file:border-white/10 file:rounded file:px-2 file:py-1 file:text-zinc-300 file:mr-2" />
-                  <button type="submit" className="text-[11px] font-body text-amber-400 hover:text-amber-300">+ Upload</button>
+                  <SubmitButton className="text-[11px] font-body text-amber-400 hover:text-amber-300">+ Upload</SubmitButton>
                 </form>
               </div>
               {otherDocs.length === 0 ? (
@@ -666,7 +667,7 @@ export default async function DealEntityPage({
                         <span>{new Date(f.uploadedAt).toLocaleDateString()}</span>
                         <form action={deleteFile} className="inline">
                           <input type="hidden" name="fileId" value={f.id} />
-                          <button type="submit" className="hover:text-red-400">Delete</button>
+                          <SubmitButton className="hover:text-red-400">Delete</SubmitButton>
                         </form>
                       </div>
                     </li>
@@ -713,7 +714,7 @@ export default async function DealEntityPage({
                   <form action={postNote} className="flex gap-2 mt-1.5">
                     <input type="hidden" name="parentId" value={a.id} />
                     <textarea name="body" rows={2} placeholder="Reply… @mention someone with @username" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-1.5 text-xs font-body text-white placeholder:text-zinc-500" />
-                    <button type="submit" className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1 self-start">Post reply</button>
+                    <SubmitButton className="text-[11px] font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1 self-start">Post reply</SubmitButton>
                   </form>
                 </details>
               )}
@@ -727,11 +728,11 @@ export default async function DealEntityPage({
         };
 
         return (
-          <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+          <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
             <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Activity feed</h3>
             <form action={postNote} className="flex gap-2">
               <textarea name="body" rows={2} placeholder="Post an internal note (@mention someone with @username)…" className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs font-body text-white placeholder:text-zinc-500" />
-              <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 self-start">Post</button>
+              <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 self-start">Post</SubmitButton>
             </form>
             {roots.length === 0 ? (
               <p className="text-xs text-zinc-500 font-body">No activity yet.</p>
@@ -743,7 +744,7 @@ export default async function DealEntityPage({
       })()}
 
       {tab === "tasks" && (
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Tasks</h3>
         <form action={createTask} className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
           <input name="title" required placeholder="Task title *" className="md:col-span-2 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
@@ -761,7 +762,7 @@ export default async function DealEntityPage({
           </select>
           <input name="dueDate" type="date" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white" />
           <textarea name="description" placeholder="Description (optional)" rows={2} className="md:col-span-4 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add task</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add task</SubmitButton>
         </form>
         {taskRows.length === 0 ? (
           <p className="text-xs text-zinc-500 font-body">No tasks.</p>
@@ -775,9 +776,9 @@ export default async function DealEntityPage({
                   <form action={toggleTaskComplete} className="pt-0.5">
                     <input type="hidden" name="taskId" value={t.id} />
                     <input type="hidden" name="currentlyCompleted" value={done ? "1" : "0"} />
-                    <button type="submit" aria-label="Toggle complete" className={`w-4 h-4 rounded border ${done ? "bg-green-500 border-green-400" : "bg-black/40 border-white/30 hover:border-amber-400"}`}>
+                    <SubmitButton aria-label="Toggle complete" className={`w-4 h-4 rounded border ${done ? "bg-green-500 border-green-400" : "bg-black/40 border-white/30 hover:border-amber-400"}`}>
                       {done && (<span className="text-black text-[10px] leading-none">✓</span>)}
-                    </button>
+                    </SubmitButton>
                   </form>
                   <div className="flex-1 min-w-0">
                     <div className={`text-white ${done ? "line-through" : ""}`}>{t.title}</div>
@@ -791,7 +792,7 @@ export default async function DealEntityPage({
                   </div>
                   <form action={deleteTask}>
                     <input type="hidden" name="taskId" value={t.id} />
-                    <button type="submit" className="text-[10px] text-zinc-500 hover:text-red-400">Delete</button>
+                    <SubmitButton className="text-[10px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                   </form>
                 </li>
               );
@@ -802,7 +803,7 @@ export default async function DealEntityPage({
       )}
 
       {tab === "communication" && (
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Communication log</h3>
         <form action={logMessage} className="grid grid-cols-1 md:grid-cols-4 gap-2 items-end">
           <select name="channel" required defaultValue="" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white">
@@ -821,7 +822,7 @@ export default async function DealEntityPage({
           </select>
           <input name="subject" placeholder="Subject (optional)" className="md:col-span-2 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
           <textarea name="body" required rows={2} placeholder="Body / notes *" className="md:col-span-4 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-xs text-white placeholder:text-zinc-500" />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Log message</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Log message</SubmitButton>
         </form>
         {messageRows.length === 0 ? (
           <p className="text-xs text-zinc-500 font-body">No communication logged yet.</p>
@@ -835,7 +836,7 @@ export default async function DealEntityPage({
                   </span>
                   <form action={deleteMessage} className="inline">
                     <input type="hidden" name="msgId" value={m.id} />
-                    <button type="submit" className="text-zinc-500 hover:text-red-400">Delete</button>
+                    <SubmitButton className="text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                   </form>
                 </div>
                 {m.subject && (<div className="text-white font-semibold">{m.subject}</div>)}

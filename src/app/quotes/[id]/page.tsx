@@ -8,6 +8,7 @@ import { QuoteTabs } from "@/components/QuoteTabs";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
+import { quoteTotals } from "@/lib/quoteTotals";
 
 export const dynamic = "force-dynamic";
 
@@ -38,29 +39,10 @@ async function saveQuote(formData: FormData) {
   // longer enforced anywhere — they were blocking saves silently and
   // surfacing as a "status revert to draft" on the quote editor.
 
-  let subtotal = 0;
-  let discountTotal = 0;
-  let feeTotal = 0;
-  let laborTotal = 0;
-  for (const l of lines) {
-    if (l.kind === "item") {
-      const gross = (l.quantity || 0) * (l.unitPrice || 0);
-      const disc =
-        l.discountKind === "pct"
-          ? gross * ((l.discount || 0) / 100)
-          : l.discount || 0;
-      subtotal += gross;
-      discountTotal += disc;
-    } else if (l.kind === "labor") {
-      laborTotal += (l.hours || 0) * (l.rate || 0);
-    } else if (l.kind === "fee") {
-      feeTotal += l.amount || 0;
-    }
-  }
   const taxRate = Number(formData.get("taxRate") ?? "0") || 0;
-  const taxableBase = subtotal - discountTotal + feeTotal + laborTotal;
-  const taxTotal = taxableBase * (taxRate / 100);
-  const grandTotal = taxableBase + taxTotal;
+  // Round each line before summing (shared helper) so the stored totals foot to
+  // the per-line totals shown on the quote/PDF.
+  const { subtotal, tax: taxTotal, grand: grandTotal } = quoteTotals(lines, taxRate);
 
   // Vehicle (from the in-editor VIN decoder). Blank fields clear.
   const vin = String(formData.get("vin") ?? "").trim().toUpperCase() || null;

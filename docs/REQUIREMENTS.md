@@ -908,6 +908,23 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
 - [x] Column titles on the line-items table.
 - [x] Print / Save as PDF view at /quotes/[id]/print.
 - [ ] Partial payment tracking, down-payment tracking.
+- [x] **Quote totals foot to the penny** (2026-08-06). Fixed a $0.01 gap where the grand total summed un-rounded per-line discounts (sum-then-round) while the displayed line totals were rounded (round-then-sum). New shared `src/lib/quoteTotals.ts` (`lineDiscount`/`lineNet`/`quoteTotals`) rounds each line before summing; used by the editor, save path, print view, and PDF so the rows always add up to the total. Print/PDF derive the grand from the rounded components + stored tax, so even un-re-saved quotes foot.
+- [x] **Original vs discounted price per line on the customer copy** (added
+      2026-08-06). So customers can see the discount being given, each discounted
+      item line now shows its pre-discount line total struck through above the
+      discounted line total, on both the HTML print view and the PDF (quote and
+      invoice variants). Undiscounted lines are unchanged (single total). The
+      existing Discount column still shows the amount/percent. This pairs with
+      the package bundle price, which populates those per-line discounts.
+- [x] **Add a new part (with part #) inline from a quote/PO line + duplicate
+      guard** (2026-08-06). The shared `PartSearchCombobox` (used by quote and PO
+      line editors) now offers "＋ Add new part … to inventory" when typing. It
+      opens an inline form (Part # / name / cost / sell), POSTs to `/api/parts`
+      to create the part, and adds it to the line. `POST /api/parts` now rejects
+      a duplicate SKU with HTTP 409 and the message **"duplicate part number
+      detected, add appropriate part number"**, which the combobox shows as a
+      popup (`window.alert`) and inline — so a clashing part number can't be
+      silently created. Gated by an `allowCreate` prop (default on).
 - [ ] CAD design upload (sent during quote/closing) — uses Vercel Blob.
 - [ ] Print and Send-to-customer are separate (Print done; Send pending).
 - [ ] Per-customer discount calculator that pre-fills line discounts
@@ -965,6 +982,25 @@ CREATE INDEX IF NOT EXISTS stage_overrides_deal_idx ON stage_overrides (deal_id)
     and later rows with the same SKU are flagged (`duplicate sku in file …`)
     so they show in the dry-run preview and are skipped, rather than silently
     colliding on commit.
+  - **Lenient by default** (added 2026-08-04, from real vendor/package sheets
+    that don't carry every field). The import imports what it can and reports
+    the rest instead of failing:
+    - **Only `sku` is required** — it's the identity we upsert on and can't
+      invent (a generated SKU would duplicate on every re-upload). A missing
+      SKU *column* is still fatal, with a message naming the accepted labels;
+      a row missing its SKU *value* is skipped-and-listed, not file-fatal.
+    - **`name` is optional** — falls back to the description, then the SKU.
+      New aliases: `part_description`/`part_desc`/`item_description` →
+      description; `unit_cost` → internal cost; `sell_price`/`unit_price` →
+      price; `section` → category; `brand` → manufacturer.
+    - **Numbers coerce, never fail** — an unparseable cost/qty defaults and
+      logs a warning; the row still imports.
+    - **Structural rows** (blank lines, section dividers like
+      `SEATING & PRISONER AREA` with no SKU or data) are dropped silently.
+    - Defaults/coercions surface as **warnings** in the preview (nothing is
+      silently changed). A **Strict mode** checkbox promotes every warning to
+      a skip, for a deliberate clean catalog load. The `strict` flag is sent
+      to `POST /api/parts/import`.
 - [ ] Per-part PO history button — currently shown as the FIFO layers
       table on /inventory/[id]; consider a dedicated button if needed.
 - [ ] Inline "Add new vendor" inside the dropdown (currently links
@@ -1013,18 +1049,37 @@ those SKUs.
       discounting stays on the quote). POSTs to `/api/packages`.
 - [x] **Package bulk upload** — `/packages/import` UI +
       `POST /api/packages/import` (dry-run preview → confirm). One row per
-      component grouped by `package_name`; `part` rows resolve by SKU against
-      the live catalog (unknown SKU = error, since inventory loads first).
-      Upserts by name; a package with any errored row is skipped whole (no
-      partial bundles). Sample template + column docs in the import UI.
+      component grouped by package name; upserts by name. Sample template +
+      column docs in the import UI.
+  - **Lenient by default** (added 2026-08-04, same rationale as the inventory
+    importer — real vendor/package templates lack a `component_type` column
+    and don't carry every field):
+    - **Only a package-name column is required** (`package_name` /
+      `template_name` / `package` / `name`). A blank name cell **inherits the
+      row above**, matching section templates that print the title once.
+    - **`component_type` is optional and inferred** — no SKU + hours → labor,
+      amount-only → fee, else a part; defaults to `item`. Explicit
+      `part`/`labor`/`fee` still honored.
+    - **Unresolved part SKUs still import** — the component is kept linked by
+      SKU snapshot with `partId = null` (the data model already allowed this),
+      so a package can reference a part not yet loaded into inventory. Was
+      previously a hard error.
+    - **A bad row is dropped and reported, not the whole package** — reversing
+      the old "any errored row skips the bundle" behavior. A package is only
+      skipped if it has no name or zero usable components.
+    - **Structural rows** (blank lines, section dividers like
+      `SEATING & PRISONER AREA`) are dropped silently; unparseable numbers
+      coerce with a warning. Defaults/coercions/dropped rows surface as
+      per-package **warnings** in the preview.
 
 ### CSV columns (package import)
 
-`package_name` (req), `component_type` (req: `part`/`labor`/`fee`),
-`package_category`, `package_description`, `sku` (req for `part`), `label`
-(line description; part rows default to `SKU — name`), `quantity`,
-`unit_price` (blank part price defaults to the part's inventory price),
-`hours`, `rate`, `amount`.
+Only `package_name` (or `template_name`/`package`/`name`) is required.
+Optional: `component_type` (`part`/`labor`/`fee`, inferred if absent),
+`package_category`, `package_description`, `sku`/`part_number`,
+`label`/`part_description` (line description; part rows default to
+`SKU — name`), `quantity`/`qty`, `unit_price`/`sell_price` (blank part price
+defaults to the part's inventory price), `hours`, `rate`, `amount`.
 
 ### Schema additions (Packages) — run in Neon's SQL Editor
 
@@ -1044,10 +1099,70 @@ CREATE INDEX IF NOT EXISTS packages_name_idx ON packages (name);
 CREATE INDEX IF NOT EXISTS packages_tags_gin ON packages USING gin (tags);
 ```
 
+**Bundle/deal price (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN package_price numeric(12,2);
+```
+
+**Promo→package link (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN source_promo_id uuid REFERENCES vendor_promo(id) ON DELETE SET NULL;
+```
+
+**Package markup / cost model (added 2026-08-06) — run in Neon's SQL Editor:**
+
+```sql
+ALTER TABLE packages ADD COLUMN markup_pct numeric(5,2);
+```
+
+- [x] **Markup vs Margin pricing mode on packages** (2026-08-06). The builder's "Apply to sell prices" control now has a mode toggle: **Markup % (on cost)** `sell = cost × (1 + p)`, or **Margin % (off list)** `sell = cost ÷ (1 − p)` — so a "40% off list" dealer-discount price is entered as 40 in margin mode (cost $60 → sell $100 = list). Stored in `packages.pricing_mode` (null = markup). Run: `ALTER TABLE packages ADD COLUMN pricing_mode text;`
+- [x] **Cost + markup → sell on packages** (user requirement 2026-08-06;
+      terminology: *cost* = internal cost, *sell price* = retail). Package item
+      components now carry an internal **cost** per unit (in the `components`
+      jsonb — no DDL) distinct from the part's normal average cost, because the
+      **promo cost differs**. A package-level **markup %** (`packages.markup_pct`,
+      the "vendor margin", default 40% on promo sync) derives each line's sell:
+      `sell = cost × (1 + markup)`. The builder shows editable Cost + Sell
+      columns, a Markup field with "Apply to sell prices", and a live
+      cost/sell/margin summary. On a quote the sell prices are used and the promo
+      cost is carried onto the line for margin/reporting; sales still add
+      case-by-case discounts on the quote (existing mechanics).
+- [x] **"Add to Packages" from a vendor promo** (added 2026-08-06). Vendor promos
+      (buy side) weren't searchable/quotable; only sales packages are. An
+      "Add to Packages" action on `/vendor-promos` materializes a sellable
+      package via `syncPromoToPackage()` in `src/lib/promos.ts`: each line's
+      internal **cost** = the promo's allocated unit cost (à la carte when the
+      promo isn't priced), **sell** = cost × (1 + markup) at the package markup
+      (default 40%). Linked via `packages.source_promo_id` (idempotent re-sync),
+      opens in the builder to tune markup/sell, and shows a "promo" badge on the
+      `/packages` list. Keeps buy/sell separate (PROMO_PACKAGES.md §0).
+
+- [x] **Sell-side bundle/deal price on a package** (added 2026-08-06). Fixes
+      "adding a promo package to a quote doesn't discount/allocate anything":
+      sales `packages` stored only à la carte line prices, and by design
+      (`PROMO_PACKAGES.md §0`) the purchase-side `vendor_promo` allocation must
+      not bleed onto customer quotes. So packages gained an optional
+      `package_price` — the customer's deal price for the package's PART lines.
+      When set, dropping the package on a quote allocates it across the part
+      lines as per-line `$ off` discounts so their line totals sum to it exactly
+      (labor/fees quote separately); when blank, behavior is unchanged (à la
+      carte). Reuses the Phase-3 allocation engine (`allocatePromo`) on the sell
+      basis via `expandPackageWithBundlePrice()` in `src/lib/packages.ts`;
+      refuses a price above the à la carte parts value (adds the lines
+      undiscounted and tells the rep why). Settable on the package builder (live
+      saving preview) and via the import column
+      `package_price`/`promo_price`/`bundle_price` (package-level, first row that
+      supplies it wins). Surfaced on the `/packages` list under the total price.
+      This supersedes the deferred item below for the itemized case.
+
 ### Deferred (post Packages v1)
 
 - **Fixed-price bundle option** (single-line package price) as an alternative
-  to the itemized roll-up, chosen per package.
+  to the itemized roll-up, chosen per package. (Partly addressed 2026-08-06 by
+  the sell-side bundle price above, which keeps the itemized lines but allocates
+  a deal price across them; a single-collapsed-line variant is still open.)
 - **Package on the PDF/print view** as a labeled group header rather than a
   flat list of lines.
 - **Package profitability report** (Shop Monkey surfaces most-used / highest-
@@ -1072,6 +1187,51 @@ CREATE INDEX IF NOT EXISTS packages_tags_gin ON packages USING gin (tags);
 - [ ] QC checklist built into the workflow — must be completed to close
       a build.
 - [ ] Intake checklist with photo upload + generate external PDF.
+
+## Part # column + discounted-price margin/markup (added 2026-08-06)
+
+- [x] **Part number is its own column** (not under the description) on the PO
+      editor line grid and the package builder parts grid — an editable Part #
+      input per line (so a number can be typed manually), with a header label.
+      The PO PDF already carried a Part # column.
+- [x] **Margin/markup reflect cost → retail → discounted price.** The package
+      builder summary now shows **Cost (we pay)**, **Retail (list)**, and the
+      **Discounted price** (the bundle/promo price when set, else retail, with
+      the $ off retail), then **Margin** = discounted − cost (over the discounted
+      sell, %) and **Markup** = (discounted − cost)/cost. The `/packages` list
+      margin likewise uses the discounted bundle price when one is set, else the
+      retail sell.
+
+## Purchase-order status workflow (added 2026-08-06)
+
+Statuses the user set: **Pending** (needs to be placed) → **Ordered** (placed
+with the vendor) → **Received** (some parts in) → **Fulfilled** (all parts &
+quantities received). Pending/Ordered are chosen by hand when creating or
+editing a PO; Received/Fulfilled are set **automatically** by receiving.
+
+**Schema (run in Neon's SQL Editor):**
+
+```sql
+ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'ordered';
+ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'fulfilled';
+```
+
+- [x] Added `ordered` + `fulfilled` to the `purchase_order_status` enum
+      (additive; legacy `pending_review`/`po_received`/`received` still render).
+- [x] Shared vocab in `src/lib/poStatus.ts` (labels, colors, the manual-choice
+      list) used by the list, detail, editor, and filter so they agree. Display:
+      `partially_received` → "Received", `fulfilled` → "Fulfilled".
+- [x] **Create** (`/purchase-orders`) and **edit** (`POEditor`) expose a status
+      picker limited to Pending/Ordered; once receiving starts the status is
+      shown read-only (auto-managed), and a plain save never downgrades a
+      received/fulfilled PO.
+- [x] **Receiving** (`receivePurchaseOrder` in `src/lib/inventory.ts`) sets
+      `partially_received` on a partial receipt and `fulfilled` when every line's
+      full quantity is in.
+- [x] Downstream gates updated for `fulfilled`: dashboard "arriving soon" /
+      "late vendor" / "received this month", procurement parts-to-order on-order
+      subtraction, work-order cross-PO stock math, and the PO PDF RECEIVED
+      watermark.
 
 ## Procurement / lead-time management (PR 19)
 
@@ -1704,8 +1864,10 @@ Geo-verified clock-in plus per-build labor tracking. Also fixes the dead
 - [x] **`src/lib/timeclock.ts`** — transactional `clockIn` / `clockOut`
   (one open shift per user, enforced by a `FOR UPDATE` lock on the open
   row), `getOpenEntry`, and `laborByWorkOrder` (SQL roll-up of hours +
-  labor $ per work order). Labor rate: `src/config/labor.ts`
-  (`DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`).
+  labor cost per work order). ~~Labor rate: `src/config/labor.ts`
+  (`DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`).~~ **Superseded** — rates now
+  come from the `labor_rates` table via `src/lib/laborRates.ts`; see
+  "Labor cost per build" below.
 - [x] **API**: `POST /api/timeclock/clock-in` (validates geofence; 403
   when off-site, 409 when already clocked in) and
   `POST /api/timeclock/clock-out`.
@@ -2029,9 +2191,16 @@ the subledger. Only Phase 1's chart of accounts is required.
       - **Restoring a build** (`restoreWorkOrderParts`) → the reverse, at the
         same FIFO cost refilled.
 - [x] **Non-fatal by design**: hooks resolve all needed accounts first and skip
-      posting entirely if any is missing (chart of accounts not seeded), so core
-      inventory keeps working with or without the accounting module. Never posts
-      a one-sided entry.
+      posting entirely if any is missing, so core inventory keeps working with or
+      without the accounting module. Never posts a one-sided entry. "Missing"
+      covers BOTH the chart of accounts being unseeded AND the accounting schema
+      never having been installed at all — `resolveAccountId` probes with
+      `to_regclass('gl_accounts')` (returns NULL, never raises, for an absent
+      relation) before selecting, because a bare SELECT against a missing
+      `gl_accounts` would raise and abort the shared inventory transaction. That
+      abort is what surfaced as an "Application error: a server-side exception"
+      when clicking **Receive** on a PO in an environment where
+      `accounting_phase1.sql` had not been run.
 - [x] **Reconciliation** (rule #6): `/accounting/inventory` shows the FIFO
       subledger value (Σ `quantity_remaining × unit_cost`) vs the posted
       Inventory (1200) ledger balance, per-part valuation, and a tie/diff badge.
@@ -2074,29 +2243,115 @@ Integrates with the existing `work_orders` + `time_entries` rather than adding
       (currently a manual admin action); absorb labor into WIP via a
       labor-applied clearing account for full job absorption costing.
 
-### Phase 6 — Reporting: P&L, job costing, dashboards, aging (pending)
+### Phase 6 — Reporting: P&L, job costing, dashboards, aging ✅ (PR: accounting-phase-6)
 
-P&L by date range grouped Revenue → Labor (by department) → Other Expenses →
-Net, with comparison columns, drill-down, CSV/PDF export; AR/AP aging buckets
-(not yet due, 1–30, 31–60, 61–90, 90+); balance sheet from the ledger.
+**No schema change** — all read-only, computed from posted journal lines
+(`src/lib/reports.ts`).
 
-### Phase 7 — AR and AP agents (pending)
+- [x] **Profit & Loss** (`/accounting/reports/pnl`) by date range, grouped
+      Revenue → Labor (by department) → Other Expenses → Net. **Comparison
+      column** = the immediately-preceding period of equal length.
+      **Drill-down**: each revenue/expense account links to its ledger detail
+      (`/accounting/reports/ledger/[code]`) showing the transactions.
+      **CSV export** via `/api/accounting/reports/pnl/csv`.
+- [x] **Balance sheet** (`/accounting/reports/balance-sheet`) as of any date:
+      Assets / Liabilities / Equity from account balances, with current-period
+      net income folded into equity and an Assets = Liabilities + Equity check.
+- [x] **A/R aging** (`/accounting/reports/ar-aging`) and **A/P aging**
+      (`/accounting/reports/ap-aging`): open invoices/bills bucketed
+      not-yet-due / 1–30 / 31–60 / 61–90 / 90+ by days past due, with bucket
+      totals and a grand total.
+- [x] Reports index at `/accounting/reports`; overview page gained a Reports
+      card. Job-costing rollup already shipped in Phase 5.
+- [ ] Later: PDF export of the statements (react-pdf infra already in the repo);
+      dashboard tiles/charts on the accounting overview.
 
-Server-side Anthropic calls. AR agent drafts overdue-invoice reminder emails;
-AP agent flags bills due / anomalies and proposes a payment schedule. Both
-DRAFT only — Approve/Edit/Reject with logging; never act externally on their own.
+### Phase 7 — AR and AP agents ✅ (PR: accounting-phase-7)
 
-### Phase 8 — Tax / government tracking (pending)
+SQL to run in Neon: `docs/sql/accounting_phase7.sql` (adds the `agent_drafts`
+table). **Also set `ANTHROPIC_API_KEY` in the Vercel project env** — without it
+the screens load and show a "not configured" hint instead of erroring. Uses
+`@anthropic-ai/sdk` (added as a dependency) with `claude-opus-4-8`.
 
-Track tax liabilities as ledger accounts; period summaries for filings;
-visible "confirm with a qualified accountant" disclaimer; **no hardcoded tax
-rates** — ask the user for jurisdiction, keep rates configurable.
+- [x] **Server-side Claude calls only** (`src/lib/agents.ts`) — the key is read
+      from `process.env.ANTHROPIC_API_KEY` on the server; the browser never sees
+      it. `agentsConfigured()` gates the UI.
+- [x] **AR agent** `draftArReminder(invoiceId)` — drafts an overdue-invoice
+      reminder **email** from the invoice's real facts (customer, balance, days
+      past due). Prompt forbids inventing links, fees, or legal threats. Fast
+      path (no thinking).
+- [x] **AP agent** `draftApSchedule()` — reads all open bills (via the Phase 6
+      aging query), flags anomalies (past due, outliers, possible duplicates,
+      clusters) and proposes a prioritized payment schedule. Adaptive thinking.
+- [x] **DRAFT only, never acts externally**: every result is an `agent_drafts`
+      row with status `pending`. Approving records an **internal sign-off** — it
+      does not send the email or schedule the payment; those stay manual.
+- [x] **Approve / Edit / Reject with logging**: the review page lets an admin
+      edit the draft text, then Approve or Reject with an optional note;
+      `reviewed_by` / `reviewed_at` / `review_note` / `edited_content` are all
+      persisted.
+- [x] **Screens**: `/accounting/agents` (overdue invoices with "Draft reminder",
+      an "Analyze payables" button, and the draft log), `/accounting/agents/[id]`
+      (review + approve/edit/reject). Overview page gained an AR/AP agents card.
+      All admin-only.
+- [ ] Later: actually send approved reminder emails via an email provider (kept
+      manual on purpose for now); scheduled/batch drafting of reminders.
 
-### Phase 9 — QuickBooks Online integration (LAST — do not start early)
+### Phase 8 — Tax / government tracking ✅ (PR: accounting-phase-8)
 
-Intuit OAuth 2.0; chart-of-accounts mapping screen; pull payroll labor totals
-for P&L reconciliation; one-direction sync into a QBO **sandbox** first, with
-explicit user confirmation before any production company; sync log.
+SQL to run in Neon: `docs/sql/accounting_phase8.sql` (adds `tax_rates`). Tax
+liability itself lives in the ledger (Sales Tax Payable, 2100, seeded Phase 1).
+
+- [x] **Tax liability tracked as a ledger account** — invoicing a taxed quote
+      credits Sales Tax Payable (2100, Phase 2); remitting debits it. No new
+      liability table; the ledger is the source of truth.
+- [x] **Configurable rates, nothing hardcoded** — `tax_rates` (jurisdiction,
+      `rate_pct`, active flag, notes) managed at `/accounting/tax/rates`. The
+      team enters jurisdictions and rates; the code hardcodes none.
+- [x] **Period filing summary** (`src/lib/tax.ts` → `taxSummary`) computed from
+      the 2100 ledger: opening liability, collected this period (credits),
+      remitted this period (debits), closing liability — for any date range.
+- [x] **Record a remittance** posts Dr Sales Tax Payable / Cr Cash, so paying
+      the authority draws the liability down in the ledger.
+- [x] **Accountant disclaimer** shown on every tax screen ("bookkeeping summary,
+      not tax advice — confirm with a qualified accountant").
+- [x] **Screens**: `/accounting/tax` (summary + remittance form) and
+      `/accounting/tax/rates` (manage rates). Overview page gained a Tax card.
+      All admin-only.
+- [ ] Later: per-jurisdiction liability breakdown (needs a jurisdiction tag on
+      journal lines); auto-applying configured rates on the quote side.
+
+### Phase 9 — QuickBooks Online integration ✅ (PR: accounting-phase-9)
+
+SQL to run in Neon: `docs/sql/accounting_phase9.sql` (adds `qbo_settings`,
+`qbo_account_map`, `qbo_sync_log`). **To actually connect**, set
+`QBO_CLIENT_ID`, `QBO_CLIENT_SECRET`, `QBO_REDIRECT_URI` in the Vercel env and
+register the redirect URI in your Intuit developer app. Without them the screens
+load and say "not configured" (`qboConfigured()` gates the UI).
+
+- [x] **Intuit OAuth 2.0** (`src/lib/qbo.ts`): `beginAuth()` builds the Intuit
+      authorize URL with a CSRF `state`; the callback route
+      `/api/accounting/quickbooks/callback` verifies state and exchanges the
+      code for tokens (Basic-auth to Intuit's token endpoint), storing
+      access/refresh tokens + `realmId`. Admin-only. Standard flow; must be
+      exercised against a real Intuit app + sandbox to confirm end-to-end.
+- [x] **Chart-of-accounts mapping** (`/accounting/quickbooks/mapping`): every
+      active `gl_account` → a QBO account name/id, stored in `qbo_account_map`.
+- [x] **Payroll labor import for P&L reconciliation**: enter labor totals per
+      department (from the payroll report) → posts Dr Wages (5000) per
+      department / Cr Cash (1000), landing labor in the P&L labor section. Auto-
+      pull from QBO is the future step once a live connection is proven.
+- [x] **Sandbox-first + explicit production confirmation**: environment defaults
+      to `sandbox`; switching to `production` requires ticking a confirm box and
+      disconnects the current session. Sync is one-direction into QBO.
+- [x] **Sync log** (`qbo_sync_log`, `/accounting/quickbooks/sync-log`): every
+      connect/disconnect/mapping/import/environment change is recorded.
+- [x] **Screens**: `/accounting/quickbooks` (status, connect/disconnect,
+      environment, payroll import), `/mapping`, `/sync-log`. Overview page gained
+      a QuickBooks card. All admin-only.
+- [ ] Later (needs live Intuit credentials to build+verify safely): token
+      auto-refresh, fetching the QBO account list into the mapping dropdown,
+      pushing journal entries to QBO, and pulling payroll totals automatically.
 
 ### Searchable part picker (shipped)
 
@@ -2123,6 +2378,908 @@ won't scale once the catalog is large.
   load.
 
 No schema change.
+
+## Promo packages, cost layers, reservations & backfill (brief 2026-08-03)
+
+Whelen (and vendors like them) sell most of our lighting as discounted
+**packages** — one price for a fixed basket of parts — while we also buy
+those same part numbers individually at full price. This build makes both
+work under one SKU. Full brief, phase plan, and the Phase 0 audit map live
+in **`docs/PROMO_PACKAGES.md`**; read that before touching any of it.
+
+Four governing ideas:
+
+1. **One SKU, one bin.** A part is never split into a "promo" SKU and an
+   "individual" SKU. One `parts` row, one on-hand count.
+2. **Cost lives in layers.** Every receipt creates a cost layer with its own
+   unit cost and provenance; on-hand is the sum of the layers. The existing
+   `part_receipts` table already is this — extend it, don't duplicate it.
+   **Weighted average is the primary costing basis** for work orders (see
+   below); layers still back it, and FIFO stays available as a second
+   valuation.
+3. **A package price is allocated across its parts**, in proportion to each
+   line's à la carte cost, so every part carries a fair share of the
+   discount. **Package purchases only** — allocation must be unreachable
+   from an individual PO line.
+4. **Claims, not separate bins.** A sold build reserves the parts it needs;
+   everyone else pulls against available (= on-hand − reserved).
+
+Ground rules for every phase:
+
+- Money is `numeric(12,2)`, never `real`/`float`/`double`. (Audit found no
+  float money columns; the exposure is money stored inside `jsonb` line
+  items — see `docs/PROMO_PACKAGES.md` §0.2.)
+- Multi-step money writes go in one Drizzle transaction.
+- **Snapshot, don't reference-live.** Promo lines snapshot the à la carte
+  cost at definition; PO lines snapshot the allocated cost at PO time. Later
+  price-list edits never retroactively change a placed PO or a used promo.
+- Allocation lives in exactly one code path, callable only with a
+  `vendor_promo`.
+- Receiving is idempotent — a receipt key or unique constraint, not just a
+  row lock.
+- Never edit a posted journal entry; corrections are reversing entries.
+
+Phases (one at a time, approval between each):
+
+- [x] **Phase 0 — Guardrails and inventory audit.** Written map of the real
+      tables, money-column types, on-hand storage, and current PO/receiving
+      behaviour. No code changes. Result: `docs/PROMO_PACKAGES.md` §0.
+- [x] **Phase 1 — `vendor_part_price`**, the à la carte cost basis.
+      Date-ranged rows per (vendor, sku); a price change adds a row rather
+      than overwriting, so historical POs stay explainable. This list — not
+      `parts.cost` — is what individual PO lines pre-fill from, so a
+      discounted package receipt can't leak into the next full-price order.
+      Delivered: `vendorPartPrice` table (schema + `docs/sql/promo_phase1.sql`,
+      partial unique index enforcing one current price per vendor+sku);
+      `src/lib/vendorPricing.ts` resolver (`currentAlacarteCost`,
+      `priceHistory`, transactional `setCurrentPrice` that closes-and-appends);
+      `/api/vendor-part-prices` route pair; `/vendor-pricing` admin screen
+      (set-price form + current/history views) wired into Operations nav.
+      SQL seeds the two à la carte costs the brief states (XI3JC 112.00,
+      TCRWX6 1282.80); the rest of the Whelen sheet is loaded via the screen —
+      not fabricated, so Phase 3's reconciliation stays honest.
+- [x] **Phase 2 — Cost layers + average/FIFO consumption.** Extend
+      `part_receipts` with `source_kind`/`promo_id`, add `inventory_issue`
+      rows, a general `issue(sku, qty, workOrderId?)`, and opening-balance
+      layers for stock that predates the layer table. Add `parts.avg_cost`
+      `numeric(12,4)` as a moving average maintained on receipt, a one-row
+      `costing_policy` table (default `weighted_average`), and make
+      `inventoryValuation.ts` method-aware. Issuing drains layers oldest-first
+      for quantity and provenance but charges the job at average cost.
+      **`parts.cost` auto-updates from `avg_cost`** (= `ROUND(avg_cost, 2)`,
+      relabelled "Average cost" on the form, still editable for opening
+      values); `avg_cost` `numeric(12,4)` is the authoritative average and
+      `parts.cost` `numeric(12,2)` its operational reflection. Both update at
+      receipt, in the receive transaction, never at PO entry. On
+      quote→invoice conversion, snapshot `avg_cost` onto the line items so the
+      internal margin view reflects cost at sale, not today's average.
+- [x] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
+      engine.** Pure, deterministic, unit-tested; rounding plug ties the
+      allocation to the package price exactly; refuses any promo whose
+      allocated unit cost exceeds its à la carte snapshot.
+- [x] **Phase 4 — POs apply the package; receiving writes layers.**
+      Allocation runs once at PO creation (Whelen ships partial, so a
+      partial receipt needs a cost already on the line). Individual POs
+      never call it. PO lines stayed jsonb (extended, not promoted to a
+      table — see PROMO_PACKAGES.md decision #5).
+- [x] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
+      fire when a work order enters `confirmed` (customer PO in hand, build
+      committed to the shop) — one `reserveForWorkOrder` called from
+      `maybePromoteWonDeal` and the `/workflow` board path. Every picking
+      screen reads available, never raw on-hand.
+- [x] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
+      Pulling reserved stock requires an override that logs who/why and
+      raises its own replacement requisition.
+- [x] **Phase 7 — Promo vs backfill savings report.** Did the package
+      discount survive the backfill spend? Must be built from the layer
+      table's `source_kind` + per-layer `unit_cost`, **not** from job costing
+      — under average costing the promo saving is smeared into the average
+      and is invisible in work-order cost by construction.
+
+Decisions settled 2026-08-03: weighted average primary / FIFO secondary;
+reservations fire on the `confirmed` transition; Whelen pays no rebates so
+there is no rebate-to-cost mechanism. Still open: whether PO lines stay
+`jsonb` or get promoted to a `purchase_order_line` table (Phase 4;
+recommendation is to promote). Full reasoning in `docs/PROMO_PACKAGES.md`.
+
+## Labor cost per build — one rate source, from actual clocked time
+
+**Requirement (user, this session):** the labor cost of a build must be
+driven by the actual hours clocked against that specific work order, and
+by one authoritative rate — not by a hardcoded number.
+
+### What was wrong
+
+Two independent labor-cost calculations disagreed:
+
+- `src/config/labor.ts` hardcoded `DEFAULT_LABOR_RATE_USD_PER_HOUR = 95`,
+  read by `laborByWorkOrder()` in `src/lib/timeclock.ts` and shown on
+  `/work-orders/[id]`. It grouped by work order only, so every tech on a
+  build cost the same.
+- The `labor_rates` table (per-user + shop default, Phase 5) was read by
+  `src/lib/jobCosting.ts` and drove `/accounting/job-costing`.
+
+Measured on a seeded build — Senior 10 h @ $120 + Apprentice 10 h @ $40:
+the work-order page reported **$1,900** (20 h × $95) while job costing
+reported **$1,600**. Worse, `defaultLaborRateCents()` returned `0` when
+the shop-default row was never seeded, so job costing silently reported
+**$0** labor, and `listJobCosts()` then skipped such jobs entirely
+because it tested labor *cost* rather than *hours*.
+
+### What is true now
+
+- [x] **`src/lib/laborRates.ts` is the only place a cost rate resolves.**
+  `loadLaborRates()` reads the table once; `rateForUser()` returns the
+  user's override, else the shop default, else `"unset"`. A rate of `0`
+  is treated as not-filled-in and falls through.
+- [x] **`src/config/labor.ts` is deleted.** No hardcoded rate exists.
+- [x] **Cost derives from real punches per build, per tech.**
+  `laborByWorkOrder()` groups by `(work_order_id, user_id)` and values
+  each person's hours at their own rate. Only closed punches count.
+  It accepts an optional `workOrderId` so a single build can be costed
+  without scanning the shop.
+- [x] **Both sides use one hours expression** (`CLOCKED_SECONDS_SQL`) and
+  round per tech per job, so the per-tech rows add up to the job total
+  and the two screens agree by construction.
+- [x] **"No rate" is visible, never silently $0.** `missingRate` /
+  `rateSource` flow through `WorkOrderLabor`, `LaborEntry`, and
+  `JobCost`; `/work-orders/[id]`, `/timeclock`,
+  `/accounting/job-costing`, and its detail page all say so and link to
+  `/accounting/labor-rates`, which warns when no shop default exists.
+- [x] **A job with clocked hours but no rate still lists** —
+  `listJobCosts()` keys the skip on hours, not cost.
+
+These are **cost** rates (what a build costs us). What we *bill* for
+labor is entered per quote line in the quote editor and is deliberately
+unrelated — never use one for the other or margins go wrong.
+
+### Not done here (needs a decision)
+
+Labor still does **not** post to the ledger against a job. WIP holds
+materials only; the sole path into the books is the manual QBO payroll
+import (`src/lib/qbo.ts`), which posts Dr Wages / Cr Cash with no
+`work_order_id`. Posting labor to WIP would double-count against that
+import unless one of the two is made authoritative first. See P1 item
+D-1 in `audits/audit-2026-08-03.md`.
+
+### SQL to run in Neon
+
+`labor_rates` already exists (Phase 5), so no table is added. Two things
+still need running once — seeding the shop-default rate, and adding an
+index that Phase 5 left out.
+
+The gap: `labor_rates_user_uidx` is `UNIQUE (user_id)`, and Postgres
+treats NULLs as **distinct**, so that index never constrained the
+shop-default row. Nothing stopped several default rows existing, and
+`ON CONFLICT (user_id)` silently does not fire for them — an
+`INSERT ... ON CONFLICT` run twice creates two defaults. App code now
+resolves the most-recently-updated one so behaviour is at least
+deterministic, but the index below is the real fix.
+
+Safe to run more than once:
+
+```sql
+-- Collapse any duplicate shop-default rows, keeping the newest.
+DELETE FROM labor_rates
+ WHERE user_id IS NULL
+   AND id <> (SELECT id FROM labor_rates WHERE user_id IS NULL
+              ORDER BY updated_at DESC, created_at DESC LIMIT 1);
+
+-- Enforce at most one shop-default row from here on (Phase 5's
+-- UNIQUE (user_id) does not cover NULL).
+CREATE UNIQUE INDEX IF NOT EXISTS labor_rates_single_default_uidx
+  ON labor_rates ((user_id IS NULL)) WHERE user_id IS NULL;
+
+-- Shop-wide default hourly COST rate. Written in DOLLARS in one place;
+-- rate_cents is integer cents, so it is converted here rather than making
+-- you do the arithmetic. $95.00 matches the old hardcoded constant, so
+-- nothing shifts on day one. Or just set it at /accounting/labor-rates.
+WITH rate AS (SELECT ROUND(95.00 * 100)::bigint AS cents)
+UPDATE labor_rates SET rate_cents = (SELECT cents FROM rate), updated_at = now()
+ WHERE user_id IS NULL;
+
+WITH rate AS (SELECT ROUND(95.00 * 100)::bigint AS cents)
+INSERT INTO labor_rates (user_id, rate_cents)
+SELECT NULL, (SELECT cents FROM rate)
+ WHERE NOT EXISTS (SELECT 1 FROM labor_rates WHERE user_id IS NULL);
+```
+
+Until the rate is set, every screen says so rather than reporting $0 as
+though it were real.
+
+## Themes — Dark / Black / Day
+
+**Requirement (user, this session):** three selectable themes. Dark stays as
+it was but with type ~2pt larger and a little bolder. Black = black
+background, white and other soft-toned fonts, bold. Day = tan/cream
+background with black/navy fonts.
+
+Selected by `data-theme` on `<html>`; all values live in
+`src/app/globals.css`. `src/lib/theme.ts` holds the theme list and the
+bootstrap script; `src/components/ThemeToggle.tsx` is the header control.
+
+### The header control (user, this session)
+
+A single **sun/moon icon button**, top-right next to the notification bell —
+requested in place of the original three-way Dark/Black/Day segmented
+control. The icon shows what you'll *get*, not where you are: a sun means
+"click for day".
+
+There are three themes but only one moon, so **the night side resolves to
+whichever dark theme was last used** (`chiefs-theme-night` in
+localStorage, default `dark`). Someone on Black who flips to day and back
+returns to Black rather than being silently moved to Dark. Black therefore
+has no UI to reach it from Day — switching a browser's night side to Black
+means setting `chiefs-theme` to `black` once (dev tools, or
+`localStorage.setItem('chiefs-theme','black')`), after which the toggle
+remembers it. If Black needs to be pickable again, that is a third state on
+this button or a small picker elsewhere.
+
+### How it re-skins 106 files with no component edits
+
+Tailwind v4 compiles every palette utility to `var(--color-…)` — including
+opacity variants, which become
+`color-mix(… var(--color-white) 5% …)`. So redefining those variables under
+`[data-theme="…"]` changes the whole app at once. Verified against the
+Tailwind CLI output before relying on it.
+
+The consequence is that **the palette is now semantic**, and Day inverts it:
+
+| Utility | Means | Day mode |
+| --- | --- | --- |
+| `text-white` | primary foreground | navy ink `#0d1b33` |
+| `text-zinc-200…700` | muted ramp | **inverted** — lower number = darker |
+| `bg-white/5`, `/10` | raised surface, hairline border | subtle navy wash |
+| `bg-black/20`, `/40` | recessed (inputs) | paper `#fffdf6` |
+| `bg-surface` | card background | `#fbf6ea` |
+| `amber-*` | brand accent | burnt amber, darkened |
+
+**When adding colour to a component, use a slot that already exists.** A
+literal hex will not follow the theme. The 161 old `bg-[#161624]` /
+`bg-[#0f0f1a]` usages were replaced with `bg-surface` / `bg-surface-2` for
+exactly this reason, and there are now no arbitrary hex colours in `src/`.
+
+### Type
+
+`--type-bump: 2.67px` (≈2pt) is added to every size, additively so the
+hierarchy keeps its proportions. Tailwind's line-heights are unitless
+ratios, so they follow automatically. 584 literal `text-[Npx]` usages span
+only five distinct values, so five unlayered rules scale them all.
+`--font-weight-*` is set per theme: Day lightest, Dark middle, Black
+heaviest (dark ink on cream already reads heavy; 700+ there turns muddy).
+
+### Display font weight is capped — do not remove this
+
+**Syne is a variable font with a 400–800 weight axis, and its glyphs widen
+sharply along it.** Measured at one size, weight 780 renders **~35% wider**
+than 700 — "Chiefs Pursuit Surplus" at 332px vs 246px. So the app-wide weight
+bump, which is correct for DM Sans, stretched every heading and made figures
+like `PO-4640938 · $13,531.25` hard to read.
+
+`.font-display` therefore redefines `--font-weight-*` locally (bold 650,
+semibold 600) plus `letter-spacing: -0.02em`. This works because a custom
+property resolves from the element it is used on, so the `font-bold` utility
+on a `.font-display` element picks up the local value rather than `:root`'s.
+Result is 228px — narrower than even the original 700 — while keeping Syne's
+character.
+
+Display weight is deliberately **theme-independent**: letting it vary per
+theme would reintroduce width differences between themes. If the headings
+ever need adjusting, change those three numbers rather than the `:root`
+weights, or the stretching comes back. No `.font-display` element uses a
+`tracking-*` utility, which is what makes setting letter-spacing there safe.
+
+### Contrast
+
+Black and Day were measured with a real contrast check (resolving `oklch`,
+which Tailwind emits by default) and have **zero** elements below 4.5:1.
+Getting there required lifting the faint end of both zinc ramps off a
+"natural" curve and darkening the Day ambers — the first pass had the
+primary button at 3.5:1 and Day's `text-zinc-600` at 3.5:1.
+
+**Dark is left as-is per the requirement, and it has ~54 elements below
+4.5:1** — `text-zinc-500` at 3.7:1 and `text-zinc-600` at 2.32:1 on a card.
+That is pre-existing, not introduced here. Two variable overrides in the
+dark block would fix it if wanted.
+
+### Exceptions
+
+- `.upfit-canvas` (the vehicle diagram) is literal white in every theme — it
+  is a spec sheet that gets printed.
+- `@media print` forces ink-on-paper regardless of the active theme.
+
+No schema change. Theme choice is per-browser (`localStorage`), not per-user
+in the database — so it does not follow someone to another machine.
+
+## Vendor package-template import (user requirement, 2026-08-05)
+
+**Requirement (user, this session):** import a vendor package template
+sheet (e.g. `PIU Whelen Lightbar Regional Promo`) in one pass. Rules the
+user stated:
+
+- **One sheet = one sellable package.** Every part line belongs to it —
+  lighting, siren, brackets, all sections. Sections are groupings, not
+  separate packages.
+- **The package price covers ALL parts on the sheet.** In the sample, the
+  `Lightbar Regional Promo · $7,200` header row (a price with no part
+  number) is the cost of the whole basket, allocated across every part.
+- **Not every package has promo pricing** — a sheet with no package-price
+  row imports at plain à la carte, no promo. Both cases must work.
+- **Promo pricing varies by deal** (regional heavily discounted, national
+  and bulk different, and they don't take every promo), so the price is
+  always read from the sheet — never computed or assumed.
+- **Ignore the Notes column** entirely (it lists Whelen promo codes that
+  aren't all used).
+- Each part's allocated cost is the **net of its own à la carte cost** —
+  parts do not share a price.
+
+### Implementation
+
+- [x] `src/lib/packageTemplateCsv.ts` — pure parser. Alias-matched headers
+      (`Template Name`, `Section`, `Part Number`, `Part Description`, `Qty`,
+      `Unit Cost`, `Sell Price`, `Install Hrs`); `Line #`, `Discount %`,
+      `Extended Sell`, `Notes` ignored. A priced row with **no part number**
+      is the package price (or freight, if the label says freight/shipping);
+      it is never a component line. Section name infers labor/fee vs item.
+      Blank Template Name / Section cells inherit the row above. Structural
+      rows drop silently.
+- [x] `src/lib/packageTemplateImport.ts` — preview/commit importer. Creates:
+      à la carte `vendor_part_price` rows from each part's Unit Cost (via the
+      append-only `setCurrentPrice`), ONE `vendor_promo` + lines allocated
+      across all parts when the sheet is priced, and the sellable `packages`
+      row (items with Sell Price + labor + fees). Missing SKUs are created
+      with the sheet's cost/price as opening values. Packages upsert by name.
+      **Duplicate SKUs on a sheet are merged for the promo** (summed qty —
+      e.g. XI3JC 4 roof + 2 grille = 6) while the sellable package keeps the
+      lines separate as distinct placements.
+- [x] `POST /api/package-templates/import` `{ csv, vendorId, commit? }`.
+- [x] `/packages/import-template` — vendor picker (defaults to a
+      Whelen-matching vendor), file/paste, **dry-run preview → confirm**,
+      per-template result showing items / new parts / à la carte set /
+      promo saving. Linked from `/packages` and the Operations nav.
+- [x] **Report hardening:** `promoReport.ts` looked up the à la carte basis
+      with a join on `(promo_id, sku)`, which would multiply receipt rows
+      when a promo carries the same SKU twice. Now a correlated subquery, so
+      duplicate promo lines can't inflate units or cost.
+
+**Verified against the user's real sheet:** 19 part lines → 18 merged promo
+lines; basis $11,324.70 → package $7,200.00 = $4,124.70 saved; allocation
+ties to $7,200 exactly; every allocated cost ≤ its à la carte; 18 distinct
+allocated unit costs (no two parts share a price).
+
+### Deferred
+
+- Labor `rate` and fee `amount` import as 0 when the sheet leaves those
+  columns blank (the sample does) — filled in on the package editor.
+- Multi-sheet `.xlsx` upload (today: one CSV sheet per import; export each
+  tab, or paste it).
+
+## AP: PO receipt / vendor bill double-count (fixed)
+
+**Requirement (user, this session):** fix the P0 from
+`audits/audit-2026-08-03.md` where receiving a PO and entering its vendor bill
+both credited Accounts Payable.
+
+### What was wrong
+
+Receiving goods and being billed for them are two events against **one**
+liability, but both credited AP (2000):
+
+| Event | Old entry |
+| --- | --- |
+| Receive parts | Dr Inventory 1200 / **Cr AP 2000** |
+| Vendor bill | Dr *hand-picked expense* / **Cr AP 2000** |
+
+A $10,000 PO received **and** billed therefore showed **$20,000** owed, and the
+cost was booked twice — once as an Inventory asset, once as an expense.
+
+### What is true now
+
+Receipt credits a clearing account; the bill relieves it.
+
+| Event | Entry |
+| --- | --- |
+| Receive parts | Dr Inventory 1200 / Cr **Accrued Purchases 2050** |
+| Bill **against a PO** | Dr **2050** (received value) + Dr **5900** (any excess) / Cr AP 2000 |
+| Bill **not** against a PO | Dr chosen expense/asset accounts / Cr AP 2000 *(unchanged)* |
+| Pay vendor | Dr AP 2000 / Cr Cash 1000 *(unchanged)* |
+
+Over a full cycle Inventory rises, Cash falls, and 2050 returns to zero. Its
+running balance is a useful figure on its own: **goods received but not yet
+invoiced**.
+
+- [x] `docs/sql/accounting_phase10.sql` adds `2050 Accrued Purchases (GRNI)` and
+  `5900 Purchase Price Variance`; both are also in the phase-1 seed so a fresh
+  environment gets them without running phase 10.
+- [x] `src/lib/inventoryLedger.ts` — `postInventoryReceipt` credits 2050.
+- [x] `src/lib/ap.ts` — `createBill` with a `purchaseOrderId` relieves the
+  accrual and routes any excess to variance. **The caller's line accounts are
+  overridden on purpose**: the goods are already capitalised in Inventory, so
+  debiting an expense here is precisely the double-count being removed. Line
+  descriptions/amounts are still kept as bill detail.
+- [x] `accruedRemainingForPo()` is the three-way match. "Received" comes from
+  `part_receipts` (append-only, priced at arrival) rather than the PO's
+  **editable** line items, so a later price edit cannot rewrite history.
+  "Already relieved" is prior bills' 2050 debits, not their totals — a bill that
+  ran over only relieved part of itself.
+- [x] `BillForm` gained the PO picker. Before this, `purchaseOrderId` was never
+  sent by any UI, so **no bill was linked to a PO at all** and there would have
+  been nothing to trigger the new path. Selecting a PO hides the per-line
+  Account/Department pickers (the GL side is determined) and warns when the bill
+  exceeds the received value.
+
+**A partial bill is not a variance.** Billing less than was received leaves the
+remainder accrued, because another invoice is normally still coming. Only the
+*excess* over received value becomes variance. The consequence: if a vendor
+permanently under-bills, that residue sits in 2050 until someone clears it —
+there is no PO-close to detect "no more invoices are coming" (see the audit's
+D-8).
+
+### ⚠️ Sizing what is already posted
+
+Fixing the code stops new double-counts. It does **not** correct entries already
+in the ledger. Run this to size the existing overstatement:
+
+```sql
+SELECT COUNT(*) AS receipt_entries,
+       (SUM(jl.credit_cents)/100.0)::numeric(14,2) AS overstated_dollars,
+       MIN(je.entry_date)::date AS first_seen,
+       MAX(je.entry_date)::date AS last_seen
+FROM journal_lines jl
+JOIN journal_entries je ON je.id = jl.journal_entry_id
+JOIN gl_accounts    g  ON g.id  = jl.account_id
+WHERE g.code = '2000'
+  AND je.status = 'posted'
+  AND je.source = 'system'
+  AND je.memo LIKE 'Inventory received%'
+  AND jl.credit_cents > 0;
+```
+
+Correcting it is one journal entry reclassifying those credits from 2000 to
+2050 — **but whether to reclassify or reverse depends on which of those POs were
+also billed**, which is a call for whoever signs off on the books. Not posted
+automatically, on purpose.
+
+### Unrelated gap found while testing
+
+`part_receipts` has **no `CREATE TABLE` anywhere in the repo** —
+`promo_phase2.sql` calls it "the existing FIFO layer table" and only ALTERs it.
+A fresh environment cannot be built from the SQL in version control; the table
+has to be created by hand first. Worth adding a phase file for it.
+
+## Chart of accounts restructure (accountant's request, 2026-08-06)
+
+The accountant asked for a chart that shows where profit comes from and where
+cost goes, rather than a single Materials line and a single Wages line.
+
+### What was asked for
+
+1. **Cost of Goods Sold becomes its own account type**, not an expense
+   subgroup, so it gets its own P&L section above gross profit.
+2. **COGS split into the components installed on police vehicles** — wire &
+   cable, emergency lights, sirens, consoles, partitions, gun locks, mounting
+   brackets, radios, cameras, graphics/decals, freight in, shop supplies used on
+   jobs.
+3. **Contractor labor moves under COGS.**
+4. **Direct labor separated from administrative payroll.**
+5. **Operating expenses expanded** across 6xxx.
+6. **Nobody may choose Normal Balance.** Quoting the request: *"It prevents
+   someone from accidentally creating an expense account with a credit balance or
+   a liability with a debit balance."*
+
+### The chart
+
+```
+4000  Revenue
+5000  COST OF GOODS SOLD                     (type `cogs`, above gross profit)
+  5100  Vehicle Parts — Uncategorized        ← where unmapped material lands
+  5110  Wire & Cable          5170  Mounting Brackets
+  5120  Emergency Lights      5180  Radios
+  5130  Sirens & Speakers     5190  Cameras
+  5140  Consoles              5200  Graphics & Decals
+  5150  Partitions            5210  Freight In
+  5160  Gun Locks             5220  Shop Supplies Used on Jobs
+  5300  Direct Labor — Installers
+  5310  Direct Labor — Payroll Taxes
+  5320  Contractor Labor
+  5900  Purchase Price Variance              (group `cogs_other`)
+6000  OPERATING EXPENSES
+  6010  Payroll — Administrative    6150  Fuel
+  6020  Payroll Taxes — Admin       6160  Vehicle Expense
+  6030  Benefits                    6170  Shop Supplies (non-job)
+  6100  Office Rent                 6180  Advertising
+  6110  Utilities                   6190  Training
+  6120  Software Subscriptions      6200  Repairs & Maintenance
+  6130  Insurance                   6210  Depreciation
+  6140  Office Supplies
+```
+
+### Normal balance is derived, in three places
+
+`src/lib/chartOfAccounts.ts` is the single source: asset/expense/COGS → debit,
+liability/equity/revenue → credit.
+
+- The form has **no normal-balance input** — it shows the derived value
+  read-only (`src/components/accounting/AccountTypeFields.tsx`).
+- The API **ignores** any `normalBalance` in the request body and derives it
+  (`src/app/api/accounting/accounts/route.ts`).
+- A CHECK constraint enforces it for direct SQL
+  (`gl_accounts_normal_balance_matches_type`).
+
+A second CHECK (`gl_accounts_report_group_matches_type`) blocks the other way to
+create an account that reports nowhere: a P&L account with `report_group =
+'none'` appears on **no statement at all**, and a balance-sheet account carrying
+a P&L group would be double-counted. Which group beyond that is left to app code,
+because historical rows still carry the pre-restructure `labor` /
+`other_expense` values and must stay valid.
+
+The report group is also filtered by type in the form, so a COGS account cannot
+be filed under operating expenses and end up below gross profit.
+
+### COGS actually splits itself — by part category
+
+Twelve accounts are worthless if nothing posts to them. Material reaches COGS in
+exactly one place — the WIP→COGS settlement when a job closes — and that used to
+post the whole job as one line to 5100.
+
+- `part_category_accounts` maps `parts.category` (free text) → GL account,
+  case-insensitively.
+- On settle, `src/lib/cogsCategories.ts :: cogsSplitForWorkOrder` reads the
+  job's `inventory_issue` rows, groups their cost by the part's category, folds
+  those into accounts via the mapping, and apportions the **WIP balance** across
+  them.
+- The issue rows are **weights, not amounts**: their `unit_cost` is the FIFO
+  layer cost while WIP may have been charged at weighted average, so the totals
+  differ. Apportioning by weight with largest-remainder rounding means the split
+  always sums to the WIP balance to the cent.
+- Unmapped categories (and jobs with no issue detail) land on **5100
+  Uncategorized**. A settlement never fails because the mapping is incomplete.
+- `/accounting/cogs-categories` edits the mapping and lists what is still
+  unmapped; the accounting home shows that count. The job-costing detail page
+  previews exactly which accounts a settle would debit, before posting.
+- A category can only map to a `cogs_parts` account — enforced in
+  `setCategoryAccount`, so the server action and the API can't disagree.
+
+Changing a mapping affects **future** settlements only. Posted entries are never
+rewritten.
+
+### Direct vs administrative payroll is entered, not inferred
+
+The QuickBooks payroll import used to post everything to `5000 Wages`. Each
+department line now carries a Direct / Administrative choice: direct → `5300`
+(COGS, above gross profit), administrative → `6010` (overhead). Lines default to
+administrative, because overstating gross profit is the more misleading error.
+Only whoever runs payroll knows which departments turn wrenches.
+
+### What was done with the old accounts
+
+Journal lines reference account **ids**, so renaming and renumbering are safe —
+history follows the row.
+
+- `6000/6010/6020/6040` (Rent, Utilities, Software, Insurance) → renumbered to
+  `6100/6110/6120/6130`. Same rows, new codes, history intact.
+- `6030 Supplies` and `6050 Office Expense` do **not** map cleanly — the new
+  chart separates office supplies (6140) from non-job shop supplies (6170), and
+  nothing in the data says which those lumps were. Moved to `6230/6240`, renamed
+  "— legacy (pre-split)" and deactivated rather than relabelled on a guess. If
+  you know what they held, reactivate and rename one.
+- `5000/5010/5020` (Wages, Payroll Taxes, Benefits) → retired inactive, history
+  left in operating expenses. Splitting past payroll between COGS and overhead
+  after the fact would restate prior-period gross margin on a guess.
+- `5030 Contractor Labor` → retired inactive but regrouped to `cogs_labor`. That
+  **is** a reclassification of prior periods, and it is the correction that was
+  asked for.
+- `5100 Cost of Goods Sold` → retyped `cogs`, renamed `Vehicle Parts —
+  Uncategorized`. It held material cost while sitting under `other_expense`,
+  which was the "COGS mixed in with expenses" problem itself.
+
+### SQL to run in Neon
+
+`docs/sql/accounting_phase11.sql`, **after** `accounting_phase10.sql`. Safe to
+re-run. Two things about it are not cosmetic:
+
+- **Order matters.** The renumbering in step 2 must run before step 5 inserts
+  new accounts at `6010/6020/6030`, or past utility bills end up labelled Payroll
+  and the new Benefits account silently isn't created.
+- **Every renumber is guarded** with `AND NOT EXISTS (… destination code …)`.
+  That guard is what makes a second run safe: on re-run, `6010` is the *new*
+  Payroll account, and an unguarded rename would collide with Utilities or move
+  Payroll into it. Verified idempotent over three consecutive runs.
+
+Step 8 seeds the category mapping by keyword-matching the categories already on
+parts — **once, in a file you can read**, not silently at posting time. Anything
+it doesn't match is left unmapped and visible in the UI.
+
+### Verified against a real Postgres
+
+`scripts/verify-cogs-split.ts` and `scripts/verify-pnl-cogs.ts` (throwaway
+database only — they post entries). They check that the split sums to the WIP
+balance exactly at awkward totals, that unmapped categories collect on 5100,
+that the settle entry balances and zeroes the job out of WIP, that the rollup
+still sees material after a split settle, that a second settle is refused and
+reopen restores WIP, that variance stays out of `cogs_parts`, and that the
+balance sheet still balances now that `cogs` is its own type. Both pass.
+
+`scripts/scratch-schema-drift.ts` lists columns `schema.ts` declares that a
+database lacks — needed because `drizzle/0000_initial.sql` is behind the schema
+(see the `part_receipts` gap above).
+
+### Still open
+
+- Direct labor from the **time clock** is not posted to the GL. Clocked hours ×
+  cost rate drives the job-cost rollup (see the labor-cost section above), but
+  `5300` is fed only by the payroll import. Wiring the clock to the ledger would
+  mean deciding how to avoid double-booking it against payroll.
+- `5310 Direct Labor — Payroll Taxes` and `5320 Contractor Labor` exist but
+  nothing posts to them automatically yet.
+
+## Button feedback (user requirement, 2026-08-06)
+
+> "all of these buttons have no feedback when pressing the buttons. It works and
+> is functional to save but the button is still and hard and you cannot tell if
+> it worked or not. i need this to be audited throughout the whole system"
+
+### What the audit found
+
+Counted mechanically across all 135 `.tsx` files by `scripts/audit-buttons.mjs`,
+which is still runnable — it now doubles as a regression check and exits non-zero
+if a raw `<button type="submit">` reappears inside a `<form action={…}>`:
+
+| | count |
+|---|---|
+| `<button>` elements | 207 across 79 files |
+| …submit buttons | 128 |
+| …of those, inside a `<form action={…}>` server action | 113 across 53 files |
+| …non-submit (`onClick`) buttons | 79 |
+| **buttons with any `:active` / press styling** | **0** |
+| `<form>` elements | 126 (111 server action, 10 `method="get"`) |
+
+Zero press states app-wide is the whole complaint: nothing happened between the
+click and the page changing, so a slow server action looked identical to a dead
+button — and the natural response is to click it again.
+
+### The three signals
+
+1. **Press** — global `:active` in `globals.css`: `scale(0.94) translateY(1px)` +
+   `brightness(0.82)`, plus a `:focus-visible` outline (keyboard users had
+   nothing at all). Deliberately global rather than a utility class so it reaches
+   every button — icon buttons in table rows, tabs, the theme toggle — not just
+   the ones someone remembers to opt into.
+2. **Working** — a spinner, `cursor: wait`, and a disabled button (which is also
+   the double-submit guard).
+3. **Done** — an emerald ring flashes when the action finishes, and only once the
+   work has really landed.
+
+### ⚠️ The first attempt was correct and still invisible
+
+Everything above applied, and the buttons still read as dead. Measured against a
+**production build** — dev-mode timings are not the ones anybody gets:
+
+| what | measured |
+|---|---|
+| `Save account` pending state | **~128ms** — 8 frames out of 245 |
+| `Archive` on a list row | **~16ms**, then the button left the DOM at frame 5 |
+| `Create & build` | **78ms**, then unmounted (the action redirects) |
+| completion flash on `/packages` | **never fired** — the button no longer exists |
+
+Two separate causes, and neither is fixable by styling the button harder:
+
+- **The work is faster than perception.** A correct spinner shown for an eighth
+  of a second is a flicker. Hence `MIN_WORKING_MS` / `MIN_BUSY_MS` (550ms): the
+  working state is *held* past the end of the work.
+- **The button is destroyed before the work finishes.** `router.refresh()`
+  replaces the row; a redirect replaces the page. Holding state on a component
+  that is about to be unmounted cannot help.
+
+So feedback also lives *above* the thing that re-renders:
+`src/components/WorkIndicator.tsx` is a page-level bar mounted in `AppShell`,
+driven by `beginWork()` from both `SubmitButton` and `useBusy`. Its minimum
+on-screen deadline is a **module-level timestamp, not React state** — a redirect
+remounts the component, and state would reset (measured: 99ms of bar, then the
+new page wiped it). With the deadline outside React the bar spans the navigation.
+
+### Three button families, not one
+
+The original audit said the 79 `onClick` buttons were fine because they "already
+had a `disabled` binding". That was the wrong test: it checked a pending binding
+*existed*, not that it lasted long enough to see. `ListRowControls` — Archive and
+tag-save, on **every list page** — is a client component doing `fetch` +
+`router.refresh()`, and its `busy` flag was on screen for ~30ms.
+
+- `<form action={…}>` submits → `SubmitButton` (`useFormStatus`)
+- client `fetch` + `router.refresh()` → `useBusy` (`src/lib/useBusy.ts`)
+- `method="get"` filter forms → browser navigation, press state only
+
+Both families set the same `data-pending` attribute, and the spinner is a CSS
+`::after` on it rather than an element, so there is one mechanism and nothing to
+remember when adding a button.
+
+### Verified in a real browser
+
+`scripts/verify-button-feedback.mjs` (Playwright, throwaway database, run
+against a **production build**). It tests perception, not internals — an earlier
+version asserted "does the button carry `data-pending`" and passed while the
+feature was invisible in practice. The central check samples the whole page every
+animation frame and asks how many milliseconds ANY feedback was on screen:
+
+- in-place save — **616ms** visible, flash fires, and the flash only appears once
+  the row really exists, created exactly once
+- list row action, where the button is removed by its own refresh — **614ms**
+- redirecting save, where the whole page is replaced — **616ms**
+- nothing stuck: no bar, no disabled button left behind
+- one form with several submit buttons: only the pressed one spins
+
+Caveat on method: holding the POST open with request interception showed
+`pending` dropping before the response, which would make the flash premature. It
+could not be reproduced without interception, and under real timings the flash
+lands after the row exists — so it is recorded as a likely artifact of the
+interception, not a verified property.
+
+## Package pricing + PO status: the SQL that was missing (2026-08-18)
+
+PRs #93–#98 (package cost/markup pricing, markup-vs-margin mode, promo→package,
+and the Pending → Ordered → Received → Fulfilled purchase-order workflow) changed
+`src/db/schema.ts` but shipped **no SQL**, so the live database never got:
+
+- `purchase_order_status` enum values `ordered` and `fulfilled`
+- `packages.package_price`, `.markup_pct`, `.pricing_mode`, `.source_promo_id`
+
+The code on `main` reads and writes all of these, so those screens error against
+the live database until the SQL runs. `docs/sql/promo_phase7.sql` covers it —
+additive and nullable only, no backfill, safe to re-run.
+
+Verified by building a database from the schema as it stood at the last SQL the
+user ran (accounting_phase11), confirming `scripts/scratch-schema-drift.ts`
+reported exactly those four columns as missing, applying the file, and
+confirming the drift went to zero and the enum gained both values. Re-run twice
+more with no errors.
+
+**When a session changes `schema.ts`, it owes a SQL file in the same commit.**
+That is the rule in this document's build-patterns section, and this is the
+second time it has been missed (see the `part_receipts` gap above) — both found
+only because something else went looking.
+
+## Packages: composition, per-line discounts, currency (user requirements, 2026-08-18)
+
+Six fixes to the packages / quotes / promos builders.
+
+### Composing a package from a promo plus add-ons
+
+> "I have a whelen regional piu promo + 2 additional ions I need to add to the
+> build. That should be its own package."
+
+`+ Add package / promo…` in the package builder pulls an existing package (a
+vendor promo becomes one via **Add to Packages**) into the one being edited as
+**flat, individually editable lines** — the user's explicit choice over a
+collapsed group.
+
+Everything is COPIED, nothing referenced:
+
+- the source package is never written to, so re-syncing the promo later cannot
+  disturb a build made from it, and editing a line here cannot disturb the promo
+- each line's `cost` is locked from the source (the negotiated promo cost, not
+  today's average cost)
+- the source's bundle price is allocated across the copied lines as per-line
+  discounts, so the parts still total the promo price instead of silently
+  reverting to list
+- lines carry `fromLabel` and show "from <promo name>" so the origin is visible
+
+### Per-line discounts, composing with the bundle price
+
+Packages already had a bundle price; quotes already had per-line discounts.
+Packages now have both, and — per the user — **neither overrides the other**:
+"the bundle promo price should stay with the option to discount on top of the
+promo as well if needed."
+
+Order: list price → bundle allocation → per-line discount. A percentage is taken
+off the **bundle-allocated price**, so "10% off" on a promo line means 10% off
+what the promo charges, not 10% off list. The two live in separate fields
+(`bundleDiscount` vs `discount`) precisely so one cannot silently overwrite the
+other — the allocation used to write `discount` directly, which wiped out any
+discount the package carried.
+
+### Currency
+
+One module owns money: `src/lib/money.ts` (`round2`, `fmtUSD`, `parseMoney`,
+`discountAmount`) with `src/components/MoneyInput.tsx` providing the field
+primitives. Every currency figure carries a `$` and exactly two decimals, in
+readouts AND input boxes; quantities and hours deliberately carry neither, which
+is what the user was asking for ("It currently confuses with quantities").
+
+**The audit found the same discount arithmetic hand-written in five places** —
+the editor, the print view, the quote PDF, and the upfit PDF twice — each
+slightly free to drift, and none of them aware of the bundle allocation. All now
+call `lineGross` / `lineDiscount` / `lineNet`. `quoteTotals` re-exports `round2`
+rather than defining a second one.
+
+### Enter, and the add controls
+
+- Enter in any builder field commits the value and opens the next line, instead
+  of doing nothing (or submitting the whole form). Values also still commit as
+  you type, so nothing is lost by clicking away either.
+- The add controls sit at the **top and bottom** of the contents box in packages
+  and promos (quotes already had both), and the contents list scrolls inside its
+  own card so the totals and the bottom controls stay reachable on a long build.
+
+### Internal cost
+
+Package lines take the part's **`avg_cost`** — the weighted-average basis job
+costing actually uses — rather than `parts.cost`, a 2dp mirror that only tracks
+it when the receive path updates it and can be edited by hand. The part search
+API returns both; `cost` remains the fallback.
+
+### A bundle price ABOVE the à la carte total (added 2026-08-19)
+
+Reported from the floor: a build came to $14,274.98 à la carte, the negotiated
+number for the bundle was $14,378.10, and the builder refused it — *"Bundle
+price is above the à la carte parts total; it can't allocate."* The allocator
+only ever discounted downward, so the ordinary workflow of setting a specific
+bundle price **after add-ons have been added** was blocked.
+
+A price above list is not an error. The bundle price is the authoritative parts
+total in both directions:
+
+- **Below** à la carte → allocated across the part lines as per-line discounts
+  (unchanged).
+- **Above** à la carte → the part lines' **sell prices scale up** proportionally
+  until they total exactly the price typed.
+
+Chosen over the alternatives (adding an "uplift" line, or letting the total sit
+wrong) because it keeps one number per line that the customer can read, and it
+is the mirror image of what already happens below list.
+
+Rules this path follows:
+
+- **Labor and fees are never touched.** A bundle price covers parts; install and
+  freight quote on top. ($14,378.10 parts + $380 labor = $14,758.10.)
+- **The apportionment is done in integer cents on the unit prices**, floor-then-
+  distribute, so the unit prices *themselves* add up to the target. Scaling each
+  line independently and rounding left a cent over, which then printed as a
+  `Discount $0.01` line on the customer's quote — noise on a document someone
+  signs. Raising a unit price by a cent moves the total by that line's quantity,
+  so the leftover cents are handed out largest-quantity-first. Only when no
+  combination of quantities can make up the last cent (every line qty 2, one
+  cent left) does a rounding adjustment appear.
+- **A $0 line stays $0** — an included accessory must not quietly acquire a cent.
+- **"Retail (list)" keeps meaning à la carte.** `packageTotals` reports
+  `alacarteGross` measured off the saved components, separately from
+  `partsGross` (what the rows now add up to). Without the split, setting a
+  bundle price above list made the screen claim list *was* $14,378 and the
+  customer had saved a penny. The readout shows `Bundle price +$103.12` as an
+  uplift, never a saving.
+- **The builder's price boxes keep the catalogue prices.** They are the source
+  data; rewriting them would destroy the à la carte reference on save. The
+  scaling shows in the totals, and in the prices that land on the quote — the
+  same shape as a below-list promo.
+- **A per-line discount still applies on top**, as everywhere else.
+
+The only real error left is having nothing to scale from: no part line carries a
+sell price. That says so plainly rather than blaming the bundle price.
+
+### Verified
+
+- `scripts/verify-package-money.ts` — pure math: both reductions apply, a
+  percentage comes off the promo price, rows foot to the total at awkward bundle
+  prices ($1, $99.99, $123.45), labor/fees stay out of a parts bundle, and a
+  bundle above list scales the sell prices to hit it exactly — including the
+  reported $14,274.98 → $14,378.10, targets of $20,000/$14,274.99/$99,999.99,
+  all-even quantities where a leftover cent cannot be handed out singly, and a
+  $0 accessory that stays $0.
+- The above-list case end to end on a production build: the amber explanation
+  replaces the old red refusal, "Retail (list)" stays $14,274.98 while
+  "Customer pays (parts)" reads $14,378.10, labor stays $380 through the
+  scaling and a save/reload, the quote receives scaled unit prices
+  ($9,341.98 / $2,518.06), and the **print view and the PDF** both show
+  subtotal $14,378.10 and grand total $14,758.10 with no stray discount line.
+- `scripts/verify-package-builder.mjs` — Playwright against a **production**
+  build: the Whelen scenario end to end (promo in, costs 840/195 locked, parts
+  net exactly $1,700, 2 Ions added at avg cost 61.25 not 55.00), add controls at
+  both ends, Enter adds a line without submitting, money formatted and
+  quantities not, and the source promo byte-identical afterwards.
+
+One caution worth recording: an earlier version of the quote check reported
+"PASSED" while running **zero** assertions, because the seed had no quotes to
+open. A check that cannot fail is not a check — assert that the fixture exists.
 
 ## Notes on building order
 

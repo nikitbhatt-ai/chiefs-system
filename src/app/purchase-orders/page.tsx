@@ -11,24 +11,21 @@ import { parsePagination } from "@/lib/pagination";
 import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
 import { fmtDateTime } from "@/lib/datetime";
+import { poStatusLabel, poStatusColor, PO_MANUAL_STATUSES } from "@/lib/poStatus";
+import { SubmitButton } from "@/components/SubmitButton";
 
-const PO_STATUSES = ["pending", "pending_review", "po_received", "partially_received", "received"];
-
-const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-zinc-500/10 text-zinc-400 border-zinc-500/30",
-  pending_review: "bg-amber-500/10 text-amber-300 border-amber-500/30",
-  po_received: "bg-blue-500/10 text-blue-300 border-blue-500/30",
-  partially_received: "bg-purple-500/10 text-purple-300 border-purple-500/30",
-  received: "bg-green-500/10 text-green-300 border-green-500/30",
-};
+// Statuses offered in the list filter, in workflow order.
+const PO_STATUSES = ["pending", "ordered", "partially_received", "fulfilled"];
 
 async function createPO(formData: FormData) {
   "use server";
   const vendorId = String(formData.get("vendorId") ?? "") || null;
+  const statusRaw = String(formData.get("status") ?? "pending");
+  const status = statusRaw === "ordered" ? "ordered" : "pending";
   const poNumber = `PO-${Date.now().toString().slice(-7)}`;
   const [row] = await db
     .insert(purchaseOrders)
-    .values({ poNumber, vendorId, status: "pending", lineItems: [] })
+    .values({ poNumber, vendorId, status, lineItems: [] })
     .returning();
   revalidatePath("/purchase-orders");
   redirect(`/purchase-orders/${row.id}`);
@@ -101,7 +98,7 @@ export default async function PurchaseOrdersPage({
 
   return (
     <AppShell title="Purchase Orders" subtitle="Buying & receiving">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New PO
         </h3>
@@ -118,12 +115,23 @@ export default async function PurchaseOrdersPage({
               </option>
             ))}
           </select>
-          <button
-            type="submit"
+          <select
+            name="status"
+            defaultValue="pending"
+            title="Received and Fulfilled are set automatically as parts are received"
+            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+          >
+            {PO_MANUAL_STATUSES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2"
           >
             Create draft
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -133,14 +141,14 @@ export default async function PurchaseOrdersPage({
           {tag && <input type="hidden" name="tag" value={tag} />}
           <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
             <option value="">All statuses</option>
-            {PO_STATUSES.map((s) => (<option key={s} value={s}>{s.replace(/_/g, " ")}</option>))}
+            {PO_STATUSES.map((s) => (<option key={s} value={s}>{poStatusLabel(s)}</option>))}
           </select>
           <button type="submit" className="text-xs font-body font-semibold bg-white/10 hover:bg-white/20 text-white rounded-md px-4 py-2">Filter</button>
           {status && (<a href="/purchase-orders" className="text-[11px] text-zinc-400 hover:text-zinc-200">Clear</a>)}
         </form>
         <ListFilters basePath="/purchase-orders" view={view} tag={tag} carry={{ status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -170,9 +178,9 @@ export default async function PurchaseOrdersPage({
                   </td>
                   <td className="px-4 py-2.5">
                     <span
-                      className={`inline-block text-[10px] uppercase tracking-wider font-semibold rounded border px-2 py-0.5 ${STATUS_COLORS[p.status]}`}
+                      className={`inline-block text-[10px] uppercase tracking-wider font-semibold rounded border px-2 py-0.5 ${poStatusColor(p.status)}`}
                     >
-                      {p.status.replace(/_/g, " ")}
+                      {poStatusLabel(p.status)}
                     </span>
                   </td>
                   <td className="px-4 py-2.5 text-xs text-right">{fmt(p.total)}</td>
@@ -187,12 +195,11 @@ export default async function PurchaseOrdersPage({
                     </a>
                     <form action={deletePO} className="inline">
                       <input type="hidden" name="id" value={p.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                       >
                         Delete
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

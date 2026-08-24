@@ -7,6 +7,7 @@ type Result = {
   action: "create" | "update" | "skip";
   componentCount: number;
   errors: string[];
+  warnings: string[];
 };
 
 type ImportResponse = {
@@ -67,24 +68,31 @@ export function ImportClient() {
 
   const summary = committed ?? preview;
   const errorRows = summary?.results.filter((r) => r.errors.length > 0) ?? [];
+  const warningRows = summary?.results.filter((r) => r.errors.length === 0 && r.warnings.length > 0) ?? [];
 
   return (
     <div className="space-y-4 max-w-5xl">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="text-xs font-body text-zinc-300">
-          One row per component, grouped by{" "}
-          <code className="text-amber-400">package_name</code>. Required:{" "}
-          <code className="text-amber-400">package_name</code>,{" "}
-          <code className="text-amber-400">component_type</code> (
-          <code>part</code> / <code>labor</code> / <code>fee</code>). For{" "}
-          <code>part</code> rows, <code className="text-amber-400">sku</code> is
-          required and must already exist in inventory. Optional:{" "}
+          One row per component, grouped by package name. Only a{" "}
+          <code className="text-amber-400">package_name</code> column is required
+          (also accepted as <code>template_name</code>, <code>package</code>, or{" "}
+          <code>name</code>); a blank name cell inherits the row above, the way
+          section templates repeat a title once. Everything else is optional:{" "}
+          <code>component_type</code> (<code>part</code>/<code>labor</code>/
+          <code>fee</code>) — if absent it&apos;s inferred, defaulting to a part;{" "}
+          <code>sku</code>/<code>part_number</code>,{" "}
+          <code>label</code>/<code>part_description</code>, <code>quantity</code>/
+          <code>qty</code>, <code>unit_price</code>/<code>sell_price</code>,{" "}
+          <code>hours</code>, <code>rate</code>, <code>amount</code>,{" "}
           <code>package_category</code>, <code>package_description</code>,{" "}
-          <code>label</code>, <code>quantity</code>, <code>unit_price</code>,{" "}
-          <code>hours</code>, <code>rate</code>, <code>amount</code>. Blank{" "}
-          <code>unit_price</code> defaults to the part&apos;s inventory price.
-          A package that already exists (by name) is replaced; new ones are
-          created. If any row in a package errors, the whole package is skipped.
+          <code>package_price</code>/<code>promo_price</code>/
+          <code>bundle_price</code> (a package-level deal price — set it on any
+          one row of the package; on a quote it&apos;s allocated across the part
+          lines as discounts). A part SKU that isn&apos;t in inventory yet still
+          imports (linked by SKU, with its price snapshotted). A bad row is
+          dropped and reported; the rest of its package still imports. Existing
+          packages (by name) are replaced.
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
@@ -144,7 +152,7 @@ export function ImportClient() {
       ) : null}
 
       {summary ? (
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <div className="flex items-center gap-3 text-xs font-body flex-wrap">
             <span
               className={`text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${
@@ -167,6 +175,12 @@ export function ImportClient() {
             <span className="text-red-400">
               Skipped: <strong>{summary.skipped}</strong>
             </span>
+            {warningRows.length > 0 ? (
+              <span className="text-amber-400">
+                {summary.commit ? "Imported with fixes" : "With warnings"}:{" "}
+                <strong>{warningRows.length}</strong>
+              </span>
+            ) : null}
             {summary.commit ? (
               <a href="/packages" className="ml-auto text-amber-400 hover:text-amber-300">
                 View packages →
@@ -191,6 +205,33 @@ export function ImportClient() {
                     <tr key={i} className="border-t border-white/5">
                       <td className="px-2 py-1">{r.name}</td>
                       <td className="px-2 py-1 text-red-300">{r.errors.join("; ")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {warningRows.length > 0 ? (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-amber-400 font-body mb-1">
+                {summary.commit ? "Imported with fixes" : "With warnings"} ({warningRows.length})
+                <span className="normal-case tracking-normal text-zinc-500">
+                  {" "}— {summary.commit ? "these imported" : "these will import"}; a value was defaulted, coerced, or a row dropped
+                </span>
+              </div>
+              <table className="w-full text-xs font-body">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500">
+                    <th className="px-2 py-1">Package</th>
+                    <th className="px-2 py-1">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="text-zinc-300">
+                  {warningRows.map((r, i) => (
+                    <tr key={i} className="border-t border-white/5">
+                      <td className="px-2 py-1">{r.name}</td>
+                      <td className="px-2 py-1 text-amber-300">{r.warnings.join("; ")}</td>
                     </tr>
                   ))}
                 </tbody>

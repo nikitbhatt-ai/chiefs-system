@@ -8,6 +8,7 @@ import { fmtDateTime } from "@/lib/datetime";
 import { auth } from "@/auth";
 import { publishVehicleAction } from "@/lib/publishVehicle";
 import { VehicleAddForm } from "./VehicleAddForm";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const LOTS = ["on-site", "dealership", "upfitting", "sames-dropoff"] as const;
 type Lot = (typeof LOTS)[number];
@@ -158,7 +159,7 @@ export default async function VehiclesPage({
       ) : null}
       <VehicleAddForm action={createVehicle} lots={LOTS as unknown as string[]} />
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -254,12 +255,11 @@ export default async function VehiclesPage({
                             <option value="draft">Draft</option>
                             <option value="active">Active</option>
                           </select>
-                          <button
-                            type="submit"
+                          <SubmitButton
                             className="text-[11px] font-body font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded px-2 py-0.5"
                           >
                             Publish
-                          </button>
+                          </SubmitButton>
                         </form>
                       )}
                     </td>
@@ -272,12 +272,11 @@ export default async function VehiclesPage({
                       </a>
                       <form action={deleteVehicle} className="inline">
                         <input type="hidden" name="id" value={v.id} />
-                        <button
-                          type="submit"
+                        <SubmitButton
                           className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                         >
                           Delete
-                        </button>
+                        </SubmitButton>
                       </form>
                     </td>
                   </tr>

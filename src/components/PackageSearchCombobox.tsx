@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { AnchoredPopover } from "@/components/AnchoredPopover";
 import type { PackageComponent } from "@/db/schema";
 import { packageValue, packageCounts } from "@/lib/packages";
 
@@ -10,6 +11,7 @@ export type PackageHit = {
   category: string | null;
   description: string | null;
   components: PackageComponent[];
+  packagePrice: string | null;
 };
 
 // Server-backed package picker for the quote editor's "+ Add package" control.
@@ -33,6 +35,9 @@ export function PackageSearchCombobox({
   const [loading, setLoading] = useState(false);
   const [focusIdx, setFocusIdx] = useState(0);
   const seq = useRef(0);
+  // Results panel is portalled to <body> so the enclosing card's
+  // `overflow-hidden` can't clip it; this anchors it.
+  const anchorRef = useRef<HTMLDivElement>(null);
 
   async function runSearch(q: string) {
     const my = ++seq.current;
@@ -65,7 +70,7 @@ export function PackageSearchCombobox({
   }
 
   return (
-    <div className={`relative ${className ?? ""}`}>
+    <div ref={anchorRef} className={`relative ${className ?? ""}`}>
       <input
         value={text}
         onChange={(e) => {
@@ -97,8 +102,12 @@ export function PackageSearchCombobox({
         placeholder={placeholder ?? "+ Add a package…"}
         className="w-full bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-sm placeholder:text-zinc-500"
       />
-      {open && (results.length > 0 || loading) ? (
-        <ul className="absolute left-0 right-0 top-full z-30 mt-1 bg-[#161624] border border-white/10 rounded-md shadow-lg max-h-60 overflow-y-auto">
+      <AnchoredPopover
+        anchorRef={anchorRef}
+        open={open && (results.length > 0 || loading)}
+        className="bg-surface border border-white/10 rounded-md shadow-lg"
+      >
+        <ul>
           {loading && results.length === 0 ? (
             <li className="px-3 py-2 text-xs text-zinc-500 font-body">Searching…</li>
           ) : (
@@ -130,7 +139,7 @@ export function PackageSearchCombobox({
             })
           )}
         </ul>
-      ) : null}
+      </AnchoredPopover>
     </div>
   );
 }

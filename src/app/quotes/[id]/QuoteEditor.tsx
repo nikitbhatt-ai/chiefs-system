@@ -2,8 +2,12 @@
 
 import { useMemo, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
+import { MoneyInput, QtyInput, HoursInput, PercentInput } from "@/components/MoneyInput";
+import { fmtUSD } from "@/lib/money";
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
-import { componentsToQuoteLines } from "@/lib/packages";
+import { expandPackageWithBundlePrice } from "@/lib/packages";
+import { quoteTotals, lineNet } from "@/lib/quoteTotals";
+import { SubmitButton } from "@/components/SubmitButton";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -20,6 +24,16 @@ export type QuoteLine =
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
+      // Internal unit cost carried from a package (e.g. the promo cost). Stored
+      // on the line for margin/reporting; costLocked marks it authoritative.
+      cost?: number;
+      costLocked?: boolean;
+      /**
+       * Dollars allocated to this line from a package's bundle/promo price.
+       * Separate from `discount` so a rep can still discount on top of a promo
+       * without the allocation overwriting what they typed (or vice versa).
+       */
+      bundleDiscount?: number;
     } & LineGroup)
   | ({
       kind: "fee";
@@ -116,29 +130,8 @@ export function QuoteEditor({
   const [savingPkg, setSavingPkg] = useState(false);
 
   const totals = useMemo(() => {
-    let subtotal = 0;
-    let discountTotal = 0;
-    let feeTotal = 0;
-    let laborTotal = 0;
-    for (const l of lines) {
-      if (l.kind === "item") {
-        const gross = (l.quantity || 0) * (l.unitPrice || 0);
-        const disc =
-          l.discountKind === "pct"
-            ? gross * ((l.discount || 0) / 100)
-            : l.discount || 0;
-        subtotal += gross;
-        discountTotal += disc;
-      } else if (l.kind === "labor") {
-        laborTotal += (l.hours || 0) * (l.rate || 0);
-      } else {
-        feeTotal += l.amount || 0;
-      }
-    }
-    const taxBase = subtotal - discountTotal + feeTotal + laborTotal;
-    const tax = taxBase * ((Number(taxRate) || 0) / 100);
-    const grand = taxBase + tax;
-    return { subtotal, discountTotal, feeTotal, laborTotal, tax, grand };
+    // Shared helper rounds each line before summing, so the rows foot to grand.
+    return quoteTotals(lines, Number(taxRate) || 0);
   }, [lines, taxRate]);
 
   function updateLine(i: number, patch: Partial<QuoteLine>) {
@@ -206,10 +199,15 @@ export function QuoteEditor({
   }
   function addPackage(pkg: PackageHit) {
     // Itemized roll-up: expand the package's components into individual,
-    // editable quote lines (parts / labor / fees). The bundle is appended
-    // verbatim — a package can intentionally repeat a part — and the rep
-    // tweaks quantities, prices, or discounts from there.
-    const expanded = componentsToQuoteLines(pkg.components ?? []) as QuoteLine[];
+    // editable quote lines (parts / labor / fees). When the package carries a
+    // sell-side bundle price, the expansion allocates that total across the part
+    // lines as per-line discounts so their totals sum to it (the promo deal);
+    // otherwise lines come in at à la carte with no discount. The rep tweaks
+    // from there. A package can intentionally repeat a part — appended verbatim.
+    const { lines: expanded, allocated, scaled, error, saving } = expandPackageWithBundlePrice(
+      pkg.components ?? [],
+      pkg.packagePrice,
+    );
     if (expanded.length === 0) {
       setPkgMsg({ tone: "err", text: `"${pkg.name}" has no components.` });
       return;
@@ -218,9 +216,33 @@ export function QuoteEditor({
     // together and prints under the package title. A fresh id per add
     // means the same package can be added twice as two distinct groups.
     const groupId = randomGroupId();
-    const grouped = expanded.map((l) => ({ ...l, groupId, groupTitle: pkg.name }));
+    const grouped = expanded.map((l) => ({ ...(l as QuoteLine), groupId, groupTitle: pkg.name }));
     setLines((prev) => [...prev, ...grouped]);
-    setPkgMsg({ tone: "ok", text: `Added package "${pkg.name}" (${expanded.length} line${expanded.length === 1 ? "" : "s"}).` });
+    const n = expanded.length;
+    if (allocated) {
+      setPkgMsg({
+        tone: "ok",
+        text:
+          `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}) — bundle price applied` +
+          (saving != null ? `, ${fmt(saving)} off à la carte spread across the parts.` : "."),
+      });
+    } else if (scaled) {
+      // The bundle price was above à la carte, so the sell prices were scaled up
+      // to meet it. Worth saying out loud — the unit prices on these lines are
+      // not the catalogue list prices.
+      setPkgMsg({
+        tone: "ok",
+        text:
+          `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}) — bundle price is above à la carte, ` +
+          `so the part sell prices were scaled up to total it exactly.`,
+      });
+    } else if (error) {
+      // A bundle price was set but couldn't be applied at all — lines added
+      // at à la carte so the rep still gets the bundle.
+      setPkgMsg({ tone: "err", text: `Added "${pkg.name}" at à la carte — bundle price not applied: ${error}` });
+    } else {
+      setPkgMsg({ tone: "ok", text: `Added package "${pkg.name}" (${n} line${n === 1 ? "" : "s"}).` });
+    }
   }
 
   async function saveAsPackage() {
@@ -408,8 +430,6 @@ export function QuoteEditor({
   const renderItemRow = (i: number, reorder: { upTo: number | null; downTo: number | null } | null) => {
     const l = lines[i];
     if (l.kind !== "item") return null;
-    const gross = (l.quantity || 0) * (l.unitPrice || 0);
-    const disc = l.discountKind === "pct" ? gross * ((l.discount || 0) / 100) : l.discount || 0;
     return (
       <div
         key={i}
@@ -432,35 +452,37 @@ export function QuoteEditor({
             }
           />
         </div>
-        <input
-          type="number"
-          min="0"
-          step="1"
+        <QtyInput
+          className="col-span-1"
           value={l.quantity}
-          onChange={(e) =>
-            updateLine(i, { quantity: Math.max(0, Math.floor(Number(e.target.value) || 0)) })
-          }
-          placeholder="Qty"
-          className="col-span-1 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+          onChange={(v) => updateLine(i, { quantity: v })}
+          onEnter={addItem}
+          ariaLabel="Quantity"
         />
-        <input
-          type="number"
-          min="0"
-          step="0.01"
+        <MoneyInput
+          className="col-span-2"
           value={l.unitPrice}
-          onChange={(e) => updateLine(i, { unitPrice: Number(e.target.value) })}
-          placeholder="Price"
-          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
+          onChange={(v) => updateLine(i, { unitPrice: v ?? 0 })}
+          onEnter={addItem}
+          ariaLabel="Unit price"
         />
-        <input
-          type="number"
-          min="0"
-          step="0.01"
-          value={l.discount}
-          onChange={(e) => updateLine(i, { discount: Number(e.target.value) })}
-          placeholder="Discount"
-          className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right"
-        />
+        {l.discountKind === "amt" ? (
+          <MoneyInput
+            className="col-span-2"
+            value={l.discount}
+            onChange={(v) => updateLine(i, { discount: v ?? 0 })}
+            onEnter={addItem}
+            ariaLabel="Discount in dollars"
+          />
+        ) : (
+          <PercentInput
+            className="col-span-2"
+            value={l.discount || ""}
+            onChange={(v) => updateLine(i, { discount: v })}
+            onEnter={addItem}
+            ariaLabel="Discount percent"
+          />
+        )}
         <select
           value={l.discountKind}
           onChange={(e) => updateLine(i, { discountKind: e.target.value as "pct" | "amt" })}
@@ -477,7 +499,12 @@ export function QuoteEditor({
           Remove
         </button>
         <div className="col-span-12 text-right text-[11px] text-zinc-500">
-          {`Line total: ${fmt(gross - disc)}`}
+          {l.bundleDiscount ? (
+            <span className="text-amber-300/80 mr-2">
+              promo −{fmtUSD(l.bundleDiscount)}
+            </span>
+          ) : null}
+          {`Line total: ${fmt(lineNet(l))}`}
         </div>
       </div>
     );
@@ -675,7 +702,7 @@ export function QuoteEditor({
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="lines" value={JSON.stringify(lines)} />
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* Uncontrolled selects: React 19 auto-resets the <form> after a
             server action, which snaps a *controlled* select back to its
             first option (Draft) and then won't re-sync the DOM — that was
@@ -721,7 +748,7 @@ export function QuoteEditor({
       {/* Vehicle — VIN decoder. The exact car this quote (and, once
           converted, this invoice) is for. Decoded fields post with the
           form and persist on the quote. */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Vehicle
@@ -804,7 +831,7 @@ export function QuoteEditor({
         </p>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Line items
@@ -888,7 +915,7 @@ export function QuoteEditor({
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body block mb-1">
             Notes (internal)
@@ -934,12 +961,11 @@ export function QuoteEditor({
           >
             Back
           </a>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save quote
-          </button>
+          </SubmitButton>
         </div>
       </div>
     </form>

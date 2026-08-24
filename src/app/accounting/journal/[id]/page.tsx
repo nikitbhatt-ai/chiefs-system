@@ -8,6 +8,7 @@ import { journalEntries, journalLines, glAccounts, departments } from "@/db/sche
 import { AppShell } from "@/components/AppShell";
 import { fmtCents, postDraft, reverseJournalEntry } from "@/lib/accounting";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         </span>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-body">
         <div>
           <div className="text-[10px] uppercase tracking-wider text-zinc-500">Entry date</div>
           <div className="text-white">{fmtDateTime(entry.entryDate)}</div>
@@ -101,7 +102,7 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         </div>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -140,22 +141,22 @@ export default async function JournalEntryPage({ params }: { params: Promise<{ i
         {entry.status === "draft" && (
           <>
             <form action={deleteDraft}>
-              <button type="submit" className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors">
+              <SubmitButton className="text-xs font-body text-zinc-400 hover:text-red-400 bg-white/5 border border-white/10 rounded-md px-4 py-2 transition-colors">
                 Delete draft
-              </button>
+              </SubmitButton>
             </form>
             <form action={postEntry}>
-              <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
+              <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">
                 Post entry
-              </button>
+              </SubmitButton>
             </form>
           </>
         )}
         {entry.status === "posted" && (
           <form action={reverse}>
-            <button type="submit" className="text-xs font-body font-semibold text-zinc-200 bg-white/5 border border-white/10 rounded-md px-4 py-2 hover:bg-white/10 transition-colors">
+            <SubmitButton className="text-xs font-body font-semibold text-zinc-200 bg-white/5 border border-white/10 rounded-md px-4 py-2 hover:bg-white/10 transition-colors">
               Reverse entry
-            </button>
+            </SubmitButton>
           </form>
         )}
       </div>

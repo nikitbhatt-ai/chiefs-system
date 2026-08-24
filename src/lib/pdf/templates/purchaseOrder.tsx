@@ -5,6 +5,7 @@ import { BRANDING } from "../branding";
 
 export type POLine = {
   partId?: string;
+  sku?: string | null;
   description: string;
   quantity: number;
   quantityReceived: number;
@@ -39,7 +40,9 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
   return (
     <Document title={`PURCHASE ORDER ${docNumber}`} author={BRANDING.companyName} creator={BRANDING.companyName}>
       <Page size="LETTER" style={styles.page}>
-        {data.status === "received" && <Text style={styles.watermark}>RECEIVED</Text>}
+        {(data.status === "fulfilled" || data.status === "received") && (
+          <Text style={styles.watermark}>RECEIVED</Text>
+        )}
 
         <View style={styles.header}>
           <View style={styles.brandBlock}>
@@ -81,9 +84,10 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
 
         <View style={styles.table}>
           <View style={[styles.tableRow, styles.tableHeader]}>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Recv</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>Part #</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "41%" }]}>Description</Text>
+            <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>Qty</Text>
+            <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>Recv</Text>
             <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>Unit cost</Text>
             <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>Total</Text>
           </View>
@@ -99,9 +103,10 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
               const lineTotal = (l.quantity || 0) * (l.unitCost || 0);
               return (
                 <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantityReceived}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>{l.sku || "—"}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "41%" }]}>{l.description}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>{l.quantity}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>{l.quantityReceived}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>{money(l.unitCost || 0)}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>{money(lineTotal)}</Text>
                 </View>

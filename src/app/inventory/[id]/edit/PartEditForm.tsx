@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { RESTRICTION_CATEGORIES } from "@/lib/credentials";
 import { FormField } from "@/components/FormField";
+import { SubmitButton } from "@/components/SubmitButton";
 
 type Initial = {
   sku: string;
@@ -46,7 +47,7 @@ export function PartEditForm({
   return (
     <form
       action={action}
-      className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl"
+      className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl"
     >
       <FormField label="SKU" required>
         <input
@@ -150,7 +151,7 @@ export function PartEditForm({
           className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         />
       </FormField>
-      <FormField label="Internal cost" hint="$">
+      <FormField label="Average cost" hint="$ · auto-updated on receipt">
         <input
           name="cost"
           type="number"
@@ -255,12 +256,11 @@ export function PartEditForm({
         >
           Cancel
         </a>
-        <button
-          type="submit"
+        <SubmitButton
           className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
         >
           Save changes
-        </button>
+        </SubmitButton>
       </div>
     </form>
   );

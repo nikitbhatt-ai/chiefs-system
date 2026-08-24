@@ -7,6 +7,7 @@ import { stageMapping } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { DEFAULT_MAPPING, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
 import { stageLabel } from "@/lib/pipelines";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -66,7 +67,7 @@ export default async function StageMappingPage() {
 
   return (
     <AppShell title="Stage mapping" subtitle="CRM stage → Workflow stage routing">
-      <form action={save} className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3 max-w-3xl">
+      <form action={save} className="bg-surface border border-white/5 rounded-lg p-4 space-y-3 max-w-3xl">
         <p className="text-[11px] text-zinc-400 font-body">
           The workflow board is filtered by these targets. A CRM stage with no
           workflow target is pre-shop (won&apos;t appear in /workflow). Use the
@@ -116,9 +117,9 @@ export default async function StageMappingPage() {
             ))}
           </tbody>
         </table>
-        <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">
+        <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">
           Save mapping
-        </button>
+        </SubmitButton>
       </form>
     </AppShell>
   );
