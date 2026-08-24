@@ -643,6 +643,39 @@ export function UpfitBuilder({
                       </select>
                     </div>
 
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-body shrink-0">
+                        Rotate
+                      </span>
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        step={1}
+                        value={pin.rotation ?? 0}
+                        onChange={(e) => updatePin(pin.id, { rotation: Number(e.target.value) })}
+                        className="flex-1 accent-amber-500"
+                      />
+                      <input
+                        type="number"
+                        min={-180}
+                        max={180}
+                        value={pin.rotation ?? 0}
+                        onChange={(e) => updatePin(pin.id, { rotation: Number(e.target.value) || 0 })}
+                        className="w-14 bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white text-right font-body"
+                      />
+                      <span className="text-[10px] text-zinc-500 font-body">°</span>
+                      {pin.rotation ? (
+                        <button
+                          type="button"
+                          onClick={() => updatePin(pin.id, { rotation: 0 })}
+                          className="text-[10px] text-zinc-400 hover:text-amber-300 font-body"
+                        >
+                          reset
+                        </button>
+                      ) : null}
+                    </div>
+
                     {(pin.widthFracOverride !== undefined ||
                       pin.heightFracOverride !== undefined) && (
                       <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] font-body text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded px-2 py-1">
@@ -847,6 +880,7 @@ function PlacedPin({
           touchAction: "none",
           borderRadius: isCircle ? "50%" : isPushbar ? undefined : `${Math.min(widthPct, heightPct) * 0.25}%`,
           boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
+          transform: pin.rotation ? `rotate(${pin.rotation}deg)` : undefined,
         }}
       >
         {isPushbar ? (
