@@ -39,21 +39,14 @@ export function getViews(t: VehicleTemplate): TemplateView[] {
 
 // Build the standard 5-view (per-side) set for a folder-based template
 // at public/upfit-templates/<slug>/{driver,passenger,front,rear,top}.jpg.
-// `fileFor` optionally overrides the on-disk filename for a given view key
-// (used when a template's source photos were saved under swapped names).
-function sideViews(
-  slug: string,
-  fileFor?: Partial<Record<TemplateView["key"], string>>,
-): TemplateView[] {
+function sideViews(slug: string): TemplateView[] {
   const base = `/upfit-templates/${slug}`;
-  const url = (key: TemplateView["key"], fallback: string) =>
-    `${base}/${fileFor?.[key] ?? fallback}`;
   return [
-    { key: "driver", label: "Driver Side", imageUrl: url("driver", "driver.jpg") },
-    { key: "passenger", label: "Passenger Side", imageUrl: url("passenger", "passenger.jpg") },
-    { key: "front", label: "Front", imageUrl: url("front", "front.jpg") },
-    { key: "rear", label: "Rear", imageUrl: url("rear", "rear.jpg") },
-    { key: "top", label: "Top", imageUrl: url("top", "top.jpg") },
+    { key: "driver", label: "Driver Side", imageUrl: `${base}/driver.jpg` },
+    { key: "passenger", label: "Passenger Side", imageUrl: `${base}/passenger.jpg` },
+    { key: "front", label: "Front", imageUrl: `${base}/front.jpg` },
+    { key: "rear", label: "Rear", imageUrl: `${base}/rear.jpg` },
+    { key: "top", label: "Top", imageUrl: `${base}/top.jpg` },
   ];
 }
 
@@ -63,25 +56,19 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     slug: "tahoe",
     label: "Chevrolet Tahoe (2021–25)",
     imageUrl: "/upfit-templates/tahoe/driver.jpg",
-    // Passenger-side and rear source photos were saved under swapped
-    // filenames; map each view to the file that actually shows that side.
-    views: sideViews("tahoe", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    views: sideViews("tahoe"),
   },
   tahoe_2026: {
     slug: "tahoe_2026",
     label: "Chevrolet Tahoe (2026+)",
     imageUrl: "/upfit-templates/tahoe_2026/driver.jpg",
-    // Passenger-side and rear source photos were saved under swapped
-    // filenames; map each view to the file that actually shows that side.
-    views: sideViews("tahoe_2026", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    views: sideViews("tahoe_2026"),
   },
   tahoe_1520: {
     slug: "tahoe_1520",
     label: "Chevrolet Tahoe (2015–20)",
     imageUrl: "/upfit-templates/tahoe_1520/driver.jpg",
-    // Passenger-side and rear source photos were saved under swapped
-    // filenames; map each view to the file that actually shows that side.
-    views: sideViews("tahoe_1520", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    views: sideViews("tahoe_1520"),
   },
   suburban: {
     slug: "suburban",
@@ -97,10 +84,7 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     slug: "silverado",
     label: "Chevrolet Silverado (2020–26)",
     imageUrl: "/upfit-templates/silverado/driver.jpg",
-    // The Silverado's passenger-side and rear source photos were saved under
-    // swapped filenames (passenger.jpg holds the rear shot and vice versa), so
-    // map each view to the file that actually shows that side.
-    views: sideViews("silverado", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    views: sideViews("silverado"),
   },
   durango: {
     slug: "durango",
@@ -203,26 +187,25 @@ export const PUSHBAR_STYLES: Record<string, PushbarStyle> = {
     ],
   },
   // Full brush guard (Pro-gard style) — a straight, symmetric FRONT view:
-  // an outer tubular frame with two main uprights and cross rails. The
-  // CENTER window is left open (no vertical bars; top & bottom rails only
-  // span the side sections), with a single crossbar through the middle.
+  // an outer tubular frame with three cross rails, two main uprights, and
+  // center brush bars. Stroked (hollow tubing), centered on x=100.
   pushbar_wrap: {
     viewBox: { w: 200, h: 140 },
     strokeWidth: 7,
     paths: [
       // Outer frame (rounded-rect perimeter).
       "M 12 44 Q 12 22 34 22 L 166 22 Q 188 22 188 44 L 188 110 Q 188 132 166 132 L 34 132 Q 12 132 12 110 Z",
-      // Top rail — side sections only (open across the center).
-      "M 12 48 L 68 48",
-      "M 132 48 L 188 48",
-      // Middle rail — full width (single crossbar through the center).
+      // Cross rails.
+      "M 12 48 L 188 48",
       "M 12 82 L 188 82",
-      // Bottom rail — side sections only (open across the center).
-      "M 12 116 L 68 116",
-      "M 132 116 L 188 116",
+      "M 12 116 L 188 116",
       // Main uprights.
       "M 68 22 L 68 132",
       "M 132 22 L 132 132",
+      // Center brush bars.
+      "M 88 48 L 88 116",
+      "M 100 48 L 100 116",
+      "M 112 48 L 112 116",
     ],
   },
 };
