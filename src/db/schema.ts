@@ -672,6 +672,9 @@ export type UpfitPin = {
   // See COLOR_SCHEMES in src/lib/upfit/templates.ts.
   colorScheme?: string;
   orientation?: "horizontal" | "vertical";
+  // Free rotation in degrees (clockwise), applied on top of orientation
+  // for placements that aren't strictly vertical/horizontal.
+  rotation?: number;
   partId?: string | null;
   partSku?: string | null;
   // Legacy single-color field (the old circle fill). Kept so older

@@ -144,26 +144,32 @@ function PinShape({ pin }: { pin: UpfitPin }) {
   const scheme = getColorScheme(pin.colorScheme);
   const { width, height, horizontal, isCircle } = pinDims(pin);
 
+  // Outer positioning box (never rotated — keeps the caption upright).
+  const outer = {
+    position: "absolute" as const,
+    left: `${pin.x * 100}%`,
+    top: `${pin.y * 100}%`,
+    width,
+    height,
+    marginLeft: -width / 2,
+    marginTop: -height / 2,
+  };
+  // Free rotation applied to the shape only, about its center.
+  const rot = pin.rotation
+    ? { transform: `rotate(${pin.rotation}deg)`, transformOrigin: "center" }
+    : {};
+
   // Push bumper: draw the shared grille-guard outline as filled rounded
   // rects, stretched to the pin's box (preserveAspectRatio none).
   if (pin.shape === "pushbar") {
     return (
-      <View
-        style={{
-          position: "absolute",
-          left: `${pin.x * 100}%`,
-          top: `${pin.y * 100}%`,
-          width,
-          height,
-          marginLeft: -width / 2,
-          marginTop: -height / 2,
-        }}
-      >
+      <View style={outer}>
         <Svg
           width={width}
           height={height}
           viewBox={`0 0 ${PUSHBAR_VIEWBOX.w} ${PUSHBAR_VIEWBOX.h}`}
           preserveAspectRatio="none"
+          style={rot}
         >
           {PUSHBAR_RECTS.map((r, i) => (
             <Rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
@@ -178,27 +184,28 @@ function PinShape({ pin }: { pin: UpfitPin }) {
   // border-radius); rectangle segments follow the pin's orientation.
   const segmentDir: "row" | "column" = isCircle ? "row" : horizontal ? "row" : "column";
   return (
-    <View
-      style={{
-        position: "absolute",
-        left: `${pin.x * 100}%`,
-        top: `${pin.y * 100}%`,
-        width,
-        height,
-        marginLeft: -width / 2,
-        marginTop: -height / 2,
-        borderWidth: 0.6,
-        borderColor: "#000000",
-        // Circles are fully round; rectangles get a subtle pill curve
-        // proportional to the short axis so long strips don't pinch.
-        borderRadius: isCircle ? width / 2 : Math.min(width, height) * 0.2,
-        overflow: "hidden",
-        flexDirection: segmentDir,
-      }}
-    >
-      {scheme.segments.map((c, i) => (
-        <View key={i} style={{ flex: 1, backgroundColor: c }} />
-      ))}
+    <View style={outer}>
+      <View
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width,
+          height,
+          borderWidth: 0.6,
+          borderColor: "#000000",
+          // Circles are fully round; rectangles get a subtle pill curve
+          // proportional to the short axis so long strips don't pinch.
+          borderRadius: isCircle ? width / 2 : Math.min(width, height) * 0.2,
+          overflow: "hidden",
+          flexDirection: segmentDir,
+          ...rot,
+        }}
+      >
+        {scheme.segments.map((c, i) => (
+          <View key={i} style={{ flex: 1, backgroundColor: c }} />
+        ))}
+      </View>
       {pin.caption ? <CaptionPill caption={pin.caption} height={height} /> : null}
     </View>
   );
