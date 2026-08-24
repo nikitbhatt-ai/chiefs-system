@@ -953,7 +953,7 @@ export type UpfitPin = {
   // Visual config. All optional with defaults handled by the renderer
   // so existing pins (circles) keep working. `pushbar` renders a
   // push-bumper drawing rather than a colored equipment marker.
-  shape?: "rect" | "circle" | "pushbar";
+  shape?: "rect" | "circle" | "pushbar" | "pushbar_wrap";
   size?:
     | "small"
     | "medium"

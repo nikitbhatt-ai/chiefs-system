@@ -11,8 +11,8 @@ import {
   getTemplate,
   getViews,
   localImagePath,
-  PUSHBAR_RECTS,
-  PUSHBAR_VIEWBOX,
+  getPushbarStyle,
+  isPushbarShape,
 } from "@/lib/upfit/templates";
 import type { QuoteLine } from "./quote";
 import type { UpfitPin } from "@/db/schema";
@@ -162,17 +162,18 @@ function PinShape({ pin }: { pin: UpfitPin }) {
 
   // Push bumper: draw the shared grille-guard outline as filled rounded
   // rects, stretched to the pin's box (preserveAspectRatio none).
-  if (pin.shape === "pushbar") {
+  if (isPushbarShape(pin.shape)) {
+    const style = getPushbarStyle(pin.shape);
     return (
       <View style={outer}>
         <Svg
           width={width}
           height={height}
-          viewBox={`0 0 ${PUSHBAR_VIEWBOX.w} ${PUSHBAR_VIEWBOX.h}`}
+          viewBox={`0 0 ${style.viewBox.w} ${style.viewBox.h}`}
           preserveAspectRatio="none"
           style={rot}
         >
-          {PUSHBAR_RECTS.map((r, i) => (
+          {style.rects.map((r, i) => (
             <Rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
           ))}
         </Svg>

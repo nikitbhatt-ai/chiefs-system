@@ -159,21 +159,49 @@ export function nextPinColor(existing: number): string {
   return PIN_PALETTE[existing % PIN_PALETTE.length];
 }
 
-// --- Push bumper (grille guard) glyph -------------------------------------
+// --- Push bumper glyphs ---------------------------------------------------
 //
-// A Pro-gard-style push bumper: two rounded uprights + three horizontal
-// cross bars, drawn as filled rounded rects on this viewBox. Both the
-// editor (<svg>/<rect>) and the PDF (React-PDF <Svg>/<Rect>) render from
-// this single geometry with preserveAspectRatio="none" so it stretches
-// to whatever size the pin is resized to.
-export const PUSHBAR_VIEWBOX = { w: 120, h: 104 };
-export const PUSHBAR_RECTS: { x: number; y: number; w: number; h: number; r: number }[] = [
-  { x: 6, y: 4, w: 18, h: 96, r: 9 }, // left upright
-  { x: 96, y: 4, w: 18, h: 96, r: 9 }, // right upright
-  { x: 16, y: 6, w: 88, h: 15, r: 7 }, // top rail
-  { x: 12, y: 46, w: 96, h: 14, r: 7 }, // middle rail
-  { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
-];
+// Push bumpers render as filled rounded rects on a shared viewBox. Both
+// the editor (<svg>/<rect>) and the PDF (React-PDF <Svg>/<Rect>) render
+// from this single geometry with preserveAspectRatio="none" so the shape
+// stretches to whatever size the pin is resized to.
+export type PushbarRect = { x: number; y: number; w: number; h: number; r: number };
+export type PushbarStyle = { viewBox: { w: number; h: number }; rects: PushbarRect[] };
+
+export const PUSHBAR_STYLES: Record<string, PushbarStyle> = {
+  // Pro-gard-style grille guard: two rounded uprights + three cross bars.
+  pushbar: {
+    viewBox: { w: 120, h: 104 },
+    rects: [
+      { x: 6, y: 4, w: 18, h: 96, r: 9 }, // left upright
+      { x: 96, y: 4, w: 18, h: 96, r: 9 }, // right upright
+      { x: 16, y: 6, w: 88, h: 15, r: 7 }, // top rail
+      { x: 12, y: 46, w: 96, h: 14, r: 7 }, // middle rail
+      { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
+    ],
+  },
+  // Westin-style full-wrap brush guard: a narrow center guard (two
+  // uprights + top/mid rails) sitting on a wide double-bar wrap bumper.
+  pushbar_wrap: {
+    viewBox: { w: 200, h: 104 },
+    rects: [
+      { x: 78, y: 6, w: 13, h: 54, r: 6 }, // left upright
+      { x: 109, y: 6, w: 13, h: 54, r: 6 }, // right upright
+      { x: 82, y: 6, w: 36, h: 12, r: 6 }, // top rail
+      { x: 78, y: 40, w: 44, h: 11, r: 5 }, // middle rail
+      { x: 6, y: 60, w: 188, h: 14, r: 7 }, // upper wrap bar (full width)
+      { x: 12, y: 82, w: 176, h: 14, r: 7 }, // lower wrap bar (full width)
+    ],
+  },
+};
+
+export function isPushbarShape(shape: string | undefined | null): boolean {
+  return shape === "pushbar" || shape === "pushbar_wrap";
+}
+
+export function getPushbarStyle(shape: string | undefined | null): PushbarStyle {
+  return PUSHBAR_STYLES[shape ?? "pushbar"] ?? PUSHBAR_STYLES.pushbar;
+}
 
 // --- Pin shapes -----------------------------------------------------------
 //
