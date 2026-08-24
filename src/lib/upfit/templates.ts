@@ -186,23 +186,26 @@ export const PUSHBAR_STYLES: Record<string, PushbarStyle> = {
       { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
     ],
   },
-  // Westin-style full-wrap brush guard: an open center grille guard with
-  // a crossbar, sitting on a wide DOUBLE wrap bumper whose ends sweep up
-  // (the "wrap"). Drawn as stroked tubes.
+  // Full brush guard (Pro-gard style) — a straight, symmetric FRONT view:
+  // an outer tubular frame with three cross rails, two main uprights, and
+  // center brush bars. Stroked (hollow tubing), centered on x=100.
   pushbar_wrap: {
-    viewBox: { w: 240, h: 110 },
-    strokeWidth: 8,
+    viewBox: { w: 200, h: 140 },
+    strokeWidth: 7,
     paths: [
-      // Center guard: top loop + two uprights.
-      "M 104 50 L 104 14 Q 104 7 111 7 L 129 7 Q 136 7 136 14 L 136 50",
-      // Center guard crossbar.
-      "M 99 32 L 141 32",
-      // Center guard vertical divider.
-      "M 120 7 L 120 50",
-      // Upper wrap tube — full width, ends curving up.
-      "M 14 78 Q 14 54 44 52 L 196 52 Q 226 54 226 78",
-      // Lower wrap tube — parallel, below.
-      "M 22 96 Q 22 70 52 68 L 188 68 Q 218 70 218 96",
+      // Outer frame (rounded-rect perimeter).
+      "M 12 44 Q 12 22 34 22 L 166 22 Q 188 22 188 44 L 188 110 Q 188 132 166 132 L 34 132 Q 12 132 12 110 Z",
+      // Cross rails.
+      "M 12 48 L 188 48",
+      "M 12 82 L 188 82",
+      "M 12 116 L 188 116",
+      // Main uprights.
+      "M 68 22 L 68 132",
+      "M 132 22 L 132 132",
+      // Center brush bars.
+      "M 88 48 L 88 116",
+      "M 100 48 L 100 116",
+      "M 112 48 L 112 116",
     ],
   },
 };
