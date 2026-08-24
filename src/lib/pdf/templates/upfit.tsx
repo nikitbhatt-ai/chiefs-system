@@ -1,4 +1,4 @@
-import { Document, Page, Text, View, Image as PdfImage, Svg, Rect } from "@react-pdf/renderer";
+import { Document, Page, Text, View, Image as PdfImage, Svg, Rect, Path } from "@react-pdf/renderer";
 import React from "react";
 import { lineGross, lineDiscount, lineNet } from "@/lib/quoteTotals";
 import { existsSync, readFileSync } from "fs";
@@ -173,8 +173,19 @@ function PinShape({ pin }: { pin: UpfitPin }) {
           preserveAspectRatio="none"
           style={rot}
         >
-          {style.rects.map((r, i) => (
-            <Rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+          {(style.rects ?? []).map((r, i) => (
+            <Rect key={`r${i}`} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+          ))}
+          {(style.paths ?? []).map((d, i) => (
+            <Path
+              key={`p${i}`}
+              d={d}
+              fill="none"
+              stroke="#18181b"
+              strokeWidth={style.strokeWidth ?? 8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           ))}
         </Svg>
         {pin.caption ? <CaptionPill caption={pin.caption} height={height} /> : null}

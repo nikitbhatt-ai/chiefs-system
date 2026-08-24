@@ -957,8 +957,19 @@ function PushbarGlyph({ shape }: { shape?: string }) {
       preserveAspectRatio="none"
       className="w-full h-full"
     >
-      {style.rects.map((r, i) => (
-        <rect key={i} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+      {(style.rects ?? []).map((r, i) => (
+        <rect key={`r${i}`} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+      ))}
+      {(style.paths ?? []).map((d, i) => (
+        <path
+          key={`p${i}`}
+          d={d}
+          fill="none"
+          stroke="#18181b"
+          strokeWidth={style.strokeWidth ?? 8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
       ))}
     </svg>
   );

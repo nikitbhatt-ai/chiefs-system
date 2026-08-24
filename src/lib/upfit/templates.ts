@@ -161,12 +161,18 @@ export function nextPinColor(existing: number): string {
 
 // --- Push bumper glyphs ---------------------------------------------------
 //
-// Push bumpers render as filled rounded rects on a shared viewBox. Both
-// the editor (<svg>/<rect>) and the PDF (React-PDF <Svg>/<Rect>) render
-// from this single geometry with preserveAspectRatio="none" so the shape
-// stretches to whatever size the pin is resized to.
+// Push bumpers render on a shared viewBox with preserveAspectRatio="none"
+// so the shape stretches to whatever size the pin is resized to. Two
+// primitive kinds: filled `rects` (the grille guard) and stroked `paths`
+// (the full-wrap tubes — curves that rects can't express). Both the
+// editor (<svg>) and the PDF (React-PDF <Svg>) render from this geometry.
 export type PushbarRect = { x: number; y: number; w: number; h: number; r: number };
-export type PushbarStyle = { viewBox: { w: number; h: number }; rects: PushbarRect[] };
+export type PushbarStyle = {
+  viewBox: { w: number; h: number };
+  rects?: PushbarRect[];
+  paths?: string[]; // stroked outline paths (fill none)
+  strokeWidth?: number;
+};
 
 export const PUSHBAR_STYLES: Record<string, PushbarStyle> = {
   // Pro-gard-style grille guard: two rounded uprights + three cross bars.
@@ -180,17 +186,23 @@ export const PUSHBAR_STYLES: Record<string, PushbarStyle> = {
       { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
     ],
   },
-  // Westin-style full-wrap brush guard: a narrow center guard (two
-  // uprights + top/mid rails) sitting on a wide double-bar wrap bumper.
+  // Westin-style full-wrap brush guard: an open center grille guard with
+  // a crossbar, sitting on a wide DOUBLE wrap bumper whose ends sweep up
+  // (the "wrap"). Drawn as stroked tubes.
   pushbar_wrap: {
-    viewBox: { w: 200, h: 104 },
-    rects: [
-      { x: 78, y: 6, w: 13, h: 54, r: 6 }, // left upright
-      { x: 109, y: 6, w: 13, h: 54, r: 6 }, // right upright
-      { x: 82, y: 6, w: 36, h: 12, r: 6 }, // top rail
-      { x: 78, y: 40, w: 44, h: 11, r: 5 }, // middle rail
-      { x: 6, y: 60, w: 188, h: 14, r: 7 }, // upper wrap bar (full width)
-      { x: 12, y: 82, w: 176, h: 14, r: 7 }, // lower wrap bar (full width)
+    viewBox: { w: 240, h: 110 },
+    strokeWidth: 8,
+    paths: [
+      // Center guard: top loop + two uprights.
+      "M 104 50 L 104 14 Q 104 7 111 7 L 129 7 Q 136 7 136 14 L 136 50",
+      // Center guard crossbar.
+      "M 99 32 L 141 32",
+      // Center guard vertical divider.
+      "M 120 7 L 120 50",
+      // Upper wrap tube — full width, ends curving up.
+      "M 14 78 Q 14 54 44 52 L 196 52 Q 226 54 226 78",
+      // Lower wrap tube — parallel, below.
+      "M 22 96 Q 22 70 52 68 L 188 68 Q 218 70 218 96",
     ],
   },
 };
