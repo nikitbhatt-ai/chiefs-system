@@ -3362,12 +3362,36 @@ flow.
       appear on the lot view. The `vin SET NOT NULL` step self-skips with a
       notice if any VIN-less rows still exist, and names them.
 
+### Phase 2 — `deal_vehicles` link table (done, 2026-09-15)
+
+- [x] `deal_vehicles`: `deal_id`, `vehicle_id`, `linked_at`, `linked_by`,
+      `unlinked_at`, `unlinked_by`. A vehicle's **current** deal is the row
+      where `unlinked_at IS NULL`; its full history is every row.
+- [x] **Partial unique index** `deal_vehicles_active_vehicle_uniq` — unique on
+      `vehicle_id` WHERE `unlinked_at IS NULL`. This is the database-level
+      guardrail against two people attaching the same vehicle to two deals;
+      an application-code check alone loses that race. Being partial, a
+      vehicle may still accumulate any number of *closed* links.
+- [x] Indexes on `deal_id` ("what vehicles are on this deal?") and
+      `vehicle_id` ("what deal is this vehicle on?").
+- [x] Both FKs are `ON DELETE CASCADE`, so deleting a deal or vehicle does
+      not strand link rows.
+- [x] SQL for Neon: `docs/sql/vehicle_checkin_phase2.sql`. Re-runnable.
+- [x] Unlinking must stamp `unlinked_at`/`unlinked_by` — **never delete a
+      link row.** The history is the point.
+
+**Open decision — legacy `deals.vehicle_id` attachments.** `deals.vehicle_id`
+predates this table and already carries real attachments. They are invisible
+to the single-active-link index until copied into `deal_vehicles`. Phase 2
+deliberately does **not** backfill: it would have to invent a `linked_by`
+user, and any vehicle already sitting on two un-archived deals would violate
+the new index and need resolving by hand first. STEP 4 of the Phase 2 SQL is
+a read-only report showing how many such attachments exist and whether any
+vehicle is on 2+ deals. Decide before Phase 9, or `linkVehicleToDeal` will
+happily attach a vehicle that is already on a legacy deal.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 2** — `deal_vehicles` link table. Partial unique index
-      enforcing at most one active link per vehicle (unique on `vehicle_id`
-      where `unlinked_at IS NULL`). Index `deal_id`. Never delete link rows;
-      the history is the point.
 - [ ] **Phase 3** — roles + one reusable **server-side** permission helper
       (extend `src/lib/rbac.ts`; do not add a competing module). Enforce on
       the server, not just by hiding buttons.

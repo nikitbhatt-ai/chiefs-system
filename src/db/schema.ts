@@ -240,6 +240,36 @@ export const deals = pgTable("deals", {
   index("deals_pipeline_idx").on(t.pipeline),
 ]);
 
+// Links a vehicle to a deal. A deal can have many vehicles, and a vehicle can
+// appear on several deals across its lifetime — which is why this is a link
+// table and not a `dealId` column on the vehicle row.
+//
+// A vehicle's CURRENT deal is the row where unlinkedAt IS NULL. Its full
+// history is every row: unlinking stamps unlinkedAt/unlinkedBy, it never
+// deletes. The history is the point.
+//
+// Linking makes a vehicle ELIGIBLE for scheduling; it does not bypass the
+// purchase-order gate. The scheduler enforces that separately — do not
+// duplicate PO logic here.
+export const dealVehicles = pgTable("deal_vehicles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  dealId: uuid("deal_id").notNull().references(() => deals.id, { onDelete: "cascade" }),
+  vehicleId: uuid("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  linkedAt: timestamp("linked_at").notNull().defaultNow(),
+  linkedBy: uuid("linked_by").notNull().references(() => users.id),
+  unlinkedAt: timestamp("unlinked_at"),
+  unlinkedBy: uuid("unlinked_by").references(() => users.id),
+}, (t) => [
+  index("deal_vehicles_deal_idx").on(t.dealId),
+  index("deal_vehicles_vehicle_idx").on(t.vehicleId),
+  // The database-level guardrail against two people attaching the same
+  // vehicle to two deals. Partial: only ACTIVE links are constrained, so a
+  // vehicle can accumulate any number of closed links over its life.
+  uniqueIndex("deal_vehicles_active_vehicle_uniq")
+    .on(t.vehicleId)
+    .where(sql`${t.unlinkedAt} is null`),
+]);
+
 export const pipelineStageSla = pgTable("pipeline_stage_sla", {
   id: uuid("id").defaultRandom().primaryKey(),
   pipelineSlug: text("pipeline_slug").notNull(),
