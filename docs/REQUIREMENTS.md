@@ -3390,19 +3390,60 @@ a read-only report showing how many such attachments exist and whether any
 vehicle is on 2+ deals. Decide before Phase 9, or `linkVehicleToDeal` will
 happily attach a vehicle that is already on a legacy deal.
 
+### Phase 3 — roles and permissions (done, 2026-09-15)
+
+**No schema change, and no new roles.** The brief named four roles —
+`admin` / `office` / `inventory` / `tech` — but those are job descriptions,
+not values in our database. `user_role` is the authority (see the standing
+rule in `CLAUDE.md`: *always match what is in the database*), so the brief's
+names map onto the roles that already exist:
+
+| Brief says | Real `user_role` values |
+| --- | --- |
+| office | `admin`, `manager`, `sales` |
+| inventory | `warehouse` |
+| tech | `tech` |
+| — | `accountant` (not in the brief; treated as non-operational) |
+
+Permission matrix as implemented, by real role:
+
+| Action | admin | manager | sales | warehouse | tech | accountant |
+| --- | --- | --- | --- | --- | --- | --- |
+| Create check-in | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Edit check-in details | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Change `lot_status` | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Stamp departure | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Set/change `ownership` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+| Link vehicle to deal | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+- [x] **Creating a check-in is open to every role, deliberately.** A vehicle
+      that arrives and goes unrecorded is worse than one recorded by the
+      "wrong" person — arrival condition and photos cannot be reconstructed
+      later. Everything else follows the brief.
+- [x] **Ownership vs lot status is the core split.** Ownership is a
+      commercial classification, so it stays with office. Lot status is
+      physical reality, so the inventory associate (`warehouse`) owns it.
+- [x] Implemented by extending `src/lib/rbac.ts` — no competing module.
+      `LOT_CAPABILITIES` names every privileged action once; server actions
+      ask for a capability rather than re-deciding which roles qualify.
+- [x] `requireCapability(cap)` is **the** server-side guard. It reads the
+      session itself (so an action cannot be written that forgets to look)
+      and **throws** on failure (so a missed check fails loudly rather than
+      silently writing). Returns the session, since callers next need the
+      user id for `checked_in_by` / `linked_by` / `unlinked_by`.
+- [x] `can(session, cap)` is the pure predicate for deciding what to
+      **render**. Hiding a button is never sufficient — enforcement is on
+      the server, always.
+- [x] `requireCapabilityResponse(session, cap)` is the API-route flavour,
+      mirroring the existing `requireRole`.
+- [x] Tests: `src/lib/rbac.test.ts` (`npx tsx src/lib/rbac.test.ts`), 13
+      cases covering the full role × capability grid, unauthenticated
+      callers, and unknown roles. One test asserts the matrix covers exactly
+      the values in `user_role`, so it **fails if the roles in the database
+      ever change** and the code is not updated to match.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 3** — roles + one reusable **server-side** permission helper
-      (extend `src/lib/rbac.ts`; do not add a competing module). Enforce on
-      the server, not just by hiding buttons.
-      Create check-in: all roles. Edit check-in / change `lot_status` /
-      stamp departure: all but tech. Set `ownership` / link vehicle to deal:
-      office + admin only. Ownership is a commercial classification, so it
-      stays with office; lot status is physical reality, so the inventory
-      associate owns it.
-      *Open:* the brief's roles (`admin`/`office`/`inventory`/`tech`) do not
-      match the existing `user_role` enum (`admin`/`manager`/`sales`/
-      `warehouse`/`tech`/`accountant`).
 - [ ] **Phase 4** — `lookupVin(vin)`. Zod-validate (17 chars, alphanumeric,
       no I/O/Q, uppercase + trim first). Existing vehicle →
       `{ status: "existing", vehicle, lastCheckIn, activeDeal }`. Not found →

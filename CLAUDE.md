@@ -11,6 +11,20 @@ a module, consult that file's section for that module first.
 When the user adds a new requirement during a session, append it to
 `docs/REQUIREMENTS.md` in the same commit so the next session sees it.
 
+## The database is the authority
+
+**Always match what is in the database.** When a brief, a document, or a
+conversation names roles, statuses, types or any other enumerated value,
+check `src/db/schema.ts` and use the values that actually exist. Do not
+invent a parallel vocabulary, and do not add enum values to make the code
+match a document — map the document's wording onto the real values instead.
+
+Example: the vehicle check-in brief describes roles `admin` / `office` /
+`inventory` / `tech`. The `user_role` enum is `admin` / `manager` / `sales` /
+`warehouse` / `tech` / `accountant`. The brief's names are job descriptions;
+the enum is the authority, so "office" maps to admin+manager+sales and
+"inventory" maps to warehouse. See `src/lib/rbac.ts`.
+
 ## Build patterns
 
 - Server components for list/detail pages; server actions for form mutations.
