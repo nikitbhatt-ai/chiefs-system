@@ -10,6 +10,10 @@ export interface CarListingInput {
   notes?: string;
   productType?: string;
   status?: "draft" | "active";
+  year?: number | string;
+  make?: string;
+  model?: string;
+  trim?: string;
 }
 
 export interface CarListingSuccess {
