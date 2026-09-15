@@ -34,9 +34,17 @@ async function createVehicle(formData: FormData) {
   const yearRaw = String(formData.get("year") ?? "").trim();
   const mileageRaw = String(formData.get("mileage") ?? "").trim();
   const listPriceRaw = String(formData.get("listPrice") ?? "").trim();
+  // A VIN is now required: `vehicles` is one durable row per VIN, and the
+  // column is NOT NULL. Fail with the same inline banner the duplicate-VIN
+  // case uses rather than letting Postgres throw a raw constraint error.
+  if (!vin) {
+    redirect(
+      `/vehicles?addError=${encodeURIComponent("A VIN is required to add a vehicle.")}`,
+    );
+  }
   try {
     await db.insert(vehicles).values({
-      vin: vin || null,
+      vin,
       year: yearRaw ? Number(yearRaw) : null,
       make: String(formData.get("make") ?? "").trim() || null,
       model: String(formData.get("model") ?? "").trim() || null,

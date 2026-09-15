@@ -3281,6 +3281,155 @@ One caution worth recording: an earlier version of the quote check reported
 "PASSED" while running **zero** assertions, because the seed had no quotes to
 open. A check that cannot fail is not a check — assert that the fixture exists.
 
+## Vehicle check-in flow (build brief, 2026-09-15)
+
+Chiefs is a vehicle upfitting company and dealership. Vehicles physically
+arrive at the Hempstead lot and must be recorded on arrival. Primary users
+are the **inventory associate** and **office staff**, standing on the lot
+with a phone — this is a mobile-first flow; desktop is secondary.
+
+### Core model decisions (settled — do not revisit)
+
+- `vehicles` is the **durable** record: one row per VIN, forever. Holds what
+  the vehicle is and its current physical state.
+- `vehicle_check_ins` is an **event log**: one row per physical arrival. A
+  vehicle can have several over its life.
+- `deal_vehicles` is a **link table**. Do not put `dealId` on the vehicle row
+  — a deal can have many vehicles, and a vehicle can be on several deals
+  across its lifetime.
+- **Ownership** (who owns it) and **lot status** (why it is here) are
+  separate fields. Ownership rarely changes; status changes constantly.
+- The **vehicle owns physical reality** (location, condition, keys,
+  odometer). The **deal owns commercial reality** (customer, pricing, PO).
+  **Build progress lives on the work order**, not the vehicle.
+
+Three ownership situations: `chiefs` (our own inventory), `customer` (an
+agency dropped off its own unit for upfit), `sames` (Sames Auto Group
+consignment units stored on our lot for display before any upfit — we do not
+handle title or insurance for these; display-and-store only). A Sames unit
+may arrive with no deal, sit as available inventory, then later sell —
+sometimes to a customer we referred, becoming an upfit-only deal.
+
+### Existing business rule to respect
+
+All deal types except `service` require a purchase order before parts can be
+ordered or a bay scheduled. Check-in and deal-linking must **not** bypass
+this. Linking a vehicle to a deal makes it *eligible* for scheduling; the
+scheduler enforces the PO gate separately. Do not duplicate PO logic in this
+flow.
+
+> Note: the schema has no `deal_type` column today — deal classification is
+> `deals.pipeline` (`government` / `walk_in_credentialed` / `commercial`,
+> see `src/lib/pipelines.ts`), and there is no `service` type. The per-
+> pipeline `procurementGate` stage is the PO gate as actually implemented.
+
+### Phase 1 — schema (done, 2026-09-15)
+
+- [x] **Extended the existing `vehicles` table** rather than creating a
+      second one. It already was the one-row-per-VIN record, and is already
+      referenced by `deals.vehicle_id` and `work_orders.vehicle_id`.
+      Added `ownership`, `owner_party_id`, `owner_party_type`, `lot_status`.
+- [x] `lot_status` enum — **physical presence only, never build progress**:
+      `on_lot_available` (here, nothing pending), `on_lot_assigned` (here,
+      attached to a deal), `in_shop` (pulled into a bay), `departed` (gone).
+      NOT NULL, defaults to `on_lot_available`.
+- [x] `ownership` enum (`chiefs` / `customer` / `sames`) is **nullable**.
+      The brief specified NOT NULL, but Phase 4 of the same brief requires an
+      inventory associate to leave ownership *unset* for office to classify
+      later. Nullable is the only way both hold. Defaulting to `chiefs`
+      would silently mislabel partner units as our own.
+- [x] `owner_party_id` carries **no foreign key**: an agency owner is a row
+      in `customers`, a Sames owner is a row in `partners`, and one uuid
+      column cannot reference two tables. `owner_party_type`
+      (`customer` / `partner`) says which table it points into.
+- [x] `vehicles.vin` is now **NOT NULL** and unique — uniqueness is what makes
+      duplicate vehicle rows impossible. Kept as `text` rather than
+      `varchar(17)` to match the rest of the schema; the 17-char / no-I-O-Q
+      rule is enforced by Zod at the application layer (Phase 4).
+      Consequently the add/edit vehicle form and `POST /api/vehicles` now
+      **require** a VIN, where they previously allowed a null one.
+- [x] `vehicle_check_ins` — one row per arrival. **Days-on-lot is computed**
+      from `arrived_at`/`departed_at` and is never stored.
+- [x] `vehicle_check_in_photos` — photos attach to the **check-in event**,
+      not the vehicle, because condition is specific to a given arrival.
+      `url` is a public Vercel Blob URL.
+- [x] Indexes on `vehicle_check_ins.vehicle_id`,
+      `vehicle_check_in_photos.check_in_id`, and `vehicles.lot_status`.
+      `vehicles.vin` is already indexed by its UNIQUE constraint.
+- [x] SQL for Neon: `docs/sql/vehicle_checkin_phase1.sql`. Re-runnable.
+      Backfills `lot_status` from the legacy `status` column
+      (`delivered`/`sold` → `departed`) so already-sold vehicles do not
+      appear on the lot view. The `vin SET NOT NULL` step self-skips with a
+      notice if any VIN-less rows still exist, and names them.
+
+### Remaining phases (not yet built)
+
+- [ ] **Phase 2** — `deal_vehicles` link table. Partial unique index
+      enforcing at most one active link per vehicle (unique on `vehicle_id`
+      where `unlinked_at IS NULL`). Index `deal_id`. Never delete link rows;
+      the history is the point.
+- [ ] **Phase 3** — roles + one reusable **server-side** permission helper
+      (extend `src/lib/rbac.ts`; do not add a competing module). Enforce on
+      the server, not just by hiding buttons.
+      Create check-in: all roles. Edit check-in / change `lot_status` /
+      stamp departure: all but tech. Set `ownership` / link vehicle to deal:
+      office + admin only. Ownership is a commercial classification, so it
+      stays with office; lot status is physical reality, so the inventory
+      associate owns it.
+      *Open:* the brief's roles (`admin`/`office`/`inventory`/`tech`) do not
+      match the existing `user_role` enum (`admin`/`manager`/`sales`/
+      `warehouse`/`tech`/`accountant`).
+- [ ] **Phase 4** — `lookupVin(vin)`. Zod-validate (17 chars, alphanumeric,
+      no I/O/Q, uppercase + trim first). Existing vehicle →
+      `{ status: "existing", vehicle, lastCheckIn, activeDeal }`. Not found →
+      `{ status: "new", decoded }` from the **existing** decoder. Decoder
+      failure → `{ status: "new", decoded: null }` — a decoder outage must
+      never block a check-in. **Do not add a new third-party VIN service.**
+      The existing decoder is the NHTSA vPIC call in
+      `src/app/api/vin/decode/[vin]/route.ts` (no caching); the same rules
+      already exist as `vinToShopify/validate.js` + `decodeVin.js`.
+- [ ] **Phase 5** — `/lot/check-in`, mobile-first. VIN first; existing
+      vehicle shows a banner and collects arrival details only.
+      **Photos at the top** of the details section — if someone gets pulled
+      away mid-check-in, photos are the part that cannot be recreated later.
+      Six guided slots + multi "add damage photo", `capture="environment"`.
+      Fuel as tap-to-select buttons; damage-note preset chips plus free text
+      ("describe the damage" produces empty fields). Ownership visible only
+      to office/admin. One server action, **one transaction**: upsert
+      vehicle, insert check-in, insert photos. Zod on the server.
+- [ ] **Phase 6** — draft saving to local storage keyed by VIN; per-photo
+      upload status (pending/uploading/done/failed) with retry, uploaded one
+      at a time. No service worker / offline sync yet.
+- [ ] **Phase 7** — desktop layout. Same components, same server action.
+- [ ] **Phase 8** — lot view: VIN (last 8), year/make/model, ownership, lot
+      status, lot location, **days on lot** (computed), current deal,
+      front-photo thumbnail. Filters + text search. Default sort days-on-lot
+      descending. Mobile cards + desktop table. Inline lot-status change for
+      inventory and above.
+      *Why days-on-lot matters:* we store partner vehicles that generate no
+      revenue while they sit. This is the number that answers whether that is
+      working, and it **cannot be backfilled**.
+- [ ] **Phase 9** — `linkVehicleToDeal(vehicleId, dealId)`: office/admin
+      only; refuse if an active link exists, naming the existing deal;
+      insert link; set `lot_status` to `on_lot_assigned` **only if currently
+      `on_lot_available`** (do not clobber `in_shop`); copy VIN/year/make/
+      model onto the deal **only where blank**. All in a transaction. Plus
+      `unlinkVehicleFromDeal(linkId)`. No PO/bay/parts logic here.
+- [ ] **Phase 10** — departure: stamp `departed_at` on the most recent open
+      check-in, set `lot_status` to `departed`, optional notes and departure
+      photos (new `departure` photo slot). A returning vehicle gets a **new
+      check-in row against the same vehicle row**.
+
+### Definition of done (whole flow)
+
+- Inventory associate checks in a Sames unit from a phone in under two
+  minutes, with six photos.
+- It appears on the lot view immediately, unassigned, days-on-lot running.
+- Office attaches it to an upfit-only deal when it sells; the existing PO
+  gate still governs scheduling.
+- The vehicle can depart, return months later, and its history is intact.
+- No duplicate vehicle rows for the same VIN. No vehicle on two deals at once.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

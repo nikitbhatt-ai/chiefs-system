@@ -54,10 +54,13 @@ export default async function EditVehiclePage({
     const yearRaw = String(formData.get("year") ?? "").trim();
     const mileageRaw = String(formData.get("mileage") ?? "").trim();
     const listPriceRaw = String(formData.get("listPrice") ?? "").trim();
+    // `vehicles.vin` is NOT NULL — a vehicle cannot be saved without one.
+    // Blanking the field is a no-op on the VIN rather than a constraint error.
+    const vin = String(formData.get("vin") ?? "").trim().toUpperCase();
     await db
       .update(vehicles)
       .set({
-        vin: String(formData.get("vin") ?? "").trim().toUpperCase() || null,
+        ...(vin ? { vin } : {}),
         year: yearRaw ? Number(yearRaw) : null,
         make: String(formData.get("make") ?? "").trim() || null,
         model: String(formData.get("model") ?? "").trim() || null,

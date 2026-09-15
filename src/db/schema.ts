@@ -28,6 +28,17 @@ export const quoteStatus = pgEnum("quote_status", ["draft","sent","approved","co
 // legacy values (pending_review, po_received, received) stay valid for old rows.
 export const purchaseOrderStatus = pgEnum("purchase_order_status", ["pending","pending_review","po_received","partially_received","received","ordered","fulfilled"]);
 export const vehicleStatus = pgEnum("vehicle_status", ["new","received","ready_for_pickup","delivered","sold"]);
+// Check-in flow (vehicle arrivals on the Hempstead lot). Ownership is a
+// commercial classification and changes rarely; lot status is physical
+// presence only and changes constantly. They are deliberately separate from
+// the legacy `vehicle_status` above, which mixes sales state into one field.
+export const vehicleOwnership = pgEnum("vehicle_ownership", ["chiefs","customer","sames"]);
+// `owner_party_id` can point at either a customer (agency) or a partner
+// (Sames and other dealerships), so it carries no FK; this says which table.
+export const vehicleOwnerPartyType = pgEnum("vehicle_owner_party_type", ["customer","partner"]);
+export const vehicleLotStatus = pgEnum("vehicle_lot_status", ["on_lot_available","on_lot_assigned","in_shop","departed"]);
+export const fuelLevel = pgEnum("fuel_level", ["empty","quarter","half","three_quarter","full"]);
+export const checkInPhotoSlot = pgEnum("check_in_photo_slot", ["front","rear","driver_side","passenger_side","odometer","vin_plate","damage"]);
 export const commType = pgEnum("comm_type", ["call","email","in_person","note"]);
 
 export const users = pgTable("users", {
@@ -100,7 +111,11 @@ export const vendors = pgTable("vendors", {
 
 export const vehicles = pgTable("vehicles", {
   id: uuid("id").defaultRandom().primaryKey(),
-  vin: text("vin").unique(),
+  // NOT NULL + unique: one durable row per VIN, forever. Uniqueness is what
+  // makes duplicate vehicle records impossible. Kept as `text` rather than
+  // varchar(17) to match the rest of the schema; the 17-char / no-I-O-Q rule
+  // is enforced by Zod at the application layer.
+  vin: text("vin").notNull().unique(),
   year: integer("year"),
   make: text("make"),
   model: text("model"),
@@ -118,9 +133,57 @@ export const vehicles = pgTable("vehicles", {
   shopifyProductId: text("shopify_product_id").unique(),
   shopifyStatus: text("shopify_status"),
   shopifyPublishedAt: timestamp("shopify_published_at"),
+  // --- Check-in flow ---------------------------------------------------
+  // Who owns the unit. Nullable on purpose: an inventory associate checking a
+  // vehicle in on the lot cannot set ownership (office/admin only), so a row
+  // legitimately exists unclassified until office classifies it. Defaulting
+  // to "chiefs" instead would silently mislabel partner units as our own.
+  ownership: vehicleOwnership("ownership"),
+  // Which agency or dealer owns it, when ownership is customer/sames. No FK:
+  // the target is `customers` or `partners` depending on ownerPartyType.
+  ownerPartyId: uuid("owner_party_id"),
+  ownerPartyType: vehicleOwnerPartyType("owner_party_type"),
+  // Physical presence only — never build progress. Build progress lives on
+  // the work order.
+  lotStatus: vehicleLotStatus("lot_status").notNull().default("on_lot_available"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (t) => [index("vehicles_status_idx").on(t.status)]);
+}, (t) => [
+  index("vehicles_status_idx").on(t.status),
+  index("vehicles_lot_status_idx").on(t.lotStatus),
+]);
+
+// One row per physical arrival on the lot. A vehicle accumulates several of
+// these over its life; the vehicles row above stays the single durable record.
+// Days-on-lot is computed from arrivedAt/departedAt and never stored.
+export const vehicleCheckIns = pgTable("vehicle_check_ins", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  vehicleId: uuid("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  arrivedAt: timestamp("arrived_at").notNull().defaultNow(),
+  departedAt: timestamp("departed_at"),
+  odometer: integer("odometer"),
+  fuelLevel: fuelLevel("fuel_level"),
+  keyCount: integer("key_count"),
+  keyLocation: text("key_location"),
+  deliveredBy: text("delivered_by"),
+  dropContact: text("drop_contact"),
+  lotLocation: text("lot_location"),
+  damageNotes: text("damage_notes"),
+  itemsInside: text("items_inside"),
+  checkedInBy: uuid("checked_in_by").notNull().references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [index("vehicle_check_ins_vehicle_idx").on(t.vehicleId)]);
+
+// Photos hang off the check-in event, not the vehicle: condition is specific
+// to a given arrival. Stored in Vercel Blob; `url` is the public blob URL.
+export const vehicleCheckInPhotos = pgTable("vehicle_check_in_photos", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  checkInId: uuid("check_in_id").notNull().references(() => vehicleCheckIns.id, { onDelete: "cascade" }),
+  url: text("url").notNull(),
+  slot: checkInPhotoSlot("slot"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("vehicle_check_in_photos_check_in_idx").on(t.checkInId)]);
 
 export const leads = pgTable("leads", {
   id: uuid("id").defaultRandom().primaryKey(),

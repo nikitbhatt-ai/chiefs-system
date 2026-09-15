@@ -15,10 +15,16 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
+  // `vehicles.vin` is NOT NULL — one durable row per VIN. Reject up front so
+  // callers get a clear 400 instead of a raw constraint violation.
+  const vin = String(body.vin ?? "").trim().toUpperCase();
+  if (!vin) {
+    return NextResponse.json({ error: "vin is required" }, { status: 400 });
+  }
   const [row] = await db
     .insert(vehicles)
     .values({
-      vin: body.vin?.toUpperCase() ?? null,
+      vin,
       year: body.year ?? null,
       make: body.make ?? null,
       model: body.model ?? null,
