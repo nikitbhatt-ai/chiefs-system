@@ -35,10 +35,17 @@ import {
   purchaseOrders,
   backfillRequisition,
   type POLineItem,
+  type POFee,
 } from "@/db/schema";
 import { and } from "drizzle-orm";
 import { dollarsToCents } from "@/lib/accounting";
-import { postInventoryReceipt, postInventoryIssue, postInventoryRestore } from "@/lib/inventoryLedger";
+import {
+  postInventoryReceipt,
+  postInventoryIssue,
+  postInventoryRestore,
+  postPurchaseFees,
+} from "@/lib/inventoryLedger";
+import { allocateFreight, feeTotals, landedUnitCost } from "@/lib/poFees";
 import {
   recordReceiptLayer,
   drainLayersTx,
@@ -221,6 +228,11 @@ export async function restoreWorkOrderParts(workOrderId: string): Promise<{ rest
 // receives serialize instead of both reading quantity_received = 0 and
 // double-incrementing stock. Each received line appends a cost layer, rolls the
 // moving average, bumps on-hand, and logs a cost-history row — all or nothing.
+//
+// PO fees (src/lib/poFees.ts) are folded in here: freight is capitalized into
+// each line's landed unit cost so the layer carries it, and non-freight fees are
+// expensed once, on the first receipt, latched by purchase_orders
+// .fees_accrued_cents.
 export async function receivePurchaseOrder(
   purchaseOrderId: string,
   receiveByIndex: Map<number, number>,
@@ -237,8 +249,21 @@ export async function receivePurchaseOrder(
     const updatedLines: POLineItem[] = [];
     let allFullyReceived = true;
     let anyReceivedThisRound = false;
-    // Value of goods received this round at ACTUAL PO unit cost, for the ledger.
+    // Value of goods received this round at LANDED unit cost (PO unit cost plus
+    // this line's share of freight), for the ledger.
     let receivedCents = 0;
+
+    // Freight on the PO is capitalized into the parts' cost: spread it across the
+    // receivable lines once, up front, against the FULL ordered quantities. Each
+    // line then carries a fixed per-unit freight adder, so a partial receipt
+    // capitalizes exactly the freight belonging to the units that actually turned
+    // up and the rest stays with the units still outstanding. Non-freight fees
+    // are expensed separately below.
+    const { freightCents, otherCents } = feeTotals((po.fees as POFee[]) ?? []);
+    const freightByLine = allocateFreight(
+      lines.map((l) => ({ partId: l.partId, quantity: l.quantity, unitCost: l.unitCost })),
+      freightCents,
+    );
 
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
@@ -259,7 +284,12 @@ export async function receivePurchaseOrder(
           .limit(1);
         if (!dupe) {
           anyReceivedThisRound = true;
-          receivedCents += qty * dollarsToCents(l.unitCost);
+          // Landed cost: the price paid plus this line's per-unit share of
+          // freight. The layer stores it, so the moving average, parts.cost, the
+          // GRNI accrual and the Inventory debit all reflect landed cost without
+          // any of them needing to know fees exist.
+          const unitCostLanded = landedUnitCost(l.unitCost, l.quantity, freightByLine[i] ?? 0);
+          receivedCents += qty * dollarsToCents(unitCostLanded);
           // Package lines land as `package` layers carrying their promo id (for
           // Phase 7); backfill lines as `backfill`; everything else individual.
           const sourceKind = l.sourceKind ?? (l.sourcePromoId ? "package" : "individual");
@@ -267,7 +297,7 @@ export async function receivePurchaseOrder(
           await recordReceiptLayer(tx, {
             partId: l.partId,
             quantityReceived: qty,
-            unitCost: l.unitCost,
+            unitCost: unitCostLanded,
             sourceKind,
             promoId: l.sourcePromoId ?? null,
             purchaseOrderId: po.id,
@@ -289,8 +319,18 @@ export async function receivePurchaseOrder(
         ? ("partially_received" as const)
         : po.status;
 
-    // Ledger: Dr Inventory / Cr Accounts Payable for the value received.
+    // Ledger: Dr Inventory / Cr Accrued Purchases for the value received
+    // (freight included, since receivedCents is at landed cost).
     await postInventoryReceipt(tx, { totalCents: receivedCents, poNumber: po.poNumber });
+
+    // Non-freight fees are expensed once, on the first receipt that actually
+    // brings something in — they're a charge for the order, not per shipment, so
+    // splitting them across partial receipts would only invite rounding drift.
+    // fees_accrued_cents is the latch: non-zero means they're already booked.
+    const postFeesNow = anyReceivedThisRound && otherCents > 0 && (po.feesAccruedCents ?? 0) === 0;
+    if (postFeesNow) {
+      await postPurchaseFees(tx, { totalCents: otherCents, poNumber: po.poNumber });
+    }
 
     await tx
       .update(purchaseOrders)
@@ -298,6 +338,7 @@ export async function receivePurchaseOrder(
         lineItems: updatedLines as never,
         status: nextStatus,
         receivedAt: allFullyReceived ? new Date() : po.receivedAt,
+        ...(postFeesNow ? { feesAccruedCents: otherCents } : {}),
         updatedAt: new Date(),
       })
       .where(eq(purchaseOrders.id, purchaseOrderId));

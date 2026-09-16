@@ -20,7 +20,7 @@
 
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { glAccounts, bills, billLines, payments, partReceipts } from "@/db/schema";
+import { glAccounts, bills, billLines, payments, partReceipts, purchaseOrders } from "@/db/schema";
 import {
   dollarsToCents,
   postJournalEntryTx,
@@ -79,6 +79,12 @@ async function nextNumber(tx: Tx, prefix: string, count: () => Promise<number>):
  * "Already relieved" is the 2050 debits on prior non-void bills for the same PO,
  * rather than those bills' totals — a bill that ran over the received value only
  * relieved part of its total, with the rest going to variance.
+ *
+ * Non-freight PO fees accrue to 2050 too (see postPurchaseFees), so they're added
+ * on from purchase_orders.fees_accrued_cents. Without that, a vendor invoice
+ * covering parts AND a handling charge would find less accrual than it bills for
+ * and push the fee to purchase price variance. Freight needs no such term: it is
+ * capitalized into the receipt layers, so the sum above already includes it.
  */
 export async function accruedRemainingForPo(tx: Tx, purchaseOrderId: string): Promise<number> {
   const [received] = await tx
@@ -89,6 +95,11 @@ export async function accruedRemainingForPo(tx: Tx, purchaseOrderId: string): Pr
     })
     .from(partReceipts)
     .where(eq(partReceipts.purchaseOrderId, purchaseOrderId));
+
+  const [feeAccrual] = await tx
+    .select({ cents: purchaseOrders.feesAccruedCents })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, purchaseOrderId));
 
   const [relieved] = await tx
     .select({ cents: sql<number>`COALESCE(SUM(${billLines.amountCents}), 0)`.mapWith(Number) })
@@ -103,7 +114,7 @@ export async function accruedRemainingForPo(tx: Tx, purchaseOrderId: string): Pr
       ),
     );
 
-  return Math.max(0, (received?.cents ?? 0) - (relieved?.cents ?? 0));
+  return Math.max(0, (received?.cents ?? 0) + (feeAccrual?.cents ?? 0) - (relieved?.cents ?? 0));
 }
 
 /** Split a bill total against a PO's outstanding accrual. */

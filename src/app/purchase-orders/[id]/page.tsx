@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { purchaseOrders, vendors, type POLineItem } from "@/db/schema";
+import { purchaseOrders, vendors, type POLineItem, type POFee } from "@/db/schema";
+import { feeTotals } from "@/lib/poFees";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
 import { receivePurchaseOrder } from "@/lib/inventory";
@@ -24,10 +25,21 @@ async function saveDraft(formData: FormData) {
     // not array position, and can build an idempotent receipt key.
     id: l.id ?? randomUUID(),
   }));
-  const total = lines.reduce(
+  // Fees: drop blank rows, normalise the kind, and keep a stable id per row.
+  const fees = (JSON.parse(String(formData.get("fees") ?? "[]")) as POFee[])
+    .map((f) => ({
+      id: f.id ?? randomUUID(),
+      description: String(f.description ?? "").trim(),
+      amount: Number(f.amount) || 0,
+      kind: f.kind === "freight" ? ("freight" as const) : ("other" as const),
+    }))
+    .filter((f) => f.description !== "" || f.amount !== 0);
+  const linesTotal = lines.reduce(
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,
   );
+  // The PO total is what the vendor will bill: parts plus every fee.
+  const total = linesTotal + feeTotals(fees).totalCents / 100;
   // Manual status (Pending/Ordered) — but never override an auto received/
   // fulfilled state from a plain save; those are driven by receiving.
   const [cur] = await db
@@ -47,6 +59,7 @@ async function saveDraft(formData: FormData) {
       notes,
       status: status as typeof purchaseOrders.$inferSelect.status,
       lineItems: lines as never,
+      fees: fees as never,
       total: total.toFixed(2),
       expectedAt: expectedAt ? new Date(expectedAt) : null,
       updatedAt: new Date(),
@@ -121,6 +134,7 @@ export default async function POPage({
         notes={po.notes ?? ""}
         expectedAt={po.expectedAt ? new Date(po.expectedAt).toISOString().slice(0, 10) : ""}
         initialLines={initial}
+        initialFees={(po.fees as POFee[]) ?? []}
         vendors={vendorRows}
         promos={activePromos}
         status={po.status}

@@ -1321,7 +1321,54 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
       - Logs `part_cost_history` entry.
       - Updates PO status to `partially_received` or `received`.
 - [x] Status badges (pending/pending_review/po_received/partially_received/received).
+- [x] **Fee section** — a PO carries named fee rows (`purchase_orders.fees`
+      jsonb: `{ id, description, amount, kind }`) for vendor charges that
+      aren't parts. Add/remove rows in the PO editor with "+ Shipping" /
+      "+ Other fee"; the totals roll-up shows Parts subtotal → Shipping &
+      freight → Other fees → Total, and `purchase_orders.total` is
+      lines + fees. Fees are itemised under the line-item table on the PO
+      PDF so the vendor sees the same breakdown.
+
+      Each fee has a **kind**, and the kind drives the accounting
+      (`src/lib/poFees.ts`, pure + unit-tested in `poFees.test.ts`):
+      - `freight` (Shipping / freight) is **capitalized into landed cost**.
+        It's allocated across the receivable lines (linked part, qty > 0)
+        in proportion to extended value, integer cents with a
+        largest-remainder plug so it ties exactly, then folded into each
+        line's unit cost. The FIFO layer written on receipt therefore
+        carries landed cost, so the moving average, `parts.cost`, the
+        Inventory (1200) debit and the GRNI accrual all pick freight up
+        without knowing fees exist. Allocation runs against the FULL
+        ordered quantities, so a partial receipt capitalizes only the
+        freight belonging to the units that actually arrived. A
+        zero-value basket falls back to allocating by quantity.
+      - `other` (handling, customs, surcharges) is **expensed** on the
+        first receipt that brings something in: Dr 5230 Purchase Fees &
+        Surcharges / Cr 2050 Accrued Purchases. Posted once, latched by
+        `purchase_orders.fees_accrued_cents`, which also tells
+        `accruedRemainingForPo` there's extra accrual for the vendor bill
+        to relieve (otherwise a bill covering parts + handling would push
+        the fee to purchase price variance). Freight needs no such term —
+        it's already inside `part_receipts`.
+
+      Note: a costing layer stores one 2-decimal unit cost, so per-unit
+      freight rounds to the cent; qty × landed unit cost can differ from
+      (qty × unit cost + line freight) by a few cents on awkward splits.
+      The layer is the authority and the ledger posts from the same
+      landed figure, so Inventory and the FIFO subledger stay tied.
 - [ ] Filters by vendor / status / date range.
+
+### Schema additions (PO fees)
+
+Run `docs/sql/po_fees.sql` in Neon's SQL Editor:
+
+```sql
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS fees jsonb NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS fees_accrued_cents integer NOT NULL DEFAULT 0;
+INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
+  ('5230', 'Purchase Fees & Surcharges', 'cogs', 'cogs_parts', 'debit')
+ON CONFLICT (code) DO NOTHING;
+```
 
 ## Costing (FIFO + weighted average)
 

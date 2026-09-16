@@ -12,7 +12,12 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { quotes, customers, purchaseOrders, vendors, upfitConfigs, workOrders } from "@/db/schema";
 import { QuoteDocument, type QuoteData, type QuoteLine } from "./templates/quote";
-import { PurchaseOrderDocument, type PurchaseOrderData, type POLine } from "./templates/purchaseOrder";
+import {
+  PurchaseOrderDocument,
+  type PurchaseOrderData,
+  type POLine,
+  type POFeeLine,
+} from "./templates/purchaseOrder";
 import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
 import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
 import { resolvePartsFromLineItems } from "@/lib/workOrderParts";
@@ -72,6 +77,7 @@ async function resolvePurchaseOrder(recordId: string): Promise<PurchaseOrderData
     createdAt: po.createdAt,
     notes: po.notes ?? null,
     lineItems: ((po.lineItems as unknown as POLine[]) ?? []),
+    fees: ((po.fees as unknown as POFeeLine[]) ?? []),
   };
 }
 
