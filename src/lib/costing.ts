@@ -170,6 +170,10 @@ export async function drainLayersTx(
   tx: Tx,
   opts: { partId: string; qty: number; workOrderId?: string | null },
 ): Promise<DrainResult> {
+  // inventory_issue denormalizes the part SKU (NOT NULL in the live table).
+  const [pt] = await tx.select({ sku: parts.sku }).from(parts).where(eq(parts.id, opts.partId));
+  const sku = pt?.sku ?? "";
+
   const layers = await tx
     .select()
     .from(partReceipts)
@@ -190,6 +194,7 @@ export async function drainLayersTx(
       .where(eq(partReceipts.id, layer.id));
     await tx.insert(inventoryIssue).values({
       partId: opts.partId,
+      sku,
       workOrderId: opts.workOrderId ?? null,
       layerId: layer.id,
       qty: take,
