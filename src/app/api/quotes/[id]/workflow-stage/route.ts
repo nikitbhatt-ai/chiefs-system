@@ -5,11 +5,6 @@ import { db } from "@/db";
 import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
-import {
-  reserveForWorkOrder,
-  fulfillReservationsForWorkOrder,
-  releaseReservationsForWorkOrder,
-} from "@/lib/reservations";
 import { checkReordersForWorkOrder } from "@/lib/backfill";
 import { qcComplete } from "@/lib/qc";
 
@@ -133,28 +128,21 @@ export async function POST(
       await db.update(workOrders).set({ status: stage, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
     }
 
-    // Transactional, idempotent consumption (see src/lib/inventory.ts) plus the
-    // reservation lifecycle (Phase 5):
-    //   - in_progress+ : consume the quote's parts once, then fulfill the WO's
-    //     reservation (the claim is realized; on-hand already dropped).
-    //   - confirmed / awaiting_parts / next_in_line : committed but not yet
-    //     consumed — restore any prior consumption and (re)reserve the parts.
-    //   - estimate : de-committed — restore and release the reservation.
+    // Inventory policy (owner decision): a build has NO inventory effect until
+    // it reaches the In Progress column. Crossing into in_progress+ consumes the
+    // quote's parts exactly once (on-hand drops via FIFO layers); dragging the
+    // build back out before in_progress restores exactly what was drained.
+    // Earlier columns (confirmed / awaiting_parts / next_in_line) are purely for
+    // scheduling and never touch stock — no reservations are taken. Both calls
+    // are idempotent and transactional (see src/lib/inventory.ts).
     if (wo) {
-      const CONFIRMED_INDEX = STAGE_KEYS.indexOf("confirmed");
       if (targetIndex >= BUILD_START_INDEX) {
         await consumeWorkOrderParts(wo.id);
-        await fulfillReservationsForWorkOrder(wo.id);
       } else {
         await restoreWorkOrderParts(wo.id);
-        if (targetIndex >= CONFIRMED_INDEX) {
-          await reserveForWorkOrder(wo.id);
-        } else {
-          await releaseReservationsForWorkOrder(wo.id);
-        }
       }
-      // Reserving or consuming dropped available — raise reorder-point
-      // backfills for any part that hit its threshold (best-effort).
+      // Consuming dropped on-hand — raise reorder-point backfills for any part
+      // that hit its threshold. Best-effort: bookkeeping must never block a move.
       try {
         await checkReordersForWorkOrder(wo.id);
       } catch (err) {
