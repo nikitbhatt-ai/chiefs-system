@@ -1684,6 +1684,14 @@ guarded function.
   `moveStage` server action was removed — it duplicated the logic, ran
   no CRM sync, and failed silently (which read to users as the move
   "reverting"). The endpoint returns typed 400s the UI surfaces.
+- [x] **No stock effect before In Progress (owner policy, 2026-09).** A build
+  in `estimate` / `confirmed` / `awaiting_parts` / `next_in_line` takes nothing
+  out of inventory — those columns are scheduling only. Parts leave on-hand only
+  when the build reaches `in_progress` (or beyond) via `consumeWorkOrderParts`,
+  and come back if it's dragged back before `in_progress`. The workflow-stage
+  path and `maybePromoteWonDeal` therefore do **not** create reservations. This
+  also means a card move never touches the `inventory_reservation` table, so a
+  stage move can't fail on that table being absent (the original drag bug).
 - [x] **Approval gate before a build can start.** The
   `POST /api/quotes/[id]/workflow-stage` endpoint rejects any move to
   `in_progress` (or a later stage) unless `quotes.status` is `approved`
@@ -2462,11 +2470,17 @@ Phases (one at a time, approval between each):
       partial receipt needs a cost already on the line). Individual POs
       never call it. PO lines stayed jsonb (extended, not promoted to a
       table — see PROMO_PACKAGES.md decision #5).
-- [x] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
-      fire when a work order enters `confirmed` (customer PO in hand, build
-      committed to the shop) — one `reserveForWorkOrder` called from
-      `maybePromoteWonDeal` and the `/workflow` board path. Every picking
-      screen reads available, never raw on-hand.
+- [x] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservation
+      infrastructure (`src/lib/reservations.ts`, `inventory_reservation` table)
+      exists and available = on-hand − active reserved is read on the part page.
+      **Superseded 2026-09 by the "no stock before In Progress" owner policy
+      (below):** the workflow-stage path and `maybePromoteWonDeal` no longer
+      call `reserveForWorkOrder`, so nothing reserves at `confirmed`; reserved
+      is effectively always 0 and available == on-hand. The reservation reads
+      degrade to 0 when the `inventory_reservation` table has not been migrated
+      (`isMissingReservationTable`), so the part-detail and backfill pages never
+      crash on a not-yet-created table. Re-enabling soft-reserve later is a
+      matter of restoring those two write calls + running `promo_phase5.sql`.
 - [x] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
       Pulling reserved stock requires an override that logs who/why and
       raises its own replacement requisition.

@@ -26,7 +26,7 @@ import {
   inventoryReservation,
   type POLineItem,
 } from "@/db/schema";
-import { availableForPart } from "@/lib/reservations";
+import { availableForPart, isMissingReservationTable } from "@/lib/reservations";
 import { issueStock } from "@/lib/costing";
 import { currentAlacarteCost } from "@/lib/vendorPricing";
 import { randomUUID } from "node:crypto";
@@ -69,12 +69,18 @@ export async function listReorderPoints() {
 
 async function activeReservedByPart(partIds: string[]): Promise<Map<string, number>> {
   if (!partIds.length) return new Map();
-  const rows = await db
-    .select({ partId: inventoryReservation.partId, qty: sql<number>`COALESCE(SUM(${inventoryReservation.qtyReserved}),0)`.mapWith(Number) })
-    .from(inventoryReservation)
-    .where(and(inArray(inventoryReservation.partId, partIds), eq(inventoryReservation.status, "active")))
-    .groupBy(inventoryReservation.partId);
-  return new Map(rows.map((r) => [r.partId, r.qty]));
+  try {
+    const rows = await db
+      .select({ partId: inventoryReservation.partId, qty: sql<number>`COALESCE(SUM(${inventoryReservation.qtyReserved}),0)`.mapWith(Number) })
+      .from(inventoryReservation)
+      .where(and(inArray(inventoryReservation.partId, partIds), eq(inventoryReservation.status, "active")))
+      .groupBy(inventoryReservation.partId);
+    return new Map(rows.map((r) => [r.partId, r.qty]));
+  } catch (err) {
+    // Not-yet-migrated reservation table → treat as nothing reserved.
+    if (isMissingReservationTable(err)) return new Map();
+    throw err;
+  }
 }
 
 // ── Reorder-point auto-backfill ──────────────────────────────────────────────

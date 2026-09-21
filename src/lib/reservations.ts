@@ -21,6 +21,17 @@ type DbOrTx = typeof db | Tx;
 
 type QuoteLine = { kind?: string; partId?: string; quantity?: number };
 
+// The inventory_reservation table is defined in schema.ts but created by a
+// manual Neon migration (docs/sql/promo_phase5.sql). Under the current policy
+// (builds take no stock before In Progress) nothing is ever reserved, so a read
+// against a not-yet-migrated table should simply report zero rather than crash
+// the page. Matches Postgres "undefined_table" (42P01), wrapped or not.
+export function isMissingReservationTable(err: unknown): boolean {
+  const e = err as { code?: string; cause?: { code?: string }; message?: string };
+  if ((e?.code ?? e?.cause?.code) === "42P01") return true;
+  return /relation "?inventory_reservation"? does not exist/i.test(String(e?.message ?? ""));
+}
+
 function rollupPartQuantities(lineItems: unknown): Map<string, number> {
   const lines = (lineItems as QuoteLine[] | null) ?? [];
   const byPart = new Map<string, number>();
@@ -42,11 +53,18 @@ export async function reservedForPart(
   const runner: DbOrTx = opts?.tx ?? db;
   const filters = [eq(inventoryReservation.partId, partId), eq(inventoryReservation.status, "active")];
   if (opts?.excludeWorkOrderId) filters.push(ne(inventoryReservation.workOrderId, opts.excludeWorkOrderId));
-  const [row] = await runner
-    .select({ qty: sql<number>`COALESCE(SUM(${inventoryReservation.qtyReserved}), 0)`.mapWith(Number) })
-    .from(inventoryReservation)
-    .where(and(...filters));
-  return row?.qty ?? 0;
+  try {
+    const [row] = await runner
+      .select({ qty: sql<number>`COALESCE(SUM(${inventoryReservation.qtyReserved}), 0)`.mapWith(Number) })
+      .from(inventoryReservation)
+      .where(and(...filters));
+    return row?.qty ?? 0;
+  } catch (err) {
+    // Report zero if the table isn't migrated yet — but only outside a caller's
+    // transaction, where a failed query has already aborted it.
+    if (!opts?.tx && isMissingReservationTable(err)) return 0;
+    throw err;
+  }
 }
 
 /** On-hand − active reserved for a part. Optionally exclude one work order's own claim. */
@@ -65,15 +83,20 @@ export async function availableForPart(
 export async function reservedByPart(partIds?: string[]): Promise<Map<string, number>> {
   const filters = [eq(inventoryReservation.status, "active")];
   if (partIds && partIds.length) filters.push(inArray(inventoryReservation.partId, partIds));
-  const rows = await db
-    .select({
-      partId: inventoryReservation.partId,
-      qty: sql<number>`COALESCE(SUM(${inventoryReservation.qtyReserved}), 0)`.mapWith(Number),
-    })
-    .from(inventoryReservation)
-    .where(and(...filters))
-    .groupBy(inventoryReservation.partId);
-  return new Map(rows.map((r) => [r.partId, r.qty]));
+  try {
+    const rows = await db
+      .select({
+        partId: inventoryReservation.partId,
+        qty: sql<number>`COALESCE(SUM(${inventoryReservation.qtyReserved}), 0)`.mapWith(Number),
+      })
+      .from(inventoryReservation)
+      .where(and(...filters))
+      .groupBy(inventoryReservation.partId);
+    return new Map(rows.map((r) => [r.partId, r.qty]));
+  } catch (err) {
+    if (isMissingReservationTable(err)) return new Map();
+    throw err;
+  }
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
