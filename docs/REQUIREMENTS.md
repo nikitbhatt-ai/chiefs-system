@@ -2461,6 +2461,14 @@ Phases (one at a time, approval between each):
       receipt, in the receive transaction, never at PO entry. On
       quote→invoice conversion, snapshot `avg_cost` onto the line items so the
       internal margin view reflects cost at sale, not today's average.
+  - **Drift fix 2026-09:** the live `inventory_issue` table carried a stray
+    `sku NOT NULL` column absent from `schema.ts` and this migration, so every
+    consumption insert (a build entering In Progress) failed with
+    `null value in column "sku" … violates not-null constraint`. Resolved by
+    adding the denormalized `sku` to `inventoryIssue` in `schema.ts` and
+    populating it in `drainLayersTx` (from `parts.sku`); the CREATE above now
+    includes it, with an idempotent backfill for older DBs. No production DB
+    action was required — the column already existed there.
 - [x] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose

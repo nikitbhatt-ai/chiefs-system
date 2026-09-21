@@ -336,6 +336,11 @@ export const partReceipts = pgTable("part_receipts", {
 export const inventoryIssue = pgTable("inventory_issue", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+  // Denormalized part SKU (1:1 with part_id, parts.sku is unique). The live DB
+  // has this as NOT NULL, so every issue slice must carry it — populated from
+  // the part in drainLayersTx. Matches the sku denormalization on
+  // inventory_reservation / backfill_requisition / stock_override_log.
+  sku: text("sku").notNull(),
   workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
   layerId: uuid("layer_id").references(() => partReceipts.id, { onDelete: "set null" }),
   qty: integer("qty").notNull(),

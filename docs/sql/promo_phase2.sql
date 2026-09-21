@@ -43,6 +43,7 @@ ALTER TABLE parts
 CREATE TABLE IF NOT EXISTS inventory_issue (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   part_id       uuid NOT NULL REFERENCES parts(id) ON DELETE CASCADE,
+  sku           text NOT NULL,
   work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
   layer_id      uuid REFERENCES part_receipts(id) ON DELETE SET NULL,
   qty           integer NOT NULL,
@@ -52,6 +53,16 @@ CREATE TABLE IF NOT EXISTS inventory_issue (
 CREATE INDEX IF NOT EXISTS inventory_issue_part_idx ON inventory_issue (part_id);
 CREATE INDEX IF NOT EXISTS inventory_issue_work_order_idx ON inventory_issue (work_order_id);
 CREATE INDEX IF NOT EXISTS inventory_issue_layer_idx ON inventory_issue (layer_id);
+
+-- inventory_issue.sku denormalizes parts.sku (NOT NULL), mirroring src/db/
+-- schema.ts. Idempotent alignment for a DB whose table predates this column:
+-- add nullable, backfill from parts, then enforce NOT NULL. Production already
+-- has it NOT NULL, so all three are no-ops there.
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS sku text;
+UPDATE inventory_issue ii SET sku = p.sku FROM parts p WHERE ii.part_id = p.id AND ii.sku IS NULL;
+DO $$ BEGIN
+  ALTER TABLE inventory_issue ALTER COLUMN sku SET NOT NULL;
+EXCEPTION WHEN others THEN NULL; END $$;
 
 -- ── 5. costing_policy (single row) ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS costing_policy (

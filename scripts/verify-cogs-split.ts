@@ -77,6 +77,7 @@ async function main() {
     const s = seeded[i];
     await db.insert(inventoryIssue).values({
       partId: partRows[i].id,
+      sku: s.sku,
       workOrderId: wo.id,
       qty: s.qty,
       unitCost: s.unit,
