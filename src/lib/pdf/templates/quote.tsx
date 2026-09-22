@@ -3,6 +3,7 @@ import React from "react";
 import { sharedStyles } from "../styles";
 import { BRANDING, brandLogo } from "../branding";
 import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
+import { lineUnitCost, lineExtCost, costRollup, type PartCostMap } from "@/lib/lineCost";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
 
@@ -38,6 +39,17 @@ export type QuoteData = {
   salesPerson: string | null;
   /** partId → customer-facing part number (`parts.sku`), for the Part # column. */
   partNumbers: Record<string, string>;
+  /**
+   * partId → internal weighted-average cost. Only read when `internal` is set;
+   * the customer-facing document never renders it.
+   */
+  partCosts: PartCostMap;
+  /**
+   * INTERNAL COPY: adds per-line cost and margin columns for the sales team.
+   * Never true for a document sent to a customer — the route only sets it when
+   * `?internal=1` is asked for by a signed-in user.
+   */
+  internal?: boolean;
   lineItems: QuoteLine[];
   taxTotal: number;
   grandTotal: number;
@@ -73,6 +85,36 @@ function discountPct(l: Extract<QuoteLine, { kind: "item" }>): number {
   return round2((lineDiscount(l) / gross) * 100);
 }
 
+/**
+ * Wrap a long part number across lines WITHOUT altering it.
+ *
+ * React-PDF's hyphenation inserts a hyphen at every break, which would turn
+ * `KIT-23S1-CC0713-OS` into `KIT-23S1--CC0713-OS` — a part number a customer
+ * could order against, silently wrong. So the cell renders its own lines,
+ * broken after separators the code already contains. Read top to bottom the
+ * pieces concatenate back to exactly the original string.
+ *
+ * Short codes come back as a single line, unchanged.
+ */
+function splitCode(code: string, maxLen = 12): string[] {
+  if (code.length <= maxLen) return [code];
+  // Break points come after a separator, so the separator stays on the line it
+  // belongs to and nothing is inserted.
+  const atoms = code.split(/(?<=[-_/.])/).filter(Boolean);
+  const out: string[] = [];
+  let cur = "";
+  for (const a of atoms) {
+    if (cur && (cur + a).length > maxLen) {
+      out.push(cur);
+      cur = a;
+    } else {
+      cur += a;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
 // Renders the Parts / Labor / Fees sub-tables for a set of lines. Used
 // both for a package group's lines (showTitles=false — the package
 // title is the header) and for loose lines (showTitles=true).
@@ -80,30 +122,51 @@ function KindTables({
   lines,
   showTitles,
   partNumbers,
+  partCosts,
+  internal = false,
 }: {
   lines: QuoteLine[];
   showTitles: boolean;
   /** partId → customer-facing part number, for the Part # column. */
   partNumbers?: Record<string, string>;
+  /** Internal cost basis; only read when `internal`. */
+  partCosts?: PartCostMap;
+  /** Adds the Cost and Margin columns. Internal copy only. */
+  internal?: boolean;
 }) {
   const styles = sharedStyles;
   const items = lines.filter((l) => l.kind === "item");
   const labor = lines.filter((l) => l.kind === "labor");
   const fees = lines.filter((l) => l.kind === "fee");
+  // Two extra columns on the internal copy, so every column narrows to fit.
+  // Each set sums to 100%.
+  const W = internal
+    ? { num: "3%", desc: "24%", part: "16%", qty: "5%", cost: "11%", unit: "12%", disc: "8%", margin: "11%", total: "10%" }
+    : { num: "4%", desc: "40%", part: "16%", qty: "7%", cost: "0%", unit: "13%", disc: "8%", margin: "0%", total: "12%" };
   return (
     <View>
       {items.length > 0 && (
-        <View style={{ marginTop: showTitles ? 12 : 4 }}>
-          {showTitles && <Text style={styles.sectionTitle}>Parts &amp; Items</Text>}
+        <View style={{ marginTop: showTitles ? 12 : 4 }} wrap={items.length > 12}>
+          {showTitles && (
+            <Text style={styles.sectionTitle} minPresenceAhead={70}>
+              Parts &amp; Items
+            </Text>
+          )}
           <View style={styles.table}>
-            <View style={[styles.tableRow, styles.tableHeader]}>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "4%" }]}>#</Text>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>Description</Text>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>Part #</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "7%" }]}>Qty</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>Unit price</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "8%" }]}>Disc %</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>Total</Text>
+            <View style={[styles.tableRow, styles.tableHeader]} minPresenceAhead={40}>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: W.num }]}>#</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: W.desc }]}>Description</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: W.part }]}>Part #</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: W.qty }]}>Qty</Text>
+              {internal ? (
+                <Text style={[styles.tableCell, styles.cellRight, { width: W.cost }]}>Avg cost</Text>
+              ) : null}
+              <Text style={[styles.tableCell, styles.cellRight, { width: W.unit }]}>Unit price</Text>
+              <Text style={[styles.tableCell, styles.cellRight, { width: W.disc }]}>Disc %</Text>
+              {internal ? (
+                <Text style={[styles.tableCell, styles.cellRight, { width: W.margin }]}>Margin</Text>
+              ) : null}
+              <Text style={[styles.tableCell, styles.cellRight, { width: W.total }]}>Total</Text>
             </View>
             {items.map((l, idx) => {
               if (l.kind !== "item") return null;
@@ -116,31 +179,54 @@ function KindTables({
               const disc = lineDiscount(l);
               const pct = discountPct(l);
               const partNo = l.partId ? partNumbers?.[l.partId] : undefined;
+              const unitCost = internal ? lineUnitCost(l, partCosts ?? {}) : null;
+              const extCost = internal ? lineExtCost(l, partCosts ?? {}) : null;
+              const net = lineNet(l);
+              const lineMargin = extCost == null ? null : round2(net - extCost);
+              const marginPct = lineMargin == null || net <= 0 ? null : (lineMargin / net) * 100;
               return (
                 <View key={`item-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "4%" }]}>{idx + 1}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "40%" }]}>{l.description}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "16%", fontSize: 9 }]}>
-                    {partNo ?? "—"}
-                  </Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "7%" }]}>{l.quantity}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>{money(l.unitPrice || 0)}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: W.num }]}>{idx + 1}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: W.desc }]}>{l.description}</Text>
+                  <View style={{ width: W.part, paddingVertical: 6, paddingHorizontal: 8 }}>
+                    {(partNo ? splitCode(partNo, internal ? 11 : 14) : ["—"]).map((piece, k) => (
+                      <Text key={k} style={{ fontSize: 8.5, textAlign: "left" }}>
+                        {piece}
+                      </Text>
+                    ))}
+                  </View>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: W.qty }]}>{l.quantity}</Text>
+                  {internal ? (
+                    // "—" rather than $0.00: a part with no recorded average is
+                    // not a free part, and a rep must be able to tell.
+                    <Text style={[styles.tableCell, styles.cellRight, { width: W.cost, fontSize: 9 }]}>
+                      {unitCost == null ? "—" : money(unitCost)}
+                    </Text>
+                  ) : null}
+                  <Text style={[styles.tableCell, styles.cellRight, { width: W.unit }]}>{money(l.unitPrice || 0)}</Text>
                   {/* The percentage off list, which is what gets checked against
                       a contract. The dollars come off in the Total column. */}
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "8%" }]}>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: W.disc }]}>
                     {pct > 0 ? `${pct.toFixed(2)}%` : "—"}
                   </Text>
+                  {internal ? (
+                    <Text style={[styles.tableCell, styles.cellRight, { width: W.margin, fontSize: 9 }]}>
+                      {lineMargin == null
+                        ? "—"
+                        : `${money(lineMargin)}${marginPct == null ? "" : ` / ${marginPct.toFixed(0)}%`}`}
+                    </Text>
+                  ) : null}
                   {disc > 0 ? (
                     // Show the pre-discount price struck through above the
                     // discounted price so the customer sees the saving per line.
-                    <View style={{ width: "12%", paddingVertical: 6, paddingHorizontal: 8 }}>
+                    <View style={{ width: W.total, paddingVertical: 6, paddingHorizontal: 8 }}>
                       <Text style={{ fontSize: 8, textAlign: "right", color: "#888888", textDecoration: "line-through" }}>
                         {money(gross)}
                       </Text>
                       <Text style={{ fontSize: 10, textAlign: "right" }}>{money(lineNet(l))}</Text>
                     </View>
                   ) : (
-                    <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>{money(lineNet(l))}</Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: W.total }]}>{money(lineNet(l))}</Text>
                   )}
                 </View>
               );
@@ -149,10 +235,14 @@ function KindTables({
         </View>
       )}
       {labor.length > 0 && (
-        <View style={{ marginTop: showTitles ? 12 : 4 }}>
-          {showTitles && <Text style={styles.sectionTitle}>Labor</Text>}
+        <View style={{ marginTop: showTitles ? 12 : 4 }} wrap={labor.length > 12}>
+          {showTitles && (
+            <Text style={styles.sectionTitle} minPresenceAhead={70}>
+              Labor
+            </Text>
+          )}
           <View style={styles.table}>
-            <View style={[styles.tableRow, styles.tableHeader]}>
+            <View style={[styles.tableRow, styles.tableHeader]} minPresenceAhead={40}>
               <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
               <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Hours</Text>
               <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Rate / hr</Text>
@@ -175,10 +265,14 @@ function KindTables({
         </View>
       )}
       {fees.length > 0 && (
-        <View style={{ marginTop: showTitles ? 12 : 4 }}>
-          {showTitles && <Text style={styles.sectionTitle}>Fees &amp; Add-ons</Text>}
+        <View style={{ marginTop: showTitles ? 12 : 4 }} wrap={fees.length > 12}>
+          {showTitles && (
+            <Text style={styles.sectionTitle} minPresenceAhead={70}>
+              Fees &amp; Add-ons
+            </Text>
+          )}
           <View style={styles.table}>
-            <View style={[styles.tableRow, styles.tableHeader]}>
+            <View style={[styles.tableRow, styles.tableHeader]} minPresenceAhead={40}>
               <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>Description</Text>
               <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>Amount</Text>
             </View>
@@ -219,10 +313,11 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   const dateLabel = isInvoice ? "Invoice date" : "Quote date";
   const generated = new Date();
   const logo = brandLogo();
+  const isInternal = data.internal === true;
 
   return (
     <Document
-      title={`${docTitle} ${docNumber}`}
+      title={`${docTitle} ${docNumber}${isInternal ? " (internal copy)" : ""}`}
       author={BRANDING.companyName}
       creator={BRANDING.companyName}
       producer={BRANDING.companyName}
@@ -241,7 +336,6 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
               // rather than leaving a blank corner. See `brandLogo()`.
               <Text style={styles.logoWordmark}>{BRANDING.companyName}</Text>
             )}
-            {logo ? <Text style={styles.brandLine}>{BRANDING.companyName}</Text> : null}
             {BRANDING.address ? <Text style={styles.brandLine}>{BRANDING.address}</Text> : null}
             {BRANDING.phone ? <Text style={styles.brandLine}>{BRANDING.phone}</Text> : null}
             {BRANDING.email ? <Text style={styles.brandLine}>{BRANDING.email}</Text> : null}
@@ -258,6 +352,12 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             ) : null}
           </View>
         </View>
+
+        {isInternal ? (
+          <View style={styles.internalBanner} fixed>
+            <Text>INTERNAL COPY — shows our cost and margin. Do not send to the customer.</Text>
+          </View>
+        ) : null}
 
         <View style={styles.twoCol}>
           <View style={{ width: "48%" }}>
@@ -330,6 +430,7 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                 return (
                   <View key={gid} style={{ marginTop: 14 }}>
                     <View
+                      minPresenceAhead={80}
                       style={{
                         backgroundColor: "#f3f4f6",
                         borderWidth: 1,
@@ -340,11 +441,11 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     >
                       <Text style={{ fontSize: 11, fontWeight: 700 }}>{title}</Text>
                     </View>
-                    <KindTables lines={gl} showTitles={false} partNumbers={data.partNumbers} />
+                    <KindTables lines={gl} showTitles={false} partNumbers={data.partNumbers} partCosts={data.partCosts} internal={isInternal} />
                   </View>
                 );
               })}
-              {loose.length > 0 && <KindTables lines={loose} showTitles={true} partNumbers={data.partNumbers} />}
+              {loose.length > 0 && <KindTables lines={loose} showTitles={true} partNumbers={data.partNumbers} partCosts={data.partCosts} internal={isInternal} />}
             </View>
           );
         })()}
@@ -385,6 +486,36 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             <Text>{isInvoice ? "Amount due" : "Total"}</Text>
             <Text>{money(grand)}</Text>
           </View>
+          {isInternal
+            ? (() => {
+                // Margin against parts net only: labor and fees have no part
+                // cost to compare against, and folding them in would flatter
+                // the number a rep negotiates on.
+                const partsNet = round2(subtotal - discountTotal);
+                const roll = costRollup(data.lineItems, partsNet, data.partCosts ?? {});
+                return (
+                  <View style={styles.internalTotals}>
+                    <View style={styles.totalRow}>
+                      <Text>Parts cost (avg)</Text>
+                      <Text>{money(roll.cost)}</Text>
+                    </View>
+                    <View style={styles.totalRow}>
+                      <Text>Parts margin</Text>
+                      <Text>
+                        {money(roll.margin)}
+                        {roll.marginPct != null ? ` (${roll.marginPct.toFixed(1)}%)` : ""}
+                      </Text>
+                    </View>
+                    {roll.unknown > 0 ? (
+                      <Text style={{ fontSize: 8, color: BRANDING.mutedColor, marginTop: 2 }}>
+                        {roll.unknown} line{roll.unknown === 1 ? "" : "s"} without a recorded average cost -
+                        excluded above.
+                      </Text>
+                    ) : null}
+                  </View>
+                );
+              })()
+            : null}
         </View>
 
         {data.notes ? (
@@ -396,7 +527,8 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
 
         <View style={styles.footer} fixed>
           <Text>
-            {BRANDING.companyName} · {isInvoice ? "Invoice" : "Quote"} {docNumber} · Generated {generated.toLocaleString("en-US")}
+            {BRANDING.companyName} · {isInvoice ? "Invoice" : "Quote"} {docNumber}
+            {isInternal ? " · INTERNAL COPY" : ""} · Generated {generated.toLocaleString("en-US")}
           </Text>
           <Text render={({ pageNumber, totalPages }) => `Page ${pageNumber} of ${totalPages}`} />
         </View>

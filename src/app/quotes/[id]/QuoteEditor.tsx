@@ -6,7 +6,8 @@ import { MoneyInput, QtyInput, HoursInput, PercentInput } from "@/components/Mon
 import { fmtUSD } from "@/lib/money";
 import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSearchCombobox";
 import { expandPackageWithBundlePrice } from "@/lib/packages";
-import { quoteTotals, lineNet } from "@/lib/quoteTotals";
+import { quoteTotals, lineNet, round2 } from "@/lib/quoteTotals";
+import { lineUnitCost, lineExtCost, costRollup, type PartCostMap } from "@/lib/lineCost";
 import { SubmitButton } from "@/components/SubmitButton";
 
 // Optional package grouping. Lines added from a saved package share a
@@ -71,6 +72,7 @@ export function QuoteEditor({
   initialVehicleModel = "",
   initialVehicleTrim = "",
   initialUnitNumber = "",
+  partCosts = {},
   action,
 }: {
   id: string;
@@ -85,6 +87,12 @@ export function QuoteEditor({
   initialVehicleModel?: string;
   initialVehicleTrim?: string;
   initialUnitNumber?: string;
+  /**
+   * partId → internal weighted-average cost, for the margin readouts. Resolved
+   * server-side because a saved line stores only `partId`; a line added from a
+   * promo carries its own locked cost and does not need this.
+   */
+  partCosts?: PartCostMap;
   action: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
@@ -128,6 +136,16 @@ export function QuoteEditor({
   // from the current quote's lines).
   const [pkgMsg, setPkgMsg] = useState<{ tone: "ok" | "err"; text: string } | null>(null);
   const [savingPkg, setSavingPkg] = useState(false);
+  // Costs for parts picked during THIS edit. `partCosts` only covers lines that
+  // were already saved, so without this a line shows "Cost —" until the rep
+  // saves and reloads — exactly when they most want to see the margin.
+  const [learnedCosts, setLearnedCosts] = useState<PartCostMap>({});
+  const costs = useMemo(() => ({ ...partCosts, ...learnedCosts }), [partCosts, learnedCosts]);
+  function learnCost(p: PartHit) {
+    const raw = p.avgCost ?? p.cost;
+    const n = raw == null || raw === "" ? NaN : Number(raw);
+    if (Number.isFinite(n)) setLearnedCosts((prev) => ({ ...prev, [p.id]: n }));
+  }
 
   const totals = useMemo(() => {
     // Shared helper rounds each line before summing, so the rows foot to grand.
@@ -170,6 +188,7 @@ export function QuoteEditor({
     ]);
   }
   function addPart(part: PartHit) {
+    learnCost(part);
     setLines((prev) => {
       // If this part is already on the quote as an item line, bump its
       // quantity by 1 instead of appending a duplicate row.
@@ -443,13 +462,14 @@ export function QuoteEditor({
             mode="inline"
             value={l.description}
             onText={(s) => updateLine(i, { description: s })}
-            onPick={(p) =>
+            onPick={(p) => {
+              learnCost(p);
               updateLine(i, {
                 description: `${p.sku} — ${p.name}`,
                 unitPrice: p.price ? Number(p.price) : 0,
                 partId: p.id,
-              })
-            }
+              });
+            }}
           />
         </div>
         <QtyInput
@@ -498,13 +518,47 @@ export function QuoteEditor({
         >
           Remove
         </button>
-        <div className="col-span-12 text-right text-[11px] text-zinc-500">
+        <div className="col-span-12 flex flex-wrap justify-end gap-x-3 text-[11px] text-zinc-500">
+          {/* Internal cost / margin, for the rep working the deal. Never
+              rendered on a customer-facing document — see lineCost.ts. */}
+          {(() => {
+            const unit = lineUnitCost(l, costs);
+            if (unit == null) {
+              return (
+                <span
+                  className="text-zinc-600"
+                  title="No average cost recorded for this part yet — margin below excludes this line."
+                >
+                  Cost —
+                </span>
+              );
+            }
+            const ext = lineExtCost(l, costs) ?? 0;
+            const net = lineNet(l);
+            const margin = round2(net - ext);
+            const pct = net > 0 ? (margin / net) * 100 : null;
+            return (
+              <>
+                <span title="Internal weighted-average cost per unit, and extended for this line's quantity">
+                  Cost <span className="tabular-nums text-zinc-400">{fmtUSD(unit)}</span>
+                  {(l.quantity || 0) !== 1 ? (
+                    <span className="tabular-nums text-zinc-500"> × {l.quantity} = {fmtUSD(ext)}</span>
+                  ) : null}
+                </span>
+                <span title="What the customer pays for this line, less our cost">
+                  Margin{" "}
+                  <span className={margin >= 0 ? "tabular-nums text-emerald-300/90" : "tabular-nums text-red-400"}>
+                    {fmtUSD(margin)}
+                    {pct != null ? ` (${pct.toFixed(1)}%)` : ""}
+                  </span>
+                </span>
+              </>
+            );
+          })()}
           {l.bundleDiscount ? (
-            <span className="text-amber-300/80 mr-2">
-              promo −{fmtUSD(l.bundleDiscount)}
-            </span>
+            <span className="text-amber-300/80">promo −{fmtUSD(l.bundleDiscount)}</span>
           ) : null}
-          {`Line total: ${fmt(lineNet(l))}`}
+          <span className="text-zinc-400">{`Line total: ${fmt(lineNet(l))}`}</span>
         </div>
       </div>
     );
@@ -941,6 +995,33 @@ export function QuoteEditor({
               big
             />
           </div>
+          {/* Internal margin on the whole quote. Amber-boxed and labelled so
+              nobody mistakes it for something the customer sees. */}
+          {(() => {
+            // Margin is measured against parts net — labor and fees have no
+            // part cost to compare against, and folding them in would inflate
+            // the number a rep negotiates on.
+            const partsNet = round2(totals.subtotal - totals.discountTotal);
+            const roll = costRollup(lines, partsNet, costs);
+            return (
+              <div className="mt-3 rounded-md border border-amber-500/25 bg-amber-500/5 px-3 py-2 space-y-1">
+                <div className="text-[10px] uppercase tracking-wider text-amber-300/80 font-semibold">
+                  Internal — not shown to the customer
+                </div>
+                <Row label="Parts cost (avg)" value={fmt(roll.cost)} />
+                <Row
+                  label="Parts margin"
+                  value={`${fmt(roll.margin)}${roll.marginPct != null ? ` (${roll.marginPct.toFixed(1)}%)` : ""}`}
+                />
+                {roll.unknown > 0 ? (
+                  <div className="text-[10px] text-amber-300/70">
+                    {roll.unknown} line{roll.unknown === 1 ? " has" : "s have"} no average cost recorded — margin
+                    above excludes {roll.unknown === 1 ? "it" : "them"}.
+                  </div>
+                ) : null}
+              </div>
+            );
+          })()}
         </div>
       </div>
 

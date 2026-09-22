@@ -3407,6 +3407,96 @@ reported a *pass* for every `contains` had the guard ("the PDF's text decoded")
 not been there. Assert that your extraction worked before trusting what it
 says about the content.
 
+## Internal cost on quotes and invoices (user requirement, 2026-09-22)
+
+> "i need the internal cost to show on every quote and invoice so that our sales
+> team knows what the internal avg cost is for each item"
+
+### Where it shows — and where it deliberately does not
+
+The stated purpose is for the **sales team** to know the cost. Printing it on the
+document that goes to the customer would hand them our margin, so the split is:
+
+| Surface | Internal cost? |
+| --- | --- |
+| Quote editor (`/quotes/[id]`) | **Yes** — per line, plus a quote-level rollup |
+| Internal copy PDF (`?internal=1`) | **Yes** — Avg cost + Margin columns |
+| Internal print view (`/print?internal=1`) | **Yes** |
+| Customer invoice / quote PDF | **No** |
+| Customer print view | **No** |
+
+The internal copy is reached from a distinct amber **"Internal copy (cost +
+margin)"** button next to the two customer downloads, is banner-marked
+`INTERNAL COPY — shows our cost and margin. Do not send to the customer.` on
+every page, and downloads as `Invoice_<no>_<date>_INTERNAL.pdf` — because what
+someone sees when attaching a file is the filename.
+
+Both internal surfaces sit behind the same auth as the rest of the app; neither
+is reachable from a customer-facing link.
+
+### Which cost, in what order
+
+`src/lib/lineCost.ts` owns this, shared by editor, print view and PDF:
+
+1. **A locked cost on the line wins.** That is a promo/package cost negotiated
+   for this build; today's moving average is not what we paid for it.
+2. Otherwise the part's **`avg_cost`** — the weighted-average basis job costing
+   uses, and what the request asked for.
+3. Otherwise any unlocked cost the line carries.
+4. Otherwise **null → renders `—`, never `$0.00`.** An uncosted part is not a
+   free part, and a rep must be able to tell the difference.
+
+Lines with no known cost are counted and declared (*"2 lines without a recorded
+average cost — excluded above"*) rather than silently treated as costing
+nothing, which would overstate margin.
+
+Margin is measured against **parts net only** — labor and fees have no part cost
+to compare against, and folding them in would flatter the number a rep
+negotiates on.
+
+Costs for parts picked during an edit are learned from the part-search response,
+so a freshly added line shows its margin immediately instead of reading `Cost —`
+until the quote is saved and reloaded.
+
+### The logo
+
+`public/brand/chiefs-logo.png` (800×270, from the user's 2000×676 artwork). The
+slot is 164×55pt, sized to the mark's ~2.96:1 ratio. `brandLogo()` inlines it as
+a data URI for react-pdf and caches it for the process; `brandLogoWebPath()`
+serves it to the print view. The wordmark fallback remains for anyone running
+without the file.
+
+### Three rendering defects found while verifying
+
+- **React-PDF inserts a hyphen wherever it breaks a word.** Letting it break a
+  part number turned `KIT-23S1-CC0713-OS` into `KIT-23S1--CC0713-OS` — a
+  corrupted value someone could order against. Hyphenation stays off; long codes
+  are wrapped explicitly by `splitCode()`, which breaks only after separators the
+  code already contains, so the pieces concatenate back to the original exactly.
+- **Part # overflowed into Qty** on the narrower internal layout before that fix.
+- **A bordered table split across a page break** left an empty box on one page
+  and "FEES & ADD-ONS" stranded at the foot of the other. Short sections
+  (≤12 rows) are now pinned with `wrap={false}`; longer ones still wrap, because
+  a `wrap={false}` block taller than a page cannot be laid out.
+
+### Verified
+
+`scripts`-free, against a seeded record on a **production** build whose costs are
+known exactly (locked 800 ×1, avg 75 ×4, avg 700 ×1 = $1,800, plus two lines with
+no cost at all):
+
+- the customer PDF and print view contain **no** cost, margin, banner, or any of
+  the figures $800 / $75 / $700 / $1,800;
+- the internal copy shows a locked promo cost **beating** the part average
+  ($800, not $1,000) and the average **beating** the catalogue cost ($75 not $70,
+  $700 not $600) — the $1,800 total proves it, since catalogue costs would give
+  $1,780;
+- parts margin = (subtotal − discount) − parts cost, to the cent;
+- uncosted lines render `—` and are declared;
+- no character falls outside the font encoding;
+- the editor shows per-line cost, `$75.00 × 4 = $300.00` for quantities, margin
+  percentages, and the labelled internal rollup.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

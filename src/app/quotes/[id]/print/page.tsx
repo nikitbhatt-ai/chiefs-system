@@ -6,6 +6,7 @@ import { PrintTrigger } from "./PrintTrigger";
 import { quoteTotals, lineNet, lineGross, lineDiscount, round2 } from "@/lib/quoteTotals";
 import { fmtUSD } from "@/lib/money";
 import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
+import { lineUnitCost, lineExtCost, costRollup, type PartCostMap } from "@/lib/lineCost";
 import { BRANDING, brandLogoWebPath } from "@/lib/pdf/branding";
 
 type LineGroup = { groupId?: string; groupTitle?: string };
@@ -56,10 +57,16 @@ function PrintKindSections({
   lines,
   showTitles,
   partNumbers,
+  partCosts,
+  internal,
 }: {
   lines: Line[];
   showTitles: boolean;
   partNumbers: Record<string, string>;
+  /** Internal cost basis; only read when `internal`. */
+  partCosts: PartCostMap;
+  /** Adds the Avg cost and Margin columns. Internal copy only. */
+  internal: boolean;
 }) {
   const items = lines.filter((l): l is Extract<Line, { kind: "item" }> => l.kind === "item");
   const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
@@ -72,13 +79,15 @@ function PrintKindSections({
           <table>
             <thead>
               <tr>
-                <th style={{ width: "4%" }}>#</th>
-                <th style={{ width: "39%" }}>Description</th>
-                <th style={{ width: "15%" }}>Part #</th>
-                <th className="right" style={{ width: "7%" }}>Qty</th>
-                <th className="right" style={{ width: "12%" }}>Unit price</th>
-                <th className="right" style={{ width: "10%" }}>Disc %</th>
-                <th className="right" style={{ width: "13%" }}>Line total</th>
+                <th style={{ width: internal ? "3%" : "4%" }}>#</th>
+                <th style={{ width: internal ? "27%" : "39%" }}>Description</th>
+                <th style={{ width: internal ? "13%" : "15%" }}>Part #</th>
+                <th className="right" style={{ width: "5%" }}>Qty</th>
+                {internal ? <th className="right" style={{ width: "11%" }}>Avg cost</th> : null}
+                <th className="right" style={{ width: internal ? "12%" : "12%" }}>Unit price</th>
+                <th className="right" style={{ width: internal ? "8%" : "10%" }}>Disc %</th>
+                {internal ? <th className="right" style={{ width: "11%" }}>Margin</th> : null}
+                <th className="right" style={{ width: internal ? "10%" : "13%" }}>Line total</th>
               </tr>
             </thead>
             <tbody>
@@ -90,14 +99,32 @@ function PrintKindSections({
                 const disc = lineDiscount(l);
                 const pct = discountPct(l);
                 const partNo = l.partId ? partNumbers[l.partId] : undefined;
+                const unitCost = internal ? lineUnitCost(l, partCosts) : null;
+                const extCost = internal ? lineExtCost(l, partCosts) : null;
+                const net = lineNet(l);
+                const lineMargin = extCost == null ? null : round2(net - extCost);
+                const marginPct = lineMargin == null || net <= 0 ? null : (lineMargin / net) * 100;
                 return (
                   <tr key={`item-${i}`}>
                     <td>{i + 1}</td>
                     <td>{l.description || "Item"}</td>
                     <td style={{ fontSize: "10pt" }}>{partNo ?? "—"}</td>
                     <td className="right">{l.quantity}</td>
+                    {internal ? (
+                      // "—" rather than $0.00: an uncosted part is not a free one.
+                      <td className="right" style={{ fontSize: "10pt" }}>
+                        {unitCost == null ? "—" : fmt(unitCost)}
+                      </td>
+                    ) : null}
                     <td className="right">{fmt(l.unitPrice)}</td>
                     <td className="right">{pct > 0 ? `${pct.toFixed(2)}%` : "—"}</td>
+                    {internal ? (
+                      <td className="right" style={{ fontSize: "10pt" }}>
+                        {lineMargin == null
+                          ? "—"
+                          : `${fmt(lineMargin)}${marginPct == null ? "" : ` / ${marginPct.toFixed(0)}%`}`}
+                      </td>
+                    ) : null}
                     <td className="right">
                       {disc > 0 ? (
                         <>
@@ -174,10 +201,15 @@ function PrintKindSections({
 
 export default async function PrintQuotePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ internal?: string }>;
 }) {
   const { id } = await params;
+  // ?internal=1 shows our cost and margin. This page is behind the app's auth
+  // middleware, so it is not reachable by a customer.
+  const internal = (await searchParams)?.internal === "1";
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) notFound();
 
@@ -250,6 +282,21 @@ export default async function PrintQuotePage({
           padding-bottom: 12pt;
         }
         .print-doc .meta { font-size: 10pt; color: #444; }
+        .print-doc .internal-banner {
+          background: #fdf2c7;
+          border: 1pt solid #d97706;
+          color: #7c4a03;
+          font-weight: bold;
+          font-size: 10pt;
+          padding: 5pt 8pt;
+          margin-bottom: 10pt;
+        }
+        .print-doc .internal-totals td {
+          border: none;
+          border-top: 1pt solid #d97706;
+          padding: 3pt 8pt;
+          color: #7c4a03;
+        }
         .print-doc .actions {
           margin-bottom: 12pt;
         }
@@ -284,6 +331,12 @@ export default async function PrintQuotePage({
 
       {/* Masthead: logo + company block on the left, document number and the
           assigned sales rep on the right — the same arrangement as the PDF. */}
+      {internal ? (
+        <div className="internal-banner">
+          INTERNAL COPY — shows our cost and margin. Do not send to the customer.
+        </div>
+      ) : null}
+
       <div className="header">
         <div>
           {logoPath ? (
@@ -373,11 +426,11 @@ export default async function PrintQuotePage({
                     >
                       {title}
                     </div>
-                    <PrintKindSections lines={gl} showTitles={false} partNumbers={facts.partNumbers} />
+                    <PrintKindSections lines={gl} showTitles={false} partNumbers={facts.partNumbers} partCosts={facts.partCosts} internal={internal} />
                   </div>
                 );
               })}
-              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} partNumbers={facts.partNumbers} /> : null}
+              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} partNumbers={facts.partNumbers} partCosts={facts.partCosts} internal={internal} /> : null}
             </>
           );
         })()
@@ -419,6 +472,38 @@ export default async function PrintQuotePage({
           </tr>
         </tbody>
       </table>
+
+      {internal
+        ? (() => {
+            // Margin against parts net only — labor and fees carry no part cost.
+            const roll = costRollup(lines, round2(subtotal - discountTotal), facts.partCosts);
+            return (
+              <table className="totals internal-totals">
+                <tbody>
+                  <tr>
+                    <td style={{ width: "75%" }} className="right">Parts cost (avg)</td>
+                    <td className="right">{fmt(roll.cost)}</td>
+                  </tr>
+                  <tr>
+                    <td className="right">Parts margin</td>
+                    <td className="right">
+                      {fmt(roll.margin)}
+                      {roll.marginPct != null ? ` (${roll.marginPct.toFixed(1)}%)` : ""}
+                    </td>
+                  </tr>
+                  {roll.unknown > 0 ? (
+                    <tr>
+                      <td className="right" style={{ fontSize: "9pt", color: "#7c4a03" }} colSpan={2}>
+                        {roll.unknown} line{roll.unknown === 1 ? "" : "s"} without a recorded average cost —
+                        excluded above.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            );
+          })()
+        : null}
 
       {q.notes ? (
         <div style={{ marginTop: "20pt" }}>

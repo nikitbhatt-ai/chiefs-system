@@ -30,34 +30,59 @@ export type QuoteDocumentFacts = {
   salesPerson: string | null;
   /** partId → part number, for the Part # column. */
   partNumbers: Record<string, string>;
+  /**
+   * partId → weighted-average unit cost. **Internal only** — this feeds the
+   * editor and the internal copy of a document, never the customer's.
+   */
+  partCosts: Record<string, number>;
 };
 
-/**
- * Part numbers for the lines on a quote, keyed by `partId`.
- *
- * The manufacturer's number is preferred over our internal SKU — it is the one
- * a customer can look up or cross-reference with a vendor. One query for all
- * lines, not one per line.
- */
-async function resolvePartNumbers(quote: QuoteRow): Promise<Record<string, string>> {
-  const ids = [
+/** The distinct part ids referenced by a quote's lines. */
+function linePartIds(quote: QuoteRow): string[] {
+  return [
     ...new Set(
       ((quote.lineItems as unknown as { partId?: string }[]) ?? [])
         .map((l) => l?.partId)
         .filter((id): id is string => typeof id === "string" && id.length > 0),
     ),
   ];
-  if (ids.length === 0) return {};
+}
+
+/**
+ * Part numbers AND internal average costs for the lines on a quote, keyed by
+ * `partId`. One query for both, because they come from the same rows.
+ *
+ * The manufacturer's number is preferred over our internal SKU — it is the one
+ * a customer can look up or cross-reference with a vendor. The cost is
+ * `avg_cost`, the weighted-average basis job costing uses, falling back to the
+ * catalogue `cost` when no average has been built up yet.
+ */
+async function resolvePartFacts(
+  quote: QuoteRow,
+): Promise<{ partNumbers: Record<string, string>; partCosts: Record<string, number> }> {
+  const ids = linePartIds(quote);
+  if (ids.length === 0) return { partNumbers: {}, partCosts: {} };
   const rows = await db
-    .select({ id: parts.id, sku: parts.sku, mfg: parts.mfgPartNumber })
+    .select({
+      id: parts.id,
+      sku: parts.sku,
+      mfg: parts.mfgPartNumber,
+      avgCost: parts.avgCost,
+      cost: parts.cost,
+    })
     .from(parts)
     .where(inArray(parts.id, ids));
-  const out: Record<string, string> = {};
+
+  const partNumbers: Record<string, string> = {};
+  const partCosts: Record<string, number> = {};
   for (const r of rows) {
     const n = r.mfg?.trim() || r.sku?.trim();
-    if (n) out[r.id] = n;
+    if (n) partNumbers[r.id] = n;
+    const raw = r.avgCost ?? r.cost;
+    const c = raw == null ? NaN : Number(raw);
+    if (Number.isFinite(c)) partCosts[r.id] = c;
   }
-  return out;
+  return { partNumbers, partCosts };
 }
 
 /**
@@ -108,6 +133,6 @@ export async function quoteDocumentFacts(quote: QuoteRow): Promise<QuoteDocument
     vehicleColor,
     vehicleMileage,
     salesPerson,
-    partNumbers: await resolvePartNumbers(quote),
+    ...(await resolvePartFacts(quote)),
   };
 }

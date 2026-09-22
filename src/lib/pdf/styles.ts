@@ -8,6 +8,12 @@ import { BRANDING } from "./branding";
 // React-PDF hyphenates by default, which put "Customer Department Graphics - 3M
 // re-flective" on a customer's invoice. An inserted hyphen mid-word reads as a
 // typo on a document someone signs, so words wrap whole instead.
+//
+// This must stay whole-word. React-PDF INSERTS a hyphen wherever it breaks, so
+// letting it break a part number turns "KIT-23S1-CC0713-OS" into
+// "KIT-23S1--CC0713-OS" — a corrupted value someone might order against, which
+// is far worse than a wide cell. Long codes are wrapped explicitly instead; see
+// `splitCode` in templates/quote.tsx.
 Font.registerHyphenationCallback((word) => [word]);
 
 export const sharedStyles = StyleSheet.create({
@@ -41,7 +47,8 @@ export const sharedStyles = StyleSheet.create({
    * still print their header in the normal flow, don't inherit a 130pt gap.
    */
   pageWithRunningHeader: {
-    paddingTop: 132,
+    // Reserves the masthead: logo (55) + four contact lines + rule.
+    paddingTop: 158,
     paddingBottom: 64,
     paddingHorizontal: 48,
     fontFamily: "Helvetica",
@@ -67,12 +74,39 @@ export const sharedStyles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: BRANDING.textColor,
   },
-  /** 4:1 landscape slot. `objectFit: contain` keeps any aspect ratio intact. */
-  logo: { width: 150, height: 38, objectFit: "contain", marginBottom: 4 },
+  /**
+   * Sized for the Chiefs mark (2000x676, ~2.96:1) so it fills the slot rather
+   * than letterboxing inside it. `objectFit: contain` keeps any replacement
+   * logo undistorted whatever its own ratio.
+   */
+  logo: { width: 164, height: 55, objectFit: "contain", marginBottom: 4 },
   logoWordmark: { fontSize: 15, fontWeight: 700, letterSpacing: 0.3, marginBottom: 2 },
   headerRight: { alignItems: "flex-end", maxWidth: 220 },
   /** The sales rep line — a name, so it reads darker than the muted meta rows. */
   docRep: { fontSize: 9, marginTop: 4, textAlign: "right", color: BRANDING.textColor },
+
+  /**
+   * INTERNAL COPY banner. Deliberately loud: this document carries our cost and
+   * margin, and the only thing standing between it and a customer is someone
+   * noticing which file they attached.
+   */
+  internalBanner: {
+    backgroundColor: "#fdf2c7",
+    borderWidth: 1,
+    borderColor: BRANDING.accentColor,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    marginBottom: 10,
+    fontSize: 9,
+    fontWeight: 700,
+    color: "#7c4a03",
+  },
+  internalTotals: {
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: BRANDING.accentColor,
+  },
   sectionTitle: {
     fontSize: 9,
     fontWeight: 700,
