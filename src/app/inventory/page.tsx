@@ -241,6 +241,12 @@ export default async function InventoryPage({
         >
           Import CSV
         </a>
+        <a
+          href="/inventory/pull"
+          className="text-zinc-300 hover:text-white px-3 py-1 border border-white/10 rounded"
+        >
+          Pull from stock (scan)
+        </a>
       </form>
 
       <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">

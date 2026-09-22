@@ -27,6 +27,7 @@ const NAV: NavGroup[] = [
       { href: "/work-orders", label: "Work Orders" },
       { href: "/vehicles", label: "Vehicles" },
       { href: "/inventory", label: "Inventory" },
+      { href: "/inventory/pull", label: "Pull from Stock (scan)" },
       { href: "/packages", label: "Packages" },
       { href: "/packages/import-template", label: "Import Package Template" },
       { href: "/purchase-orders", label: "Purchase Orders" },

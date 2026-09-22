@@ -19,6 +19,9 @@ export type ScanHit = {
   // Which field the code matched, shown in the picker when a scan is ambiguous.
   matchedOn: "barcode" | "sku" | "mfg_part_number" | "vin" | "po_number";
   archived?: boolean;
+  // Parts only — lets scan screens (stock pull) show the part without a
+  // second fetch.
+  part?: { sku: string; name: string; quantityOnHand: number };
 };
 
 export async function lookupScan(raw: string): Promise<ScanHit[]> {
@@ -77,6 +80,7 @@ export async function lookupScan(raw: string): Promise<ScanHit[]> {
     href: `/inventory/${p.id}`,
     matchedOn: has(p.barcode) ? "barcode" : has(p.sku) ? "sku" : "mfg_part_number",
     archived: p.archived,
+    part: { sku: p.sku, name: p.name, quantityOnHand: p.quantityOnHand },
   }));
   for (const v of vehicleRows) {
     hits.push({

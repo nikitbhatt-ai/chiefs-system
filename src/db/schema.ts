@@ -350,6 +350,16 @@ export const inventoryIssue = pgTable("inventory_issue", {
   qty: integer("qty").notNull(),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
   issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  // How the stock left. `auto` = the In Progress consumption of the quote's
+  // parts (and legacy/override pulls); `scan` = a warehouse scan-pull. Walking
+  // a build back out of In Progress reverses only `auto` rows — scanned parts
+  // physically left the shelf and come back only via a scan return.
+  source: text("source").notNull().default("auto"),
+  // Set on pulls with no work order: shop_use | damaged | counter_sale (see
+  // src/lib/pullReasons.ts), which decides the GL account charged.
+  reason: text("reason"),
+  issuedBy: uuid("issued_by").references(() => users.id),
+  note: text("note"),
 }, (t) => [
   index("inventory_issue_part_idx").on(t.partId),
   index("inventory_issue_work_order_idx").on(t.workOrderId),
