@@ -26,6 +26,7 @@ const NAV: NavGroup[] = [
     children: [
       { href: "/work-orders", label: "Work Orders" },
       { href: "/vehicles", label: "Vehicles" },
+      { href: "/lot/check-in", label: "Check In Vehicle" },
       { href: "/inventory", label: "Inventory" },
       { href: "/packages", label: "Packages" },
       { href: "/packages/import-template", label: "Import Package Template" },

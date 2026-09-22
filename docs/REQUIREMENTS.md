@@ -3495,17 +3495,75 @@ Permission matrix as implemented, by real role:
 > publish columns on `vehicles` (`condition`, `description`, `shopify_*`) are
 > live but appear in no SQL file at all.
 
+### Phase 5 — mobile check-in form (done, 2026-09-22)
+
+**No schema change.** Page at `/lot/check-in`, linked from Operations in the
+top nav.
+
+- [x] **Step 1 — VIN.** Fires `lookupVin` automatically once 17 valid
+      characters exist (300 ms debounce), rather than making someone find a
+      button with one thumb. An existing vehicle shows a banner with its
+      ownership, lot status, last arrival date and current deal, and the
+      identity fields are **not** re-asked. A new VIN reveals them pre-filled
+      from the decoder, editable. A lookup that errors falls through to the
+      full manual form — it must never block a check-in.
+- [x] **Step 2 — photos, above everything else.** Six guided slots (front,
+      rear, driver side, passenger side, odometer, VIN plate) plus multi
+      "add damage photo". Guided slots rather than one upload button: a
+      labelled empty box is a prompt, and every check-in comes back
+      consistent. `capture="environment"` opens the rear camera on a phone
+      and a file picker on desktop — one component, both users.
+      **Why first:** if someone is pulled away mid-check-in, the photos are
+      the part that cannot be recreated later.
+- [x] **Step 3 — condition and arrival.** Fuel as five tap targets
+      (E ¼ ½ ¾ F), odometer and key count on a numeric keypad, key location,
+      lot location, items inside, delivered by, drop contact. Damage is five
+      tappable presets **plus** free text, joined into `damage_notes` —
+      tapping a chip produces data, "describe the damage" produces empty
+      fields.
+- [x] **Step 4 — classification.** Ownership renders only for
+      `vehicle:setOwnership` (admin/manager/sales); lot status only for
+      `vehicle:setLotStatus` (those plus warehouse), defaulting to
+      `on_lot_available`. For an inventory associate ownership stays unset and
+      the page says office will classify it.
+- [x] **Enforcement is on the server.** The action re-derives both gates from
+      the session and ignores whatever the form posted — a warehouse or tech
+      account POSTing `ownership` directly has it dropped. Verified.
+- [x] **One server action, one transaction**: upsert vehicle → insert
+      check-in → insert photos. A half-saved check-in is not possible.
+- [x] The upsert is `ON CONFLICT (vin) DO UPDATE` touching only lot status,
+      ownership and lot location — **never** year/make/model — so
+      re-checking in a known vehicle cannot blank its identity. Ownership is
+      only ever set, never cleared, so an associate leaving it blank does not
+      wipe what office chose.
+- [x] Everything validated with Zod **on the server**. Photo URLs must be
+      `https://`, so a hand-crafted POST cannot stash a `javascript:` URL in
+      a column the lot view renders as an `<img>`.
+- [x] Large touch targets throughout (48–52 px), sticky save bar so the
+      button is always under the thumb.
+- [x] Photo upload helpers extracted to `src/lib/photoUpload.ts` and shared
+      with `VehiclePhotos` — phone photos are shrunk to ~2048 px JPEG before
+      upload, which is what keeps them under the 4 MB serverless limit.
+- [x] Verification: `scripts/verify-check-in.ts`, 46 checks, re-runnable,
+      against a **throwaway** database:
+      `POSTGRES_URL=... npx tsx scripts/verify-check-in.ts`. Covers the
+      transaction, identity preservation across re-arrival, both permission
+      gates, rollback, malformed input, and **two people checking the same
+      new VIN in simultaneously** (one vehicle row, two arrivals).
+
+> **react-query:** the brief says to invalidate react-query keys. The package
+> is a dependency but is imported nowhere in `src/` — this app uses server
+> components with `revalidatePath()`. The action calls `revalidatePath` for
+> `/lot`, `/lot/check-in` and `/vehicles`, which is the equivalent here.
+> Introducing react-query for one form would have been the larger change.
+
+> **Not verified from the build sandbox:** the form has not been driven in a
+> real browser — no camera, no touch device, and the sandbox cannot reach
+> Vercel Blob. Types, build and the server action are verified; the layout
+> and the camera behaviour need a look on an actual phone.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 5** — `/lot/check-in`, mobile-first. VIN first; existing
-      vehicle shows a banner and collects arrival details only.
-      **Photos at the top** of the details section — if someone gets pulled
-      away mid-check-in, photos are the part that cannot be recreated later.
-      Six guided slots + multi "add damage photo", `capture="environment"`.
-      Fuel as tap-to-select buttons; damage-note preset chips plus free text
-      ("describe the damage" produces empty fields). Ownership visible only
-      to office/admin. One server action, **one transaction**: upsert
-      vehicle, insert check-in, insert photos. Zod on the server.
 - [ ] **Phase 6** — draft saving to local storage keyed by VIN; per-photo
       upload status (pending/uploading/done/failed) with retry, uploaded one
       at a time. No service worker / offline sync yet.
