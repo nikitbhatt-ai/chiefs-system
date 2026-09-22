@@ -24,7 +24,7 @@ export default async function LotCheckInPage() {
       title="Check in a vehicle"
       subtitle="Record a vehicle arriving on the Hempstead lot"
     >
-      <div className="max-w-2xl mx-auto">
+      <div className="max-w-2xl lg:max-w-5xl mx-auto lg:mx-0">
         {!canSetOwnership ? (
           <p className="mb-4 text-[12px] text-zinc-500 font-body bg-black/30 border border-white/5 rounded-lg p-3">
             Ownership is set by the office after check-in. Record what you can

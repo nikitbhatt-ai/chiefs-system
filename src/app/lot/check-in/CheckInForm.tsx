@@ -40,10 +40,17 @@ const OWNERSHIPS = [
   { value: "sames", label: "Sames Auto Group" },
 ] as const;
 
+// 16px on mobile stops iOS zooming the viewport when a field is focused;
+// desktop can afford the smaller, denser 14px.
+// The focus ring matters on desktop specifically: a mouse user sees where the
+// pointer is, a keyboard user has only this.
 const FIELD =
-  "w-full min-h-[48px] bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 text-base text-white placeholder:text-zinc-500";
+  "w-full min-h-[48px] lg:min-h-[40px] bg-black/40 border border-white/10 rounded-lg px-3 py-2.5 lg:py-1.5 text-base lg:text-sm text-white placeholder:text-zinc-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70 focus-visible:border-amber-500/50";
 const LABEL = "block text-[11px] font-body font-semibold text-zinc-400 uppercase tracking-wider mb-1.5";
-const CARD = "bg-surface border border-white/5 rounded-lg p-4";
+const CARD = "bg-surface border border-white/5 rounded-lg p-4 lg:p-5";
+// Every tappable control that is not an <input>; same focus ring, so tabbing
+// through the form never loses the cursor.
+const FOCUS = "focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70";
 
 const VIN_OK = /^[A-HJ-NPR-Z0-9]{17}$/;
 
@@ -198,7 +205,7 @@ export function CheckInForm({
       action={formAction}
       onInput={persist}
       onChange={persist}
-      className="space-y-4 pb-28"
+      className="space-y-4 pb-28 lg:pb-0"
     >
       {/* ---- Step 1: VIN --------------------------------------------------- */}
       <div className={CARD}>
@@ -249,14 +256,14 @@ export function CheckInForm({
             <button
               type="button"
               onClick={acceptDraft}
-              className="min-h-[48px] rounded-lg bg-blue-500 text-white text-sm font-body font-bold"
+              className={`min-h-[48px] rounded-lg bg-blue-500 text-white text-sm font-body font-bold ${FOCUS}`}
             >
               Restore it
             </button>
             <button
               type="button"
               onClick={discardDraft}
-              className="min-h-[48px] rounded-lg border border-white/15 text-sm font-body text-zinc-300"
+              className={`min-h-[48px] rounded-lg border border-white/15 text-sm font-body text-zinc-300 ${FOCUS}`}
             >
               Start fresh
             </button>
@@ -329,12 +336,12 @@ export function CheckInForm({
                   ? "Filled in from the VIN. Correct anything that looks wrong."
                   : "The VIN decoder did not answer — type what you can see."}
               </p>
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
                 <Field label="Year" name="year" defaultValue={dv("year", decoded?.year ?? "")} type="number" inputMode="numeric" />
                 <Field label="Make" name="make" defaultValue={dv("make", decoded?.make ?? "")} />
                 <Field label="Model" name="model" defaultValue={dv("model", decoded?.model ?? "")} />
                 <Field label="Trim" name="trim" defaultValue={dv("trim", decoded?.trim ?? "")} />
-                <div className="col-span-2">
+                <div className="col-span-2 lg:col-span-1">
                   <Field label="Color" name="color" defaultValue={dv("color")} />
                 </div>
               </div>
@@ -356,7 +363,7 @@ export function CheckInForm({
                     type="button"
                     onClick={() => setFuel(fuel === f.value ? "" : f.value)}
                     aria-pressed={fuel === f.value}
-                    className={`min-h-[48px] rounded-lg border text-base font-body font-semibold transition-colors ${
+                    className={`min-h-[48px] lg:min-h-[44px] rounded-lg border text-base font-body font-semibold transition-colors ${FOCUS} ${
                       fuel === f.value
                         ? "bg-amber-500/20 border-amber-500/50 text-amber-200"
                         : "bg-black/40 border-white/10 text-zinc-300 active:bg-white/5"
@@ -369,13 +376,13 @@ export function CheckInForm({
               <input type="hidden" name="fuelLevel" value={fuel} />
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
               <Field label="Odometer" name="odometer" defaultValue={dv("odometer")} type="number" inputMode="numeric" placeholder="Miles" />
               <Field label="Keys" name="keyCount" defaultValue={dv("keyCount")} type="number" inputMode="numeric" placeholder="How many" />
-              <div className="col-span-2">
+              <div className="col-span-2 lg:col-span-1">
                 <Field label="Key location" name="keyLocation" defaultValue={dv("keyLocation")} placeholder="Key board, hook 14" />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-2 lg:col-span-1">
                 <Field label="Where is it parked" name="lotLocation" defaultValue={dv("lotLocation")} placeholder="Row A-3" />
               </div>
             </div>
@@ -393,7 +400,7 @@ export function CheckInForm({
                       onClick={() =>
                         setChips((c) => (on ? c.filter((x) => x !== d) : [...c, d]))
                       }
-                      className={`min-h-[40px] px-3 rounded-full border text-[13px] font-body transition-colors ${
+                      className={`min-h-[40px] px-3 rounded-full border text-[13px] font-body transition-colors ${FOCUS} ${
                         on
                           ? "bg-amber-500/20 border-amber-500/50 text-amber-200"
                           : "bg-black/40 border-white/10 text-zinc-300 active:bg-white/5"
@@ -414,9 +421,9 @@ export function CheckInForm({
               <input type="hidden" name="damageNotes" value={damageNotes} />
             </div>
 
-            <div className="mt-4 grid grid-cols-1 gap-2.5">
+            <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-2.5">
               <Field label="Items left inside" name="itemsInside" defaultValue={dv("itemsInside")} placeholder="Owner manual, jack kit" />
-              <div className="grid grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 lg:contents gap-2.5">
                 <Field label="Delivered by" name="deliveredBy" defaultValue={dv("deliveredBy")} placeholder="Name" />
                 <Field label="Drop contact" name="dropContact" defaultValue={dv("dropContact")} type="tel" inputMode="tel" placeholder="Phone" />
               </div>
@@ -430,14 +437,15 @@ export function CheckInForm({
                 Classification
               </h2>
 
+              <div className="lg:grid lg:grid-cols-2 lg:gap-5">
               {canSetOwnership ? (
-                <div className="mb-4">
+                <div className="mb-4 lg:mb-0">
                   <span className={LABEL}>Ownership</span>
                   <div className="grid grid-cols-1 gap-1.5">
                     {OWNERSHIPS.map((o) => (
                       <label
                         key={o.value}
-                        className="flex items-center gap-3 min-h-[48px] px-3 rounded-lg border border-white/10 bg-black/40 cursor-pointer"
+                        className={`flex items-center gap-3 min-h-[48px] lg:min-h-[42px] px-3 rounded-lg border border-white/10 bg-black/40 cursor-pointer hover:border-white/20 focus-within:ring-2 focus-within:ring-amber-500/70 ${FOCUS}`}
                       >
                         <input
                           type="radio"
@@ -466,7 +474,7 @@ export function CheckInForm({
                     {LOT_STATUSES.map((s) => (
                       <label
                         key={s.value}
-                        className="flex items-center gap-3 min-h-[48px] px-3 rounded-lg border border-white/10 bg-black/40 cursor-pointer"
+                        className={`flex items-center gap-3 min-h-[48px] lg:min-h-[42px] px-3 rounded-lg border border-white/10 bg-black/40 cursor-pointer hover:border-white/20 focus-within:ring-2 focus-within:ring-amber-500/70 ${FOCUS}`}
                       >
                         <input
                           type="radio"
@@ -485,6 +493,7 @@ export function CheckInForm({
                   </div>
                 </div>
               ) : null}
+              </div>
             </div>
           ) : null}
 
@@ -496,10 +505,15 @@ export function CheckInForm({
             </p>
           ) : null}
 
-          {/* Sticky so the save button is always under the thumb, however far
-              down the form someone has scrolled. */}
-          <div className="fixed bottom-0 left-0 right-0 p-3 bg-black/80 backdrop-blur border-t border-white/10">
-            <SubmitButton className="w-full min-h-[52px] rounded-lg bg-amber-500 text-black text-base font-body font-bold">
+          {/* On a phone this floats over the form so the button is always
+              under the thumb, however far down someone has scrolled. On a wide
+              screen the whole form is visible at once, so a bar pinned across
+              the bottom of the window would just be in the way — it returns to
+              the end of the flow, which is also where Tab arrives. */}
+          <div className="fixed bottom-0 left-0 right-0 p-3 bg-black/80 backdrop-blur border-t border-white/10 lg:static lg:p-0 lg:bg-transparent lg:backdrop-blur-none lg:border-0 lg:flex lg:justify-end">
+            <SubmitButton
+              className={`w-full lg:w-auto lg:px-10 min-h-[52px] rounded-lg bg-amber-500 text-black text-base font-body font-bold ${FOCUS}`}
+            >
               Save check-in
             </SubmitButton>
           </div>

@@ -130,7 +130,7 @@ export function PhotoSlots({
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
         {PHOTO_SLOTS.map(({ slot, label }) => {
           const existing = photos.find((p) => p.slot === slot);
           const st = state[slot] ?? { status: "idle" as UploadStatus, pct: 0 };
@@ -152,7 +152,7 @@ export function PhotoSlots({
         <button
           type="button"
           onClick={() => damageInput.current?.click()}
-          className="w-full min-h-[52px] rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 text-amber-300 text-sm font-body font-semibold active:bg-amber-500/15 transition-colors"
+          className="w-full lg:w-auto lg:px-6 min-h-[52px] lg:min-h-[44px] rounded-lg border border-dashed border-amber-500/40 bg-amber-500/5 text-amber-300 text-sm font-body font-semibold active:bg-amber-500/15 hover:bg-amber-500/10 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70"
         >
           + Add damage photo
         </button>
@@ -173,7 +173,7 @@ export function PhotoSlots({
         />
 
         {damagePhotos.length > 0 || damagePending.length > 0 ? (
-          <div className="mt-2.5 grid grid-cols-3 sm:grid-cols-4 gap-2">
+          <div className="mt-2.5 grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
             {damagePhotos.map((p) => (
               <div
                 key={p.key}
@@ -267,7 +267,7 @@ function SlotTile({
         onClick={() => input.current?.click()}
         disabled={busy}
         // Tall enough to hit with a thumb in a glove, on gravel.
-        className="w-full aspect-[4/3] min-h-[92px] rounded-lg border border-white/10 bg-black/40 overflow-hidden flex flex-col items-center justify-center gap-1 active:bg-white/5 transition-colors disabled:opacity-90"
+        className="w-full aspect-[4/3] min-h-[92px] rounded-lg border border-white/10 bg-black/40 overflow-hidden flex flex-col items-center justify-center gap-1 active:bg-white/5 hover:border-white/25 transition-colors disabled:opacity-90 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70"
       >
         {photoUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -320,7 +320,7 @@ function SlotTile({
           <button
             type="button"
             onClick={onRetry}
-            className="w-full min-h-[36px] rounded-md border border-red-500/40 bg-red-500/10 text-red-300 text-[12px] font-body font-semibold"
+            className="w-full min-h-[36px] rounded-md border border-red-500/40 bg-red-500/10 text-red-300 text-[12px] font-body font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/70"
           >
             Retry {label}
           </button>

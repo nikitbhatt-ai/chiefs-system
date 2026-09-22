@@ -3613,9 +3613,56 @@ browser only.
 > `localStorage`, real camera, real uploads to Vercel Blob. The draft and
 > queue logic are unit-tested in isolation; the wiring needs a phone.
 
+### Phase 7 — desktop layout (done, 2026-09-22)
+
+**No schema change, and no behaviour change.** Same components, same server
+action — layout only, plus keyboard affordances.
+
+- [x] Container widens from `max-w-2xl` to `max-w-5xl` at `lg`, and
+      **left-aligns** so the form lines up with the page heading and
+      breadcrumbs instead of floating in from the left.
+- [x] **Photo slots: all six in one row** at `lg`, so the whole set reads at a
+      glance rather than as a 2×3 block that has to be scrolled.
+- [x] Vehicle identity goes to five across (year/make/model/trim/color);
+      condition fields to four across; items-inside / delivered-by / drop
+      contact to three across; ownership and lot status side by side.
+- [x] Fields are shorter and denser at `lg` (40 px vs 48 px). Mobile keeps
+      16 px text so iOS does not zoom the viewport on focus; desktop drops to
+      14 px.
+- [x] **The save bar stops being a floating overlay on desktop** and returns
+      to the end of the flow, right-aligned — a bar pinned across the bottom
+      of a wide window is just in the way, and the end of the flow is also
+      where Tab arrives. It stays sticky on a phone.
+- [x] **Keyboard**: an amber focus ring on every control — inputs, photo
+      tiles, fuel buttons, damage chips, radio rows, save. A mouse user can
+      see where the pointer is; a keyboard user has only this.
+- [x] Tab order follows DOM order, verified in a real browser at both widths:
+      photos → fuel → odometer → keys → key location → lot location → damage
+      chips → notes → items → delivered by → contact → classification → save.
+
+**Verified in a real browser this time.** Chromium (Playwright) against the app
+running on a throwaway Postgres, signed in as real users, at 390 px and
+1440 px:
+
+- Desktop and mobile layouts render as intended; screenshots reviewed.
+- The sticky save bar does **not** overlap the last control at either width
+  (measured, not eyeballed).
+- Form left edge now matches the heading's at both widths.
+- Role rendering confirmed live: a `warehouse` account gets **0** ownership
+  radios, 3 lot-status radios and the "office will classify it" notice; an
+  `admin` gets 3 and 3 and no notice.
+- Graceful degradation confirmed live: with the VIN decoder unreachable the
+  form still opens and says "The VIN decoder did not answer — type what you
+  can see."
+- The known-vehicle banner renders correctly and suppresses the identity
+  fields.
+
+> **Still not verified:** the camera. `capture="environment"` cannot be
+> exercised headlessly, and uploads to Vercel Blob are unreachable from the
+> build sandbox. Everything else on this page has now been seen working.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 7** — desktop layout. Same components, same server action.
 - [ ] **Phase 8** — lot view: VIN (last 8), year/make/model, ownership, lot
       status, lot location, **days on lot** (computed), current deal,
       front-photo thumbnail. Filters + text search. Default sort days-on-lot
