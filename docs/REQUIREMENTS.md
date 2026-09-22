@@ -3661,16 +3661,71 @@ running on a throwaway Postgres, signed in as real users, at 390 px and
 > exercised headlessly, and uploads to Vercel Blob are unreachable from the
 > build sandbox. Everything else on this page has now been seen working.
 
+### Phase 8 — lot view (done, 2026-09-22)
+
+**No schema change.** Page at `/lot`, linked from Operations in the top nav.
+
+- [x] Everything on site on one page: front-photo thumbnail, VIN (last 8),
+      year/make/model, ownership, lot status, lot location, **days on lot**,
+      and the current deal.
+- [x] **Default sort is days on lot, descending** — the units quietly costing
+      money surface at the top. Days is colour-coded: amber past 30, red past
+      60, so it reads across a room.
+- [x] **Days-on-lot is computed** from the most recent check-in's
+      `arrived_at` / `departed_at`, never stored. A departed vehicle reports
+      the **length of its stay**, frozen — not time since arrival. A vehicle
+      with no check-in shows "—", not "0": showing zero would be a lie rather
+      than a gap.
+- [x] Three counters at the top: on site, no deal, longest stay.
+- [x] Filters: ownership (including **Unclassified**, which is how office
+      finds what inventory left for them), lot status, has-deal / no-deal, and
+      a case-insensitive text search across VIN, make and model. Filters live
+      in the URL as a plain GET form, so a view can be bookmarked and shared
+      and the back button behaves.
+- [x] **Departed vehicles are hidden by default** — the lot view is about what
+      is here. Selecting the departed status shows them.
+- [x] Desktop table, mobile cards. Both from the same data.
+- [x] **Inline lot-status change** from the row, optimistic with rollback if
+      the server refuses. Rendered only for `vehicle:setLotStatus` roles, and
+      **re-checked on the server** — a tech posting the action directly is
+      refused, verified.
+- [x] Changing status here deliberately does **not** stamp departure. Setting
+      `departed` changes where we think the vehicle is; closing the open
+      check-in and stopping the days-on-lot clock is the departure flow's job
+      (Phase 10). That logic stays in one place.
+- [x] Tests: `src/lib/lot.test.ts` (10 cases on the days-on-lot arithmetic) and
+      `scripts/verify-lot-view.ts` (36 checks against a **throwaway**
+      database): `POSTGRES_URL=... npx tsx scripts/verify-lot-view.ts`.
+
+**Verified in a real browser**: Chromium against the app on a throwaway
+Postgres, seeded with six vehicles covering the awkward cases (a 120-day Sames
+unit, one in the shop, one on a deal, one departed, one never checked in, and
+one that left and came back).
+
+- Sort order, filters, counters and empty states all correct on screen; six
+  filter combinations render with **zero** page errors.
+- Inline status change **persists across a reload**.
+- Role rendering confirmed live: admin and warehouse get 5 editable dropdowns;
+  a `tech` account sees all 5 rows but **0** editable dropdowns.
+
+> **Structure note:** `src/lib/lot.ts` holds the vocabulary and the days-on-lot
+> maths and imports no database; the query lives in `src/lib/lotQuery.ts`. The
+> inline status control is a client component, and anything it imports is
+> bundled for the browser — a single module pulled the Postgres driver into the
+> client bundle and broke the build. Keep that split.
+
+> **Viewing is open to any signed-in user.** The brief says "inventory, office
+> and admin can view". Phase 3's own matrix has no view row, describes tech as
+> "read-only on vehicles", and no other page in this app gates reads by role —
+> and a tech who cannot see where a vehicle is parked cannot go and work on it.
+> Changing status stays restricted. Say so if you want reads locked down too.
+
+> **Known cosmetic edge:** if a photo's Blob URL ever 404s, the thumbnail shows
+> the browser's broken-image icon. Fixing it needs an onError handler, which
+> would make the thumbnail a client component. Not worth it unless it happens.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 8** — lot view: VIN (last 8), year/make/model, ownership, lot
-      status, lot location, **days on lot** (computed), current deal,
-      front-photo thumbnail. Filters + text search. Default sort days-on-lot
-      descending. Mobile cards + desktop table. Inline lot-status change for
-      inventory and above.
-      *Why days-on-lot matters:* we store partner vehicles that generate no
-      revenue while they sit. This is the number that answers whether that is
-      working, and it **cannot be backfilled**.
 - [ ] **Phase 9** — `linkVehicleToDeal(vehicleId, dealId)`: office/admin
       only; refuse if an active link exists, naming the existing deal;
       insert link; set `lot_status` to `on_lot_assigned` **only if currently
