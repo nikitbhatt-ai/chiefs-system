@@ -3442,17 +3442,61 @@ Permission matrix as implemented, by real role:
       the values in `user_role`, so it **fails if the roles in the database
       ever change** and the code is not updated to match.
 
+### Phase 4 — VIN lookup (done, 2026-09-22)
+
+**No schema change.** `lookupVin(vin)` and the decoder live in
+`src/lib/vin.ts`.
+
+- [x] **The NHTSA vPIC decode was extracted, not duplicated.** It previously
+      lived inline in `src/app/api/vin/decode/[vin]/route.ts`. It now lives in
+      `src/lib/vin.ts` as `decodeVin(vin)`, and that route calls it. Same
+      service, same endpoint, same field mapping — there is still exactly one
+      VIN integration in the system, and server code no longer has to make an
+      HTTP request to itself to use it.
+- [x] `decodeVin` returns `{ ok: true, data } | { ok: false, error }`, the
+      same shape `vinToShopify/decodeVin.js` already uses. It **never throws**
+      — offline, timeout, HTTP error, unreadable body and empty results all
+      come back as `ok: false`.
+- [x] **8-second timeout** on the decode. Someone on the lot with one bar
+      should not watch a spinner forever; past that they type the year/make/
+      model in by hand.
+- [x] Blank vPIC fields (`""`) map to `null`, not empty strings — a form
+      pre-filled with `""` looks filled in when it is not.
+- [x] `vinSchema` (Zod): trims and uppercases **before** validating, then
+      requires exactly 17 characters from `A-Z0-9` excluding I, O and Q.
+- [x] `lookupVin(vin)` returns one of three statuses:
+      `invalid` (with a message for the form — the fourth case the brief's own
+      test list implies, since a malformed VIN has to be representable),
+      `existing` (`vehicle`, `lastCheckIn`, `activeDeal`), or
+      `new` (`decoded`, or `decoded: null` when the decoder failed).
+- [x] `lastCheckIn` is the most recent arrival by `arrived_at`. `activeDeal`
+      is the `deal_vehicles` row with `unlinked_at IS NULL`, joined through to
+      the deal stage and customer name for the banner.
+- [x] **A decoder outage never blocks a check-in**, and a known vehicle never
+      touches the decoder at all.
+- [x] The existing `/api/vin/decode/[vin]` route keeps its looser
+      11-character minimum — vPIC decodes partial VINs and the quote editor
+      and add-vehicle form rely on that. The strict 17-character rule applies
+      to the check-in flow only.
+- [x] Tests: `src/lib/vin.test.ts` (`npx tsx src/lib/vin.test.ts`), 13 cases
+      covering validation and every decoder failure mode, with `fetch`
+      stubbed — no network, no database.
+- [x] Database paths: `scripts/verify-vin-lookup.ts`, 25 checks, re-runnable,
+      run against a **throwaway** database:
+      `POSTGRES_URL=... npx tsx scripts/verify-vin-lookup.ts`.
+
+> **Not verified from the build sandbox:** the live NHTSA success path. The
+> sandbox proxy blocks `vpic.nhtsa.dot.gov` (403 on CONNECT), so the decode
+> was exercised against stubbed responses only. The field mapping is carried
+> over unchanged from the route that was already working in production.
+
+> **Noted while testing:** `drizzle/0000_initial.sql` is ~44 tables behind the
+> live database — `docs/sql/*.sql` is the real migration history. The Shopify
+> publish columns on `vehicles` (`condition`, `description`, `shopify_*`) are
+> live but appear in no SQL file at all.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 4** — `lookupVin(vin)`. Zod-validate (17 chars, alphanumeric,
-      no I/O/Q, uppercase + trim first). Existing vehicle →
-      `{ status: "existing", vehicle, lastCheckIn, activeDeal }`. Not found →
-      `{ status: "new", decoded }` from the **existing** decoder. Decoder
-      failure → `{ status: "new", decoded: null }` — a decoder outage must
-      never block a check-in. **Do not add a new third-party VIN service.**
-      The existing decoder is the NHTSA vPIC call in
-      `src/app/api/vin/decode/[vin]/route.ts` (no caching); the same rules
-      already exist as `vinToShopify/validate.js` + `decodeVin.js`.
 - [ ] **Phase 5** — `/lot/check-in`, mobile-first. VIN first; existing
       vehicle shows a banner and collects arrival details only.
       **Photos at the top** of the details section — if someone gets pulled
