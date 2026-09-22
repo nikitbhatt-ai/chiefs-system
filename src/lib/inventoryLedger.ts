@@ -23,6 +23,8 @@
 //                   the vendor bill credits AP when it relieves this accrual)
 //   Issue to build: Dr Work in Progress / Cr Inventory   (tagged work_order_id)
 //   Restore build:  Dr Inventory / Cr Work in Progress   (reverses an issue)
+//   Pull, no job:   Dr <reason account> / Cr Inventory    (6170 shop use,
+//                   5910 damaged, 5100 counter sale — src/lib/pullReasons.ts)
 
 import { db } from "@/db";
 import { resolveAccountId, postJournalEntryTx } from "@/lib/accounting";
@@ -103,6 +105,32 @@ export async function postInventoryRestore(
     lines: [
       { accountId: inventoryId, debitCents: totalCents, workOrderId: opts.workOrderId ?? null, memo: "Inventory" },
       { accountId: wipId, creditCents: totalCents, workOrderId: opts.workOrderId ?? null, memo: "Work in progress" },
+    ],
+  });
+}
+
+/**
+ * Dr <expense/COGS account> / Cr Inventory for stock that left without a work
+ * order (shop use, damaged, counter sale). Skips, like the others, if the chart
+ * isn't seeded or the target account doesn't exist yet.
+ */
+export async function postInventoryWriteOff(
+  tx: Tx,
+  opts: { totalCents: number; accountCode: string; memo: string; createdBy?: string | null },
+) {
+  const totalCents = Math.round(opts.totalCents);
+  if (totalCents <= 0) return;
+  const inventoryId = await resolveAccountId(tx, CODES.inventory);
+  const targetId = await resolveAccountId(tx, opts.accountCode);
+  if (!inventoryId || !targetId) return;
+
+  await postJournalEntryTx(tx, {
+    memo: opts.memo,
+    source: "system",
+    createdBy: opts.createdBy ?? null,
+    lines: [
+      { accountId: targetId, debitCents: totalCents, memo: opts.memo },
+      { accountId: inventoryId, creditCents: totalCents, memo: "Inventory" },
     ],
   });
 }

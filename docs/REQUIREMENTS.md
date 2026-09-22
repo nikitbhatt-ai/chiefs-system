@@ -1233,6 +1233,117 @@ ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'fulfilled';
       subtraction, work-order cross-PO stock math, and the PO PDF RECEIVED
       watermark.
 
+## Barcode scanning — Phase 1 (added 2026-09-22)
+
+Warehouse scans with a USB/Bluetooth scanner in **keyboard-wedge (HID)**
+mode — the scanner "types" the code then Enter, so no drivers — or with a
+**phone/tablet camera** (`@zxing/browser`, loaded only when the camera
+opens). Recommended test hardware: a 2D imager (e.g. Zebra DS2208 corded /
+DS2278 cordless, Honeywell Voyager 1470g/1472g) with Enter suffix on. The
+user asked that **PO receiving be central**: scanning what came in is
+compared against the PO before anything is received.
+
+**Schema (run in Neon's SQL Editor BEFORE deploying — every parts query
+selects this column):**
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS barcode text;
+CREATE INDEX IF NOT EXISTS parts_barcode_idx ON parts (barcode);
+```
+
+- [x] `parts.barcode` — the code on the box (vendor UPC/EAN). Not unique
+      (two SKUs may share a UPC; the scan picker lists both), but linking
+      from a scan refuses a barcode already on another part (409).
+- [x] **Scan lookup** `GET /api/scan?code=` (`src/lib/scan.ts`): exact,
+      case-insensitive match on part barcode / SKU / mfg part #, vehicle
+      VIN, and PO number. Tries alternate spellings of the same label
+      (UPC-A ↔ EAN-13 leading 0, Code 39 VIN "I" prefix) and strips scanner
+      control characters (`src/lib/scanCodes.ts`, client-safe).
+- [x] **Header Scan button** (`ScanButton`, every AppShell page): dialog
+      with an auto-focused box + "Use camera". One match → opens it; several
+      → pick; none → link the barcode to an existing part (saved, so it's
+      recognized next time) or "Create new part" (`/inventory?barcode=`
+      prefills the add form).
+- [x] **Scan from anywhere**: a wedge scan with no text box focused (burst
+      of keys <50 ms apart, ≥4 chars, Enter) opens the lookup. Pages can
+      claim scans instead via `src/components/scanCapture.ts`.
+- [x] **Scan to receive on the PO page** (`POScanReceive`): "Start
+      scanning" → each scan is matched to a PO line (part barcode / SKU /
+      mfg #) and counted, with a beep/vibrate. Per line: Ordered · Already
+      in · Scanned now (±, editable) · status (✓ matches / Short N / Over N /
+      nothing scanned). "Qty per scan" for cases. Flags **over**, **not on
+      this PO** (a known part — set aside), and **unknown barcode** (link it
+      to a PO line → saved on the part). Camera runs continuously (same code
+      ignored 1.5 s). Progress survives a refresh (localStorage, per PO).
+      "Receive scanned items" confirms the discrepancies, then posts through
+      the existing `receivePO` action (capped at what's open, so overs are
+      never received) and appends a stamped summary (received / short /
+      over / not on PO, with user + UTC time) to the PO notes. The manual
+      receive form stays for lines without a linked part.
+- [x] Barcode field on part add/edit forms and the part detail header;
+      CSV import accepts a `barcode` / `upc` / `ean` / `gtin` column (only
+      overwrites when the sheet has a value).
+
+### Scan parts OUT — pick to a job, return, pull without a job (added 2026-09-22)
+
+User asked for scanning to "work both ways": picked parts are scanned out
+of inventory. Owner decisions: **scan deducts immediately + In Progress is a
+safety net**, and **pulls without a work order are allowed with a reason**.
+
+**Schema (run in Neon's SQL Editor BEFORE deploying — every issue insert
+writes these columns):**
+
+```sql
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'auto';
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS reason text;
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS issued_by uuid REFERENCES users(id);
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS note text;
+INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
+  ('5910', 'Inventory Shrinkage & Write-offs', 'cogs', 'cogs_other', 'debit')
+ON CONFLICT (code) DO NOTHING;
+```
+
+- [x] `inventory_issue.source` — `auto` (In Progress consumption, legacy and
+      override pulls; existing rows default to this) vs `scan` (warehouse
+      scan-pull). Plus `reason`, `issued_by`, `note`.
+- [x] **Work-order page "Scan parts out"** (`ScanPullPanel`): pick list of
+      the estimate's parts — Needs · Pulled · Scanning · status (still to
+      pick / ✓ all picked / more than needed / extra). Scans off the list are
+      allowed as extras (flagged). **Return to stock** mode puts unused/wrong
+      parts back (can't return more than the job was issued). Camera,
+      wedge-scan capture, qty-per-scan, unknown-barcode linking, localStorage
+      progress, same as PO receive.
+- [x] **In Progress safety net**: `consumeWorkOrderParts` issues only the
+      quote quantity beyond what is already issued to the job, so scanned
+      parts are never double-deducted and a forgotten scan is still covered.
+- [x] **Walk-back** (`restoreWorkOrderParts`) reverses only `auto` slices —
+      scanned parts physically left the shelf and return only via a scan
+      return. The legacy quote-refill fallback runs only when the job has no
+      issue rows at all (so an all-scanned job never gets refilled).
+- [x] **`/inventory/pull` "Pull from stock"** (nav: Operations → Pull from
+      Stock; button on /inventory): no work order, reason required —
+      Shop use → 6170, Damaged/scrapped → 5910 (new), Counter sale → 5100
+      (still invoice the customer). Dr account / Cr 1200 Inventory.
+- [x] `POST /api/inventory/pull` → `pullStock` in `src/lib/inventory.ts`: one
+      transaction, locks the work order (can't race In Progress). Pull drains
+      FIFO layers + on-hand (floored at 0, lenient — the part is in hand; a
+      shortfall is reported as "check this part's count"), posts Dr WIP / Cr
+      Inventory for a job. Return uses `returnIssuedTx` (newest, scanned
+      slices first), Dr Inventory / Cr WIP. Reorder-point check after pulls.
+- Verified against a throwaway local Postgres: scan-pull → In Progress →
+  walk-back → re-consume → over-return → no-WO pulls; on-hand, FIFO layers,
+  WIP/5910 balances and debits = credits all as expected.
+
+### Deferred (next phases)
+
+- Undo for a no-work-order pull; a per-part "movement history" view of
+  scan pulls/returns (rows are in `inventory_issue`).
+- **Barcode labels** — print Code 128 labels for parts/bins without a UPC
+  (label printer e.g. Zebra ZD421), and a PO-number barcode on the PO PDF so
+  scanning the paperwork opens the PO.
+- Structured receiving-discrepancy records (today: PO notes) + vendor
+  claim workflow; cycle counts by scanning a bin.
+
 ## Procurement / lead-time management (PR 19)
 
 Procurement plans use a per-part `lead_time_days` and a per-WO target

@@ -10,6 +10,7 @@ type Initial = {
   name: string;
   description: string;
   mfgPartNumber: string;
+  barcode: string;
   category: string;
   quantityOnHand: number;
   quantityOnOrder: number;
@@ -72,6 +73,14 @@ export function PartEditForm({
           name="mfgPartNumber"
           defaultValue={initial.mfgPartNumber}
           placeholder="Mfg part #"
+          className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
+        />
+      </FormField>
+      <FormField label="Barcode" hint="UPC on the box — scan it in">
+        <input
+          name="barcode"
+          defaultValue={initial.barcode}
+          placeholder="Scan or type"
           className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white font-mono"
         />
       </FormField>

@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
+import { auth } from "@/auth";
 import { db } from "@/db";
-import { purchaseOrders, vendors, type POLineItem } from "@/db/schema";
+import { parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
+import { POScanReceive, type PartCodes, type ScanLine } from "./POScanReceive";
 import { receivePurchaseOrder } from "@/lib/inventory";
 import { listPromos } from "@/lib/promos";
 import { poStatusLabel } from "@/lib/poStatus";
@@ -77,7 +79,25 @@ async function receivePO(formData: FormData) {
     if (n > 0) receiveByIndex.set(i, n);
   }
 
-  await receivePurchaseOrder(id, receiveByIndex);
+  const result = await receivePurchaseOrder(id, receiveByIndex);
+
+  // Scan-receive sends a PO-vs-arrived summary (short / over / not on PO);
+  // append it to the PO notes, stamped with who and when, as the audit trail.
+  const receiveNote = String(formData.get("receiveNote") ?? "").trim().slice(0, 2000);
+  if (result.ok && receiveNote) {
+    const session = await auth();
+    const who = session?.user?.name ?? session?.user?.email ?? "unknown";
+    const stamp = `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    const [cur] = await db
+      .select({ notes: purchaseOrders.notes })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, id));
+    const entry = `[Scan receive · ${stamp} · ${who}] ${receiveNote}`;
+    await db
+      .update(purchaseOrders)
+      .set({ notes: cur?.notes ? `${cur.notes}\n\n${entry}` : entry, updatedAt: new Date() })
+      .where(eq(purchaseOrders.id, id));
+  }
 
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
@@ -103,6 +123,28 @@ export default async function POPage({
 
   const initial = (po.lineItems as POLineItem[]) ?? [];
 
+  // Scan-receive matches scans against each line's part barcode / SKU / mfg #.
+  const partIds = [...new Set(initial.map((l) => l.partId).filter((x): x is string => !!x))];
+  const partCodeRows = partIds.length
+    ? await db
+        .select({ id: parts.id, sku: parts.sku, barcode: parts.barcode, mfgPartNumber: parts.mfgPartNumber })
+        .from(parts)
+        .where(inArray(parts.id, partIds))
+    : [];
+  const partCodes: PartCodes = Object.fromEntries(
+    partCodeRows.map((r) => [r.id, { sku: r.sku, barcode: r.barcode, mfgPartNumber: r.mfgPartNumber }]),
+  );
+  const scanLines: ScanLine[] = initial.map((l, i) => ({
+    index: i,
+    lineKey: l.id ?? `idx${i}`,
+    partId: l.partId ?? null,
+    sku: l.sku || (l.partId ? partCodes[l.partId]?.sku : null) || null,
+    description: l.description || `Line ${i + 1}`,
+    ordered: Number(l.quantity) || 0,
+    alreadyReceived: Number(l.quantityReceived) || 0,
+  }));
+  const canReceive = !["fulfilled", "received"].includes(po.status) && scanLines.length > 0;
+
   return (
     <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${poStatusLabel(po.status)}`}>
       <div className="flex justify-end">
@@ -115,7 +157,14 @@ export default async function POPage({
           Download PDF
         </a>
       </div>
+      {canReceive ? (
+        <POScanReceive poId={po.id} lines={scanLines} initialPartCodes={partCodes} receivePO={receivePO} />
+      ) : null}
       <POEditor
+        // Remount on every save/receive so the editor's fields (notes above
+        // all) reflect the saved PO instead of keeping stale local values that
+        // a later "Save" would write back over the scan-receive log.
+        key={po.updatedAt.toISOString()}
         id={po.id}
         vendorId={po.vendorId ?? ""}
         notes={po.notes ?? ""}

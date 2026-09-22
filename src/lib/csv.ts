@@ -71,6 +71,7 @@ export type ImportRow = {
   sku: string;
   name: string;
   description: string | null;
+  barcode: string | null;
   category: string | null;
   manufacturer: string | null;
   supplier: string | null;
@@ -114,6 +115,12 @@ const HEADER_ALIASES: Record<string, string> = {
   item_description: "description",
   category: "category",
   section: "category",
+  // Box barcode (vendor UPC/EAN) — what a scanner reads; distinct from SKU.
+  barcode: "barcode",
+  upc: "barcode",
+  upc_code: "barcode",
+  ean: "barcode",
+  gtin: "barcode",
   manufacturer: "manufacturer",
   brand: "manufacturer",
   supplier: "supplier",
@@ -227,6 +234,7 @@ export function rowsToImport(rows: string[][]): {
       sku,
       name,
       description: rawDescription || null,
+      barcode: get("barcode") || null,
       category: get("category") || null,
       manufacturer: get("manufacturer") || null,
       supplier: get("supplier") || null,
