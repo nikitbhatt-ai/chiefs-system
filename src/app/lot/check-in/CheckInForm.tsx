@@ -1,11 +1,19 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { Fragment, useActionState, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { SubmitButton } from "@/components/SubmitButton";
 import { PhotoSlots, type CheckInPhoto } from "./PhotoSlots";
 import { lookupVinAction, saveCheckInAction, type CheckInState } from "./actions";
 import type { VinLookupResult } from "@/lib/vin";
+import {
+  clearDraft,
+  describeAge,
+  isDraftWorthOffering,
+  loadDraft,
+  saveDraft,
+  type CheckInDraft,
+} from "@/lib/checkInDraft";
 
 // Tap-to-select rather than a text field: nobody types "three quarters" while
 // holding a phone in one hand.
@@ -58,6 +66,88 @@ export function CheckInForm({
     ok: false,
   });
 
+  // --- draft persistence --------------------------------------------------
+  const formRef = useRef<HTMLFormElement>(null);
+  // A draft found for this VIN, waiting to be accepted or thrown away. Nothing
+  // is restored behind someone's back.
+  const [draftOffer, setDraftOffer] = useState<CheckInDraft | null>(null);
+  // Values applied from an accepted draft. Bumping `formKey` remounts the
+  // inputs so their defaultValue picks these up.
+  const [restored, setRestored] = useState<Record<string, string>>({});
+  const [formKey, setFormKey] = useState(0);
+  // Suppresses saving while a draft is being offered, so the empty form the
+  // user is looking at does not overwrite the draft underneath it.
+  const holdSaving = useRef(false);
+
+  const cleanVin = vin.trim().toUpperCase();
+
+  const persist = useCallback(() => {
+    if (holdSaving.current) return;
+    if (!VIN_OK.test(cleanVin)) return;
+    const el = formRef.current;
+    if (!el) return;
+    const fields: Record<string, string> = {};
+    for (const [k, v] of new FormData(el).entries()) {
+      if (typeof v === "string" && k !== "photos") fields[k] = v;
+    }
+    saveDraft({
+      vin: cleanVin,
+      fields,
+      chips,
+      damageText,
+      fuel,
+      photos,
+      savedAt: Date.now(),
+    });
+  }, [cleanVin, chips, damageText, fuel, photos]);
+
+  // Debounced so typing does not hit storage on every keystroke.
+  useEffect(() => {
+    if (!VIN_OK.test(cleanVin)) return;
+    const t = setTimeout(persist, 400);
+    return () => clearTimeout(t);
+  }, [persist, cleanVin, photos, chips, damageText, fuel]);
+
+  // When a VIN resolves, see whether there is unfinished work for it.
+  useEffect(() => {
+    if (!VIN_OK.test(cleanVin)) {
+      setDraftOffer(null);
+      holdSaving.current = false;
+      return;
+    }
+    const found = loadDraft(cleanVin);
+    if (isDraftWorthOffering(found)) {
+      holdSaving.current = true;
+      setDraftOffer(found);
+    }
+    // Only when the VIN itself changes — not on every keystroke elsewhere.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleanVin]);
+
+  function acceptDraft() {
+    if (!draftOffer) return;
+    setRestored(draftOffer.fields);
+    setChips(draftOffer.chips);
+    setDamageText(draftOffer.damageText);
+    setFuel(draftOffer.fuel);
+    setPhotos(draftOffer.photos);
+    setFormKey((k) => k + 1);
+    setDraftOffer(null);
+    holdSaving.current = false;
+  }
+
+  function discardDraft() {
+    if (!draftOffer) return;
+    clearDraft(draftOffer.vin);
+    setDraftOffer(null);
+    holdSaving.current = false;
+  }
+
+  // A saved check-in is no longer a draft.
+  useEffect(() => {
+    if (state.ok && state.saved) clearDraft(state.saved.vin);
+  }, [state.ok, state.saved]);
+
   // Fire the lookup the moment a valid 17-character VIN exists, rather than
   // making someone find a "look up" button with one thumb.
   useEffect(() => {
@@ -94,12 +184,22 @@ export function CheckInForm({
     return <SavedPanel saved={state.saved} onAnother={() => window.location.reload()} />;
   }
 
+  // A restored draft wins over a decoded/blank default for that field.
+  const dv = (name: string, fallback: string | number = "") =>
+    restored[name] ?? fallback;
+
   const isExisting = lookup?.status === "existing";
   const decoded = lookup?.status === "new" ? lookup.decoded : null;
   const showDetails = lookup?.status === "existing" || lookup?.status === "new";
 
   return (
-    <form action={formAction} className="space-y-4 pb-28">
+    <form
+      ref={formRef}
+      action={formAction}
+      onInput={persist}
+      onChange={persist}
+      className="space-y-4 pb-28"
+    >
       {/* ---- Step 1: VIN --------------------------------------------------- */}
       <div className={CARD}>
         <label className={LABEL} htmlFor="vin">
@@ -131,6 +231,38 @@ export function CheckInForm({
           <p className="mt-1 text-[12px] text-red-400 font-body">{state.fieldErrors.vin}</p>
         ) : null}
       </div>
+
+      {/* ---- Unfinished draft for this VIN --------------------------------- */}
+      {draftOffer ? (
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+          <p className="text-[11px] font-body font-semibold text-blue-300 uppercase tracking-wider">
+            Unfinished check-in
+          </p>
+          <p className="mt-1 text-sm text-zinc-200 font-body">
+            You started a check-in for this VIN {describeAge(draftOffer.savedAt)}
+            {draftOffer.photos.length > 0
+              ? `, with ${draftOffer.photos.length} photo${draftOffer.photos.length > 1 ? "s" : ""} already uploaded`
+              : ""}
+            .
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={acceptDraft}
+              className="min-h-[48px] rounded-lg bg-blue-500 text-white text-sm font-body font-bold"
+            >
+              Restore it
+            </button>
+            <button
+              type="button"
+              onClick={discardDraft}
+              className="min-h-[48px] rounded-lg border border-white/15 text-sm font-body text-zinc-300"
+            >
+              Start fresh
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {/* ---- Known vehicle banner ------------------------------------------ */}
       {isExisting && lookup.status === "existing" ? (
@@ -169,8 +301,8 @@ export function CheckInForm({
         </div>
       ) : null}
 
-      {showDetails ? (
-        <>
+      {showDetails && !draftOffer ? (
+        <Fragment key={formKey}>
           {/* ---- Step 2: PHOTOS FIRST -------------------------------------
               Deliberately above everything else. If someone gets pulled away
               mid-check-in, the photos are the part that cannot be recreated
@@ -198,12 +330,12 @@ export function CheckInForm({
                   : "The VIN decoder did not answer — type what you can see."}
               </p>
               <div className="grid grid-cols-2 gap-2.5">
-                <Field label="Year" name="year" defaultValue={decoded?.year ?? ""} type="number" inputMode="numeric" />
-                <Field label="Make" name="make" defaultValue={decoded?.make ?? ""} />
-                <Field label="Model" name="model" defaultValue={decoded?.model ?? ""} />
-                <Field label="Trim" name="trim" defaultValue={decoded?.trim ?? ""} />
+                <Field label="Year" name="year" defaultValue={dv("year", decoded?.year ?? "")} type="number" inputMode="numeric" />
+                <Field label="Make" name="make" defaultValue={dv("make", decoded?.make ?? "")} />
+                <Field label="Model" name="model" defaultValue={dv("model", decoded?.model ?? "")} />
+                <Field label="Trim" name="trim" defaultValue={dv("trim", decoded?.trim ?? "")} />
                 <div className="col-span-2">
-                  <Field label="Color" name="color" defaultValue="" />
+                  <Field label="Color" name="color" defaultValue={dv("color")} />
                 </div>
               </div>
             </div>
@@ -238,13 +370,13 @@ export function CheckInForm({
             </div>
 
             <div className="grid grid-cols-2 gap-2.5">
-              <Field label="Odometer" name="odometer" type="number" inputMode="numeric" placeholder="Miles" />
-              <Field label="Keys" name="keyCount" type="number" inputMode="numeric" placeholder="How many" />
+              <Field label="Odometer" name="odometer" defaultValue={dv("odometer")} type="number" inputMode="numeric" placeholder="Miles" />
+              <Field label="Keys" name="keyCount" defaultValue={dv("keyCount")} type="number" inputMode="numeric" placeholder="How many" />
               <div className="col-span-2">
-                <Field label="Key location" name="keyLocation" placeholder="Key board, hook 14" />
+                <Field label="Key location" name="keyLocation" defaultValue={dv("keyLocation")} placeholder="Key board, hook 14" />
               </div>
               <div className="col-span-2">
-                <Field label="Where is it parked" name="lotLocation" placeholder="Row A-3" />
+                <Field label="Where is it parked" name="lotLocation" defaultValue={dv("lotLocation")} placeholder="Row A-3" />
               </div>
             </div>
 
@@ -283,10 +415,10 @@ export function CheckInForm({
             </div>
 
             <div className="mt-4 grid grid-cols-1 gap-2.5">
-              <Field label="Items left inside" name="itemsInside" placeholder="Owner manual, jack kit" />
+              <Field label="Items left inside" name="itemsInside" defaultValue={dv("itemsInside")} placeholder="Owner manual, jack kit" />
               <div className="grid grid-cols-2 gap-2.5">
-                <Field label="Delivered by" name="deliveredBy" placeholder="Name" />
-                <Field label="Drop contact" name="dropContact" type="tel" inputMode="tel" placeholder="Phone" />
+                <Field label="Delivered by" name="deliveredBy" defaultValue={dv("deliveredBy")} placeholder="Name" />
+                <Field label="Drop contact" name="dropContact" defaultValue={dv("dropContact")} type="tel" inputMode="tel" placeholder="Phone" />
               </div>
             </div>
           </div>
@@ -312,9 +444,11 @@ export function CheckInForm({
                           name="ownership"
                           value={o.value}
                           defaultChecked={
-                            isExisting && lookup.status === "existing"
-                              ? lookup.vehicle.ownership === o.value
-                              : false
+                            restored.ownership
+                              ? restored.ownership === o.value
+                              : isExisting && lookup.status === "existing"
+                                ? lookup.vehicle.ownership === o.value
+                                : false
                           }
                           className="w-5 h-5 accent-amber-500"
                         />
@@ -338,7 +472,11 @@ export function CheckInForm({
                           type="radio"
                           name="lotStatus"
                           value={s.value}
-                          defaultChecked={s.value === "on_lot_available"}
+                          defaultChecked={
+                            restored.lotStatus
+                              ? restored.lotStatus === s.value
+                              : s.value === "on_lot_available"
+                          }
                           className="w-5 h-5 accent-amber-500"
                         />
                         <span className="text-sm font-body text-zinc-200">{s.label}</span>
@@ -365,7 +503,7 @@ export function CheckInForm({
               Save check-in
             </SubmitButton>
           </div>
-        </>
+        </Fragment>
       ) : null}
     </form>
   );

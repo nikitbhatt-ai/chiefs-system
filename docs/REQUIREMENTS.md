@@ -3380,15 +3380,15 @@ flow.
 - [x] Unlinking must stamp `unlinked_at`/`unlinked_by` — **never delete a
       link row.** The history is the point.
 
-**Open decision — legacy `deals.vehicle_id` attachments.** `deals.vehicle_id`
-predates this table and already carries real attachments. They are invisible
-to the single-active-link index until copied into `deal_vehicles`. Phase 2
-deliberately does **not** backfill: it would have to invent a `linked_by`
-user, and any vehicle already sitting on two un-archived deals would violate
-the new index and need resolving by hand first. STEP 4 of the Phase 2 SQL is
-a read-only report showing how many such attachments exist and whether any
-vehicle is on 2+ deals. Decide before Phase 9, or `linkVehicleToDeal` will
-happily attach a vehicle that is already on a legacy deal.
+**Legacy `deals.vehicle_id` attachments — RESOLVED 2026-09-22.** `deals.vehicle_id`
+predates this table and already carries real attachments, which are invisible to
+the single-active-link index until copied across. The user ran STEP 4 of the
+Phase 2 SQL: **`problem_vehicles` came back 0** — no vehicle is attached to two
+or more un-archived deals. A straight backfill into `deal_vehicles` is therefore
+safe and needs no manual untangling. **Write that backfill as part of Phase 9**,
+before `linkVehicleToDeal` ships, or the new guardrail will not see the old
+links. It still needs a `linked_by` value; use a system/admin user rather than
+inventing a person.
 
 ### Phase 3 — roles and permissions (done, 2026-09-15)
 
@@ -3562,11 +3562,59 @@ top nav.
 > Vercel Blob. Types, build and the server action are verified; the layout
 > and the camera behaviour need a look on an actual phone.
 
+### Phase 6 — draft saving and resilient uploads (done, 2026-09-22)
+
+**No schema change.** Nothing here reaches the server: drafts live in the
+browser only.
+
+- [x] **Draft saving.** Form state is written to `localStorage` as the user
+      types (400 ms debounce), **keyed by VIN**, so two vehicles — or two
+      people — never overwrite each other. `src/lib/checkInDraft.ts`.
+- [x] The snapshot is taken from the form's own `FormData`, so a field added
+      later is covered without touching the draft module. Chips, free text,
+      fuel and photos are stored separately, because the form merges chips and
+      free text into one `damage_notes` value and restoring from the merged
+      string would lose which chips were tapped.
+- [x] Photos in a draft are the **already-uploaded Blob URLs**, so a restored
+      draft keeps its photos rather than asking for them again.
+- [x] **A draft is offered, never applied silently.** On resolving a VIN with
+      unfinished work, a banner says how long ago it was started and how many
+      photos it has, with *Restore it* / *Start fresh*. Saving is suspended
+      while the offer is on screen so the empty form cannot overwrite the
+      draft underneath it.
+- [x] An empty draft is never offered — a VIN alone, or whitespace, is not
+      unfinished work.
+- [x] The draft is cleared on a successful submit.
+- [x] **Every storage access is guarded.** `localStorage` throws in private
+      mode, when site data is blocked, and when the quota is full; a draft is
+      a convenience and must never be the reason the form breaks. A corrupt or
+      hand-edited entry is sanitised rather than trusted.
+- [x] **Photos upload one at a time**, through `src/lib/serialQueue.ts`. Six
+      parallel uploads on one bar of signal all crawl and any can time out;
+      serialised, each gets the whole connection.
+- [x] **Per-photo status**: pending ("Queued") / uploading (live %) / done
+      (thumbnail) / failed, with a **Retry** button that re-sends *that same
+      file* — the original `File` is kept, so recovery never means walking
+      back to the vehicle to shoot it again.
+- [x] **A failure on photo four does not touch photos one through three**, nor
+      block five and six: the queue chains on both settle paths, so a rejected
+      task never breaks the chain. Verified directly.
+- [x] A summary line reports uploads still in flight, so nobody taps Save
+      while four photos are still climbing.
+- [x] Tests: `src/lib/checkInDraft.test.ts` (13 cases, fake `localStorage`
+      including quota-full and blocked-storage) and
+      `src/lib/serialQueue.test.ts` (6 cases, incl. no-overlap, a failure not
+      stopping the queue, and retry-after-failure).
+
+> **Deliberately not built:** a service worker or full offline sync, per the
+> brief. Revisit only if the team actually reports losing check-ins.
+
+> **Not verified from the build sandbox:** the browser behaviour — real
+> `localStorage`, real camera, real uploads to Vercel Blob. The draft and
+> queue logic are unit-tested in isolation; the wiring needs a phone.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 6** — draft saving to local storage keyed by VIN; per-photo
-      upload status (pending/uploading/done/failed) with retry, uploaded one
-      at a time. No service worker / offline sync yet.
 - [ ] **Phase 7** — desktop layout. Same components, same server action.
 - [ ] **Phase 8** — lot view: VIN (last 8), year/make/model, ownership, lot
       status, lot location, **days on lot** (computed), current deal,
