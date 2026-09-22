@@ -242,6 +242,12 @@ export default async function InventoryPage({
           Import CSV
         </a>
         <a
+          href="/inventory/labels"
+          className="text-zinc-300 hover:text-white px-3 py-1 border border-white/10 rounded"
+        >
+          Barcode labels
+        </a>
+        <a
           href="/inventory/pull"
           className="text-zinc-300 hover:text-white px-3 py-1 border border-white/10 rounded"
         >
