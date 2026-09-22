@@ -2,8 +2,19 @@
 // page chrome, headers, tables, and totals. Per-template stylesheets can
 // extend; avoid forking the basics so PDFs stay consistent.
 
-import { StyleSheet } from "@react-pdf/renderer";
+import { Font, StyleSheet } from "@react-pdf/renderer";
 import { BRANDING } from "./branding";
+
+// React-PDF hyphenates by default, which put "Customer Department Graphics - 3M
+// re-flective" on a customer's invoice. An inserted hyphen mid-word reads as a
+// typo on a document someone signs, so words wrap whole instead.
+//
+// This must stay whole-word. React-PDF INSERTS a hyphen wherever it breaks, so
+// letting it break a part number turns "KIT-23S1-CC0713-OS" into
+// "KIT-23S1--CC0713-OS" — a corrupted value someone might order against, which
+// is far worse than a wide cell. Long codes are wrapped explicitly instead; see
+// `splitCode` in templates/quote.tsx.
+Font.registerHyphenationCallback((word) => [word]);
 
 export const sharedStyles = StyleSheet.create({
   page: {
@@ -29,6 +40,73 @@ export const sharedStyles = StyleSheet.create({
   brandLine: { fontSize: 9, color: BRANDING.mutedColor, marginTop: 2 },
   docTitle: { fontSize: 20, fontWeight: 700, textAlign: "right" },
   docMeta: { fontSize: 9, color: BRANDING.mutedColor, marginTop: 4, textAlign: "right" },
+
+  /**
+   * Page style for documents that use the running masthead below. Separate
+   * from `page` so the purchase-order / work-order / upfit templates, which
+   * still print their header in the normal flow, don't inherit a 130pt gap.
+   */
+  pageWithRunningHeader: {
+    // Reserves the masthead: logo (55) + four contact lines + rule.
+    paddingTop: 158,
+    paddingBottom: 64,
+    paddingHorizontal: 48,
+    fontFamily: "Helvetica",
+    fontSize: 10,
+    color: BRANDING.textColor,
+    backgroundColor: "#ffffff",
+  },
+
+  // ── Running header ───────────────────────────────────────────────────────
+  // A masthead that repeats on every page: logo + company block top-left, the
+  // document number and assigned sales rep top-right. Absolutely positioned
+  // and `fixed` so a three-page invoice identifies itself on page 3 as well as
+  // page 1; `page.paddingTop` reserves the room it occupies.
+  runningHeader: {
+    position: "absolute",
+    top: 34,
+    left: 48,
+    right: 48,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    paddingBottom: 10,
+    borderBottomWidth: 2,
+    borderBottomColor: BRANDING.textColor,
+  },
+  /**
+   * Sized for the Chiefs mark (2000x676, ~2.96:1) so it fills the slot rather
+   * than letterboxing inside it. `objectFit: contain` keeps any replacement
+   * logo undistorted whatever its own ratio.
+   */
+  logo: { width: 164, height: 55, objectFit: "contain", marginBottom: 4 },
+  logoWordmark: { fontSize: 15, fontWeight: 700, letterSpacing: 0.3, marginBottom: 2 },
+  headerRight: { alignItems: "flex-end", maxWidth: 220 },
+  /** The sales rep line — a name, so it reads darker than the muted meta rows. */
+  docRep: { fontSize: 9, marginTop: 4, textAlign: "right", color: BRANDING.textColor },
+
+  /**
+   * INTERNAL COPY banner. Deliberately loud: this document carries our cost and
+   * margin, and the only thing standing between it and a customer is someone
+   * noticing which file they attached.
+   */
+  internalBanner: {
+    backgroundColor: "#fdf2c7",
+    borderWidth: 1,
+    borderColor: BRANDING.accentColor,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    marginBottom: 10,
+    fontSize: 9,
+    fontWeight: 700,
+    color: "#7c4a03",
+  },
+  internalTotals: {
+    marginTop: 8,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: BRANDING.accentColor,
+  },
   sectionTitle: {
     fontSize: 9,
     fontWeight: 700,

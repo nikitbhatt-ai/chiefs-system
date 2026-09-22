@@ -3303,6 +3303,200 @@ One caution worth recording: an earlier version of the quote check reported
 "PASSED" while running **zero** assertions, because the seed had no quotes to
 open. A check that cannot fail is not a check — assert that the fixture exists.
 
+## Invoice document format (user requirement, 2026-08-20)
+
+The user supplied a Shopmonkey work order (`Estimate #1938 — City of Navasota,
+2026 Chevrolet Silverado 1500 WT`) and asked that **downloaded invoices be
+formatted the same way**, naming six things they must carry:
+
+1. the vehicle info connected to the build
+2. the customer name
+3. contact info
+4. **discount percentage** by line item
+5. the Chiefs logo in the top left
+6. the assigned sales person
+
+Note what the reference document is and is not: it is a *work order*, with
+columns `Description | QTY | Part # | Vendor | Status` and **no prices at all**.
+So "the same way" means its **structure** — masthead, party blocks, grouped
+sections with their own table headers, running footer — with the money columns
+an invoice needs. `Vendor` and `Status` are deliberately NOT carried onto a
+customer invoice: they expose sourcing. `Part #` is, because a customer can
+cross-reference it.
+
+Invoices are converted quotes (no separate table — see the accounting section),
+so this is `templates/quote.tsx` plus `/quotes/[id]/print`, and both variants of
+the template get the new masthead.
+
+### What was built
+
+- **Running masthead**, repeated on every page (`fixed` + absolute, with
+  `pageWithRunningHeader` reserving 132pt): logo top-left over the company
+  address / phone / email / website, and on the right the document title,
+  number, date, and `Sales rep: <name>`. A three-page invoice identifies itself
+  on page 3, which the reference document does too.
+- **Bill to / Vehicle side by side.** Customer name, address, **phone**, email
+  (phone was in `customers` all along and simply never reached the PDF).
+  Vehicle is year/make/model/trim, VIN, unit #, colour, mileage.
+- **`Disc %` per line item**, computed from the dollars actually coming off
+  (`lineDiscount / lineGross`), so a **bundle-allocated promo line shows a real
+  percentage** rather than a blank where its stored `discount` is zero. A flat
+  `$125` off an `$850` line prints `14.71%`.
+- **`Part #` column** from `parts.mfg_part_number`, falling back to `parts.sku`
+  — the manufacturer's number is the one a customer can look up.
+- **`src/lib/quoteDocumentFacts.ts`** resolves customer contact, vehicle detail,
+  sales person and part numbers **once**, for both the PDF and the print view.
+  Two copies of these lookups is how an invoice ends up naming a different sales
+  rep than the screen — the same trap the discount arithmetic fell into before
+  it was consolidated.
+
+### Sales person and vehicle detail: where they come from
+
+Quotes have no rep of their own. The name resolves through the quote's deal:
+assigned user's display name → name → email, then the deal's free-text
+`sales_rep`, then **null** — an unassigned quote must not print somebody else's
+name. Colour and mileage come from the deal's linked `vehicles` row.
+
+**Engine size and transmission are on the reference document and are NOT
+printed**, because the app does not store them anywhere. A blank line beats an
+invented one on a document a customer signs. Adding them means new columns on
+`quotes` (or decoding more of the VIN response) — not done.
+
+### The logo — still needs the artwork
+
+There is **no Chiefs logo file anywhere in the repo**, and the reference PDF
+does not contain one either (its only images are Shopmonkey's own wordmark).
+`brandLogo()` / `brandLogoWebPath()` read `public/brand/chiefs-logo.png` (or
+`PDF_LOGO_PATH`) once and cache it; PNG or JPEG, roughly 4:1 landscape for the
+150×38pt slot. Until the file is dropped in, the header sets the company name as
+a wordmark so documents are never broken by a missing asset — they are just not
+branded yet.
+
+### Two defects the verification caught
+
+- **The totals block straddled a page break** — "Subtotal" on page 1, "Amount
+  due" on page 2. Fixed with `wrap={false}` on the totals view.
+- **`U+2212 MINUS SIGN` rendered as nothing.** The templates use standard-14
+  Helvetica with `/WinAnsiEncoding`, which has no U+2212; react-pdf emitted byte
+  `0x12` (undefined in that encoding), so the discount row printed
+  `Discount $530.00` with **no minus sign**. Replaced with ASCII hyphen in
+  `quote.tsx` and `upfit.tsx`. The check now scans for any byte undefined in
+  WinAnsi, so the whole class is caught rather than that one character.
+- Also: react-pdf hyphenates by default and printed `3M re-flective`. Disabled
+  via `Font.registerHyphenationCallback`.
+
+### Verified
+
+Against a seeded record on a **production** build — a converted quote for City
+of Navasota with a bundle-allocated promo group, a 10% line, a flat-$125 line,
+labor and a fee:
+
+- the downloaded PDF carries all six requested items, `Disc %` shows
+  `15.00 / 15.00 / 10.00 / 14.71`, the manufacturer part number prints, the
+  masthead and sales rep repeat on both pages, and
+  `$3,900.00 − $530.00 + $570.00 + $185.00 = $4,125.00` foots;
+- no character falls outside the font encoding;
+- no word is hyphenated mid-line;
+- the print view shows the same customer, vehicle, rep, percentages and grand
+  total as the PDF.
+
+One method note worth keeping: the first run of this check reported everything
+missing because the extractor only understood two-byte subset CIDs, while these
+documents use single-byte WinAnsi — it decoded 20 characters and would have
+reported a *pass* for every `contains` had the guard ("the PDF's text decoded")
+not been there. Assert that your extraction worked before trusting what it
+says about the content.
+
+## Internal cost on quotes and invoices (user requirement, 2026-09-22)
+
+> "i need the internal cost to show on every quote and invoice so that our sales
+> team knows what the internal avg cost is for each item"
+
+### Where it shows — and where it deliberately does not
+
+The stated purpose is for the **sales team** to know the cost. Printing it on the
+document that goes to the customer would hand them our margin, so the split is:
+
+| Surface | Internal cost? |
+| --- | --- |
+| Quote editor (`/quotes/[id]`) | **Yes** — per line, plus a quote-level rollup |
+| Internal copy PDF (`?internal=1`) | **Yes** — Avg cost + Margin columns |
+| Internal print view (`/print?internal=1`) | **Yes** |
+| Customer invoice / quote PDF | **No** |
+| Customer print view | **No** |
+
+The internal copy is reached from a distinct amber **"Internal copy (cost +
+margin)"** button next to the two customer downloads, is banner-marked
+`INTERNAL COPY — shows our cost and margin. Do not send to the customer.` on
+every page, and downloads as `Invoice_<no>_<date>_INTERNAL.pdf` — because what
+someone sees when attaching a file is the filename.
+
+Both internal surfaces sit behind the same auth as the rest of the app; neither
+is reachable from a customer-facing link.
+
+### Which cost, in what order
+
+`src/lib/lineCost.ts` owns this, shared by editor, print view and PDF:
+
+1. **A locked cost on the line wins.** That is a promo/package cost negotiated
+   for this build; today's moving average is not what we paid for it.
+2. Otherwise the part's **`avg_cost`** — the weighted-average basis job costing
+   uses, and what the request asked for.
+3. Otherwise any unlocked cost the line carries.
+4. Otherwise **null → renders `—`, never `$0.00`.** An uncosted part is not a
+   free part, and a rep must be able to tell the difference.
+
+Lines with no known cost are counted and declared (*"2 lines without a recorded
+average cost — excluded above"*) rather than silently treated as costing
+nothing, which would overstate margin.
+
+Margin is measured against **parts net only** — labor and fees have no part cost
+to compare against, and folding them in would flatter the number a rep
+negotiates on.
+
+Costs for parts picked during an edit are learned from the part-search response,
+so a freshly added line shows its margin immediately instead of reading `Cost —`
+until the quote is saved and reloaded.
+
+### The logo
+
+`public/brand/chiefs-logo.png` (800×270, from the user's 2000×676 artwork). The
+slot is 164×55pt, sized to the mark's ~2.96:1 ratio. `brandLogo()` inlines it as
+a data URI for react-pdf and caches it for the process; `brandLogoWebPath()`
+serves it to the print view. The wordmark fallback remains for anyone running
+without the file.
+
+### Three rendering defects found while verifying
+
+- **React-PDF inserts a hyphen wherever it breaks a word.** Letting it break a
+  part number turned `KIT-23S1-CC0713-OS` into `KIT-23S1--CC0713-OS` — a
+  corrupted value someone could order against. Hyphenation stays off; long codes
+  are wrapped explicitly by `splitCode()`, which breaks only after separators the
+  code already contains, so the pieces concatenate back to the original exactly.
+- **Part # overflowed into Qty** on the narrower internal layout before that fix.
+- **A bordered table split across a page break** left an empty box on one page
+  and "FEES & ADD-ONS" stranded at the foot of the other. Short sections
+  (≤12 rows) are now pinned with `wrap={false}`; longer ones still wrap, because
+  a `wrap={false}` block taller than a page cannot be laid out.
+
+### Verified
+
+`scripts`-free, against a seeded record on a **production** build whose costs are
+known exactly (locked 800 ×1, avg 75 ×4, avg 700 ×1 = $1,800, plus two lines with
+no cost at all):
+
+- the customer PDF and print view contain **no** cost, margin, banner, or any of
+  the figures $800 / $75 / $700 / $1,800;
+- the internal copy shows a locked promo cost **beating** the part average
+  ($800, not $1,000) and the average **beating** the catalogue cost ($75 not $70,
+  $700 not $600) — the $1,800 total proves it, since catalogue costs would give
+  $1,780;
+- parts margin = (subtotal − discount) − parts cost, to the cent;
+- uncosted lines render `—` and are declared;
+- no character falls outside the font encoding;
+- the editor shows per-line cost, `$75.00 × 4 = $300.00` for quantities, margin
+  percentages, and the labelled internal rollup.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

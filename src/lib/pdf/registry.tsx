@@ -17,6 +17,7 @@ import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
 import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
 import { resolvePartsFromLineItems } from "@/lib/workOrderParts";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
+import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
 export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit" | "work_order";
 
@@ -26,23 +27,22 @@ export type ResolvedPdf = {
   template: string;
 };
 
-async function resolveQuote(recordId: string, variant: "quote" | "invoice"): Promise<QuoteData | null> {
+async function resolveQuote(
+  recordId: string,
+  variant: "quote" | "invoice",
+  internal = false,
+): Promise<QuoteData | null> {
   const [q] = await db.select().from(quotes).where(eq(quotes.id, recordId));
   if (!q) return null;
-  const customer = q.customerId
-    ? (await db.select().from(customers).where(eq(customers.id, q.customerId)))[0] ?? null
-    : null;
-  const vehicleSummary = await resolveVehicleLabel(q);
+  // Customer contact, vehicle detail and the assigned sales person all come
+  // from one shared resolver so the PDF and the print view cannot disagree.
+  const facts = await quoteDocumentFacts(q);
   return {
     quoteId: q.id,
     quoteNumber: q.quoteNumber,
     createdAt: q.createdAt,
-    customerName: customer?.name ?? null,
-    customerEmail: customer?.email ?? null,
-    customerAddress: customer?.address ?? null,
-    vehicleSummary: vehicleSummary || null,
-    vin: q.vin ?? null,
-    unitNumber: q.unitNumber ?? null,
+    ...facts,
+    internal,
     lineItems: ((q.lineItems as unknown as QuoteLine[]) ?? []),
     taxTotal: Number(q.taxTotal ?? 0),
     grandTotal: Number(q.grandTotal ?? 0),
@@ -153,16 +153,26 @@ async function resolveWorkOrder(workOrderId: string): Promise<WorkOrderData | nu
 export async function renderRecordPdf(
   recordType: RecordType,
   recordId: string,
+  /**
+   * `internal: true` renders the sales team's copy — per-line cost and margin,
+   * banner, `_INTERNAL` filename. Callers must only set it for a signed-in
+   * user; it must never be reachable on a customer-facing path.
+   */
+  opts?: { internal?: boolean },
 ): Promise<ResolvedPdf | null> {
   if (recordType === "quote" || recordType === "invoice") {
     const variant = recordType === "invoice" ? "invoice" : "quote";
-    const data = await resolveQuote(recordId, variant);
+    const data = await resolveQuote(recordId, variant, opts?.internal === true);
     if (!data) return null;
     const docNumber = data.quoteNumber ?? `Q-${data.quoteId.slice(0, 8)}`;
     const dateStr = new Date(data.createdAt).toISOString().slice(0, 10).replace(/-/g, "");
-    const fileName = `${variant === "invoice" ? "Invoice" : "Quote"}_${docNumber}_${dateStr}.pdf`;
+    // The filename says INTERNAL too, because that is what someone sees in
+    // their downloads folder when they go to attach it to an email.
+    const suffix = data.internal ? "_INTERNAL" : "";
+    const fileName = `${variant === "invoice" ? "Invoice" : "Quote"}_${docNumber}_${dateStr}${suffix}.pdf`;
     const buffer = await renderToBuffer(<QuoteDocument data={data} />);
-    return { buffer, fileName, template: variant === "invoice" ? "invoice_default" : "quote_default" };
+    const template = `${variant === "invoice" ? "invoice" : "quote"}${data.internal ? "_internal" : "_default"}`;
+    return { buffer, fileName, template };
   }
   if (recordType === "upfit") {
     const data = await resolveUpfit(recordId);
