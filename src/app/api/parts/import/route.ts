@@ -133,6 +133,9 @@ export async function POST(req: Request) {
         vendorId: supplierId,
         manufacturerId,
         updatedAt: new Date(),
+        // Only overwrite a barcode when the sheet has one, so re-importing a
+        // price file without a UPC column doesn't wipe barcodes linked by scan.
+        ...(r.barcode ? { barcode: r.barcode } : {}),
       };
 
       if (isUpdate) {

@@ -26,6 +26,7 @@ async function createPart(formData: FormData) {
     name,
     description: String(formData.get("description") ?? "").trim() || null,
     mfgPartNumber: String(formData.get("mfgPartNumber") ?? "").trim() || null,
+    barcode: String(formData.get("barcode") ?? "").trim() || null,
     category: String(formData.get("category") ?? "").trim() || null,
     quantityOnHand: num("quantityOnHand") ?? 0,
     quantityOnOrder: num("quantityOnOrder") ?? 0,
@@ -86,6 +87,7 @@ export default async function InventoryPage({
     sort?: string;
     dir?: string;
     q?: string;
+    barcode?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -169,7 +171,7 @@ export default async function InventoryPage({
 
   return (
     <AppShell title="Inventory" subtitle="Parts and supplies">
-      <PartAddForm action={createPart} vendors={vendorRows} />
+      <PartAddForm action={createPart} vendors={vendorRows} defaultBarcode={(sp.barcode ?? "").trim()} />
 
       <form className="bg-surface border border-white/5 rounded-lg p-3 flex flex-wrap gap-2 items-center text-xs font-body">
         {/* Preserve the active sort (and tag filter) when applying search/filters. */}

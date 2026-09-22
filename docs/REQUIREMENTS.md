@@ -1233,6 +1233,67 @@ ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'fulfilled';
       subtraction, work-order cross-PO stock math, and the PO PDF RECEIVED
       watermark.
 
+## Barcode scanning — Phase 1 (added 2026-09-22)
+
+Warehouse scans with a USB/Bluetooth scanner in **keyboard-wedge (HID)**
+mode — the scanner "types" the code then Enter, so no drivers — or with a
+**phone/tablet camera** (`@zxing/browser`, loaded only when the camera
+opens). Recommended test hardware: a 2D imager (e.g. Zebra DS2208 corded /
+DS2278 cordless, Honeywell Voyager 1470g/1472g) with Enter suffix on. The
+user asked that **PO receiving be central**: scanning what came in is
+compared against the PO before anything is received.
+
+**Schema (run in Neon's SQL Editor BEFORE deploying — every parts query
+selects this column):**
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS barcode text;
+CREATE INDEX IF NOT EXISTS parts_barcode_idx ON parts (barcode);
+```
+
+- [x] `parts.barcode` — the code on the box (vendor UPC/EAN). Not unique
+      (two SKUs may share a UPC; the scan picker lists both), but linking
+      from a scan refuses a barcode already on another part (409).
+- [x] **Scan lookup** `GET /api/scan?code=` (`src/lib/scan.ts`): exact,
+      case-insensitive match on part barcode / SKU / mfg part #, vehicle
+      VIN, and PO number. Tries alternate spellings of the same label
+      (UPC-A ↔ EAN-13 leading 0, Code 39 VIN "I" prefix) and strips scanner
+      control characters (`src/lib/scanCodes.ts`, client-safe).
+- [x] **Header Scan button** (`ScanButton`, every AppShell page): dialog
+      with an auto-focused box + "Use camera". One match → opens it; several
+      → pick; none → link the barcode to an existing part (saved, so it's
+      recognized next time) or "Create new part" (`/inventory?barcode=`
+      prefills the add form).
+- [x] **Scan from anywhere**: a wedge scan with no text box focused (burst
+      of keys <50 ms apart, ≥4 chars, Enter) opens the lookup. Pages can
+      claim scans instead via `src/components/scanCapture.ts`.
+- [x] **Scan to receive on the PO page** (`POScanReceive`): "Start
+      scanning" → each scan is matched to a PO line (part barcode / SKU /
+      mfg #) and counted, with a beep/vibrate. Per line: Ordered · Already
+      in · Scanned now (±, editable) · status (✓ matches / Short N / Over N /
+      nothing scanned). "Qty per scan" for cases. Flags **over**, **not on
+      this PO** (a known part — set aside), and **unknown barcode** (link it
+      to a PO line → saved on the part). Camera runs continuously (same code
+      ignored 1.5 s). Progress survives a refresh (localStorage, per PO).
+      "Receive scanned items" confirms the discrepancies, then posts through
+      the existing `receivePO` action (capped at what's open, so overs are
+      never received) and appends a stamped summary (received / short /
+      over / not on PO, with user + UTC time) to the PO notes. The manual
+      receive form stays for lines without a linked part.
+- [x] Barcode field on part add/edit forms and the part detail header;
+      CSV import accepts a `barcode` / `upc` / `ean` / `gtin` column (only
+      overwrites when the sheet has a value).
+
+### Deferred (next phases)
+
+- **Scan to pull parts onto a work order** (needs work-order parts, still
+  unbuilt above).
+- **Barcode labels** — print Code 128 labels for parts/bins without a UPC
+  (label printer e.g. Zebra ZD421), and a PO-number barcode on the PO PDF so
+  scanning the paperwork opens the PO.
+- Structured receiving-discrepancy records (today: PO notes) + vendor
+  claim workflow; cycle counts by scanning a bin.
+
 ## Procurement / lead-time management (PR 19)
 
 Procurement plans use a per-part `lead_time_days` and a per-WO target

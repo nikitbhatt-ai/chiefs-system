@@ -95,7 +95,7 @@ export default async function PartDetailPage({
   const samples = [1, 5, 10, 25].filter((q) => q <= totalQty);
 
   return (
-    <AppShell title={`${p.sku}`} subtitle={p.name}>
+    <AppShell title={`${p.sku}`} subtitle={p.barcode ? `${p.name} · Barcode ${p.barcode}` : p.name}>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Stat label="On hand" value={p.quantityOnHand.toString()} />
         <Stat

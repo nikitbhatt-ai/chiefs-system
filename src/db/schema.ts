@@ -265,6 +265,10 @@ export const parts = pgTable("parts", {
   name: text("name").notNull(),
   description: text("description"),
   mfgPartNumber: text("mfg_part_number"),
+  // The code printed on the physical box (vendor UPC/EAN, or a label we print).
+  // Often differs from our SKU, so a scan matches this first. Not unique: two
+  // SKUs can legitimately share a vendor UPC; the scan UI lists both.
+  barcode: text("barcode"),
   category: text("category"),
   quantityOnHand: integer("quantity_on_hand").notNull().default(0),
   quantityOnOrder: integer("quantity_on_order").notNull().default(0),
@@ -285,7 +289,7 @@ export const parts = pgTable("parts", {
   leadTimeDays: integer("lead_time_days").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (t) => [index("parts_sku_idx").on(t.sku)]);
+}, (t) => [index("parts_sku_idx").on(t.sku), index("parts_barcode_idx").on(t.barcode)]);
 
 // Provenance of a cost layer / issue. `individual` = full-price single-SKU buy,
 // `package` = part of a vendor promo (Phase 3/4, carries promo_id), `backfill`

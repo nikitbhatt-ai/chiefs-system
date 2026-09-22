@@ -35,6 +35,7 @@ export async function POST(req: Request) {
       sku,
       name: body.name,
       description: body.description ?? null,
+      barcode: body.barcode ? String(body.barcode).trim() : null,
       category: body.category ?? null,
       quantityOnHand: body.quantityOnHand ?? 0,
       quantityOnOrder: body.quantityOnOrder ?? 0,

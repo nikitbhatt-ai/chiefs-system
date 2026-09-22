@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
@@ -36,6 +36,25 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   for (const f of ["cost", "price"]) {
     if (f in body) update[f] = body[f] != null ? String(body[f]) : null;
+  }
+  if ("barcode" in body) {
+    const barcode = body.barcode != null ? String(body.barcode).trim() : "";
+    // Linking a scanned code (Scan dialog) must not silently steal a barcode
+    // already on another part — the next scan would become ambiguous.
+    if (barcode) {
+      const [taken] = await db
+        .select({ sku: parts.sku })
+        .from(parts)
+        .where(and(sql`lower(${parts.barcode}) = lower(${barcode})`, ne(parts.id, id)))
+        .limit(1);
+      if (taken) {
+        return NextResponse.json(
+          { error: `Barcode ${barcode} is already on part ${taken.sku}`, code: "duplicate_barcode" },
+          { status: 409 },
+        );
+      }
+    }
+    update.barcode = barcode || null;
   }
   const [row] = await db.update(parts).set(update).where(eq(parts.id, id)).returning();
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });

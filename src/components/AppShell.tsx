@@ -7,6 +7,7 @@ import { TopNav } from "@/components/TopNav";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { ScanButton } from "@/components/ScanButton";
 import { WorkIndicator } from "@/components/WorkIndicator";
 import { SubmitButton } from "@/components/SubmitButton";
 
@@ -48,6 +49,7 @@ export async function AppShell({
           <GlobalSearch />
         </div>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          <ScanButton />
           <ThemeToggle />
           <Link
             href="/notifications"
