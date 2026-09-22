@@ -1338,11 +1338,37 @@ ON CONFLICT (code) DO NOTHING;
 
 - Undo for a no-work-order pull; a per-part "movement history" view of
   scan pulls/returns (rows are in `inventory_issue`).
-- **Barcode labels** — print Code 128 labels for parts/bins without a UPC
-  (label printer e.g. Zebra ZD421), and a PO-number barcode on the PO PDF so
+- Bin/shelf location labels, and a PO-number barcode on the PO PDF so
   scanning the paperwork opens the PO.
 - Structured receiving-discrepancy records (today: PO notes) + vendor
   claim workflow; cycle counts by scanning a bin.
+
+## Barcode label generator (added 2026-09-22)
+
+For products with no barcode. The user asked for a barcode generator. **No schema change.**
+
+- [x] Labels encode the part's **SKU** as **Code 128** (server-rendered SVG via
+      `bwip-js/node`, `src/lib/barcodeSvg.ts`). No new numbers: SKUs are
+      unique and the scan lookup already matches SKU exactly, so a printed
+      label scans to its part everywhere (Scan button, PO receive, work-order
+      pulls, pull from stock). A part with a vendor UPC can still get a label.
+- [x] **`/inventory/labels` builder** (nav: Operations → Barcode Labels;
+      button on /inventory): pick parts + copies, choose label stock, "skip N
+      used spots" for a partly used sheet. "Parts without a barcode" prints
+      one label for every active part with no box barcode (optionally one
+      category).
+- [x] **`/inventory/labels/print`** print view (no app chrome): `?items=id:qty,…`
+      or `?missing=1[&category=]`, `?format=`, `?skip=`. Formats
+      (`src/lib/labels.ts`): Avery 5160 Letter sheet (30/page, any office
+      printer), thermal 2"×1", thermal 2¼"×1¼", DYMO 30252 — thermal formats
+      print one label per page (@page sized to the label). Label = part name,
+      barcode, SKU text; side padding is the scanner quiet zone. Tells the
+      user to print at 100% / no margins. Capped at 1,500 labels per print.
+- [x] Shortcuts: **Print barcode label** on the part page; **Print labels for
+      this PO** on the PO page (one per unit ordered, for stock that arrives
+      unlabeled).
+- Verified: rendered labels in all four formats decode back to the exact SKU
+  with zxing (the phone-camera reader), including a SKU with "/".
 
 ## Procurement / lead-time management (PR 19)
 

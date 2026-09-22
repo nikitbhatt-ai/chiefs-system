@@ -11,6 +11,7 @@ import { POScanReceive, type PartCodes, type ScanLine } from "./POScanReceive";
 import { receivePurchaseOrder } from "@/lib/inventory";
 import { listPromos } from "@/lib/promos";
 import { poStatusLabel } from "@/lib/poStatus";
+import { formatLabelItems } from "@/lib/labels";
 
 async function saveDraft(formData: FormData) {
   "use server";
@@ -143,11 +144,25 @@ export default async function POPage({
     ordered: Number(l.quantity) || 0,
     alreadyReceived: Number(l.quantityReceived) || 0,
   }));
+  const labelQty = new Map<string, number>();
+  for (const l of initial) {
+    if (l.partId) labelQty.set(l.partId, (labelQty.get(l.partId) ?? 0) + (Number(l.quantity) || 1));
+  }
+  const labelItems = formatLabelItems([...labelQty].map(([partId, copies]) => ({ partId, copies })));
   const canReceive = !["fulfilled", "received"].includes(po.status) && scanLines.length > 0;
 
   return (
     <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${poStatusLabel(po.status)}`}>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {labelItems ? (
+          // One label per unit ordered, for stock that arrives without a barcode.
+          <a
+            href={`/inventory/labels?items=${labelItems}`}
+            className="text-[11px] font-body bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold"
+          >
+            Print labels for this PO
+          </a>
+        ) : null}
         <a
           href={`/api/pdf/purchase-orders/${po.id}`}
           target="_blank"
