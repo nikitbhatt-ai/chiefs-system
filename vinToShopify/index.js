@@ -28,6 +28,10 @@ import { createProduct } from "./shopifyClient.js";
  * @param {string} [input.notes]             - free-text notes for the listing
  * @param {string} [input.productType]       - defaults to "Used Vehicle"
  * @param {string} [input.status]            - "draft" (default) or "active"
+ * @param {string|number} [input.year]       - override / fallback for NHTSA
+ * @param {string} [input.make]              - override / fallback for NHTSA
+ * @param {string} [input.model]             - override / fallback for NHTSA
+ * @param {string} [input.trim]              - override / fallback for NHTSA
  * @returns {Promise<object>} success or error result (see shapes below)
  *
  * Success: { status: "success", productId, adminUrl, storefrontUrl, title, decoded }
@@ -49,16 +53,33 @@ export async function createCarListing(input = {}) {
   }
   const vin = validation.vin; // the cleaned/uppercased VIN
 
-  // ---- Step 2: decode the VIN via NHTSA (network) ---------------------------
-  const decode = await decodeVin(vin);
-  if (!decode.ok) {
-    return { status: "error", stage: "decode", error: decode.error };
+  // ---- Step 2: get vehicle specs ------------------------------------------
+  // If the caller already knows year+make+model (the ERP does — it stored
+  // them the first time the VIN was decoded), skip NHTSA entirely and use
+  // that data. NHTSA's check-digit validation rejects some real VINs
+  // (ErrorCode 1) and blocking a publish over that would be silly when we
+  // already have what we need. If those fields aren't provided, fall back
+  // to the NHTSA decode as before; and if NHTSA fails but we have any
+  // year/make/model at all, use that instead of hard-erroring.
+  let decoded;
+  const hasCallerSpecs = input.year && input.make && input.model;
+  if (hasCallerSpecs) {
+    decoded = callerSpecsToDecoded(input);
+  } else {
+    const decode = await decodeVin(vin);
+    if (decode.ok) {
+      decoded = decode.data;
+    } else if (input.year || input.make || input.model) {
+      decoded = callerSpecsToDecoded(input);
+    } else {
+      return { status: "error", stage: "decode", error: decode.error };
+    }
   }
 
   // ---- Step 3: build the Shopify payload (pure, in-memory) ------------------
   let payload;
   try {
-    payload = buildProduct({ decoded: decode.data, vin, listing: input });
+    payload = buildProduct({ decoded, vin, listing: input });
   } catch (buildError) {
     // Defensive: building is pure and shouldn't throw, but if a weird input
     // slips through we still return a clean error instead of crashing.
@@ -80,7 +101,16 @@ export async function createCarListing(input = {}) {
     adminUrl: created.adminUrl,
     storefrontUrl: created.storefrontUrl,
     title: payload.product.title,
-    decoded: decode.data, // handy for logging/auditing what NHTSA returned
+    decoded,
+  };
+}
+
+function callerSpecsToDecoded(input) {
+  return {
+    ModelYear: input.year != null ? String(input.year) : "",
+    Make: input.make ?? "",
+    Model: input.model ?? "",
+    Trim: input.trim ?? "",
   };
 }
 

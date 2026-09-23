@@ -59,6 +59,14 @@ export async function publishVehicleAction(formData: FormData) {
     photoUrls: photos,
     notes: shopifyNotes,
     status,
+    // Send the specs we already have on the row so we don't have to
+    // round-trip through NHTSA at publish time. NHTSA's check-digit
+    // validation rejects some real-world VINs (ErrorCode 1) and would
+    // otherwise block the publish for cars we know are legitimate.
+    year: v!.year ?? undefined,
+    make: v!.make ?? undefined,
+    model: v!.model ?? undefined,
+    trim: v!.trim ?? undefined,
   });
 
   if (result.status === "error") {
