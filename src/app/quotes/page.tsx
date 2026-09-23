@@ -131,11 +131,11 @@ export default async function QuotesPage({
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New quote
         </h3>
-        <form action={createQuote} className="flex gap-3 items-end">
+        <form action={createQuote} className="flex flex-wrap gap-3 items-end">
           <select
             name="customerId"
             defaultValue=""
-            className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            className="flex-1 min-w-[12rem] bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           >
             <option value="">— Customer (optional) —</option>
             {customerRows.map((c) => (
@@ -156,7 +156,7 @@ export default async function QuotesPage({
         <form method="get" className="flex flex-wrap items-center gap-2">
           {view === "archived" && <input type="hidden" name="view" value="archived" />}
           {tag && <input type="hidden" name="tag" value={tag} />}
-          <input name="q" defaultValue={q} placeholder="Search quote # or customer…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]" />
+          <input name="q" defaultValue={q} placeholder="Search quote # or customer…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[min(220px,100%)]" />
           <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
             <option value="">All statuses</option>
             {QUOTE_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}

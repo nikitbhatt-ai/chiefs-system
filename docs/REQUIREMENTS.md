@@ -3634,6 +3634,30 @@ no cost at all):
 - the editor shows per-line cost, `$75.00 × 4 = $300.00` for quantities, margin
   percentages, and the labelled internal rollup.
 
+## Mobile layout (user requirement, 2026-09-23)
+
+Sales and techs use the app from phone browsers. Every screen — especially
+Time Clock, Purchase Orders, Workflow and Quotes — must be fully usable and
+scrollable on a phone:
+
+- Nothing may run off the right edge unreachable. The page itself clips
+  sideways overflow (`html, body { overflow-x: hidden }`), so wide content
+  must either wrap/stack or scroll inside its own `.scroll-x` /
+  `overflow-x-auto` box.
+- Form fields never exceed their container (`select, input, textarea
+  { max-width: 100% }` in globals.css) — a `<select>` is otherwise as wide as
+  its longest option, which pushed the New PO / New quote "Create draft"
+  button off screen.
+- Button rows and create forms use `flex-wrap`; grid/flex children that hold
+  fields get `min-w-0`.
+- Wide 12-column line editors (PO lines, quote lines) sit in a `.scroll-x`
+  box with a fixed min width, so they swipe sideways like a spreadsheet
+  instead of crushing each field.
+- Anything driven by HTML5 drag-and-drop needs a touch alternative (phones
+  have no HTML5 DnD): workflow cards have a "Move to…" menu that calls the
+  same endpoint as a drop.
+- Nav dropdowns shift left to stay on screen.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

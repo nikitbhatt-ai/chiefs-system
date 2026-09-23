@@ -130,7 +130,7 @@ export default async function QuotePage({
     >
       <QuoteTabs quoteId={q.id} active="quote" />
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <a
           href={`/api/pdf/quotes/${q.id}`}
           target="_blank"

@@ -61,7 +61,7 @@ export default async function TimeClockPage() {
   return (
     <AppShell title="Time Clock" subtitle="Geo-verified clock-in · labor tracked per build">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-6">
+        <div className="space-y-6 min-w-0">
           <TimeClockPanel open={open} workOrders={woOptions} />
 
           <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
@@ -103,7 +103,7 @@ export default async function TimeClockPage() {
           </div>
         </div>
 
-        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden h-fit">
+        <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto h-fit min-w-0">
           <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
             Labor per build (closed shifts)
           </div>

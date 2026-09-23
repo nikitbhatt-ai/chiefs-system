@@ -153,7 +153,7 @@ export default async function POPage({
 
   return (
     <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${poStatusLabel(po.status)}`}>
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         {labelItems ? (
           // One label per unit ordered, for stock that arrives without a barcode.
           <a
