@@ -14,6 +14,7 @@ import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline, stageLabel, type DealStage } from "@/lib/pipelines";
 import { notify } from "@/lib/notifications";
 import { loadStageMapping, mapCrmToWorkflow, mapWorkflowToCrm, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
+import { nextDocNumber, workOrderNumberForQuote } from "@/lib/docNumbers";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -95,7 +96,14 @@ export async function maybePromoteWonDeal(
     let workOrderId: string | null = null;
     const [existingWo] = await tx.select().from(workOrders).where(eq(workOrders.quoteId, quoteId)).limit(1).for("update");
     if (!existingWo) {
-      const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+      // The work order carries its quote's number, so quote / invoice /
+      // work order all read as one job.
+      const [qForNumber] = await tx
+        .select({ quoteNumber: quotes.quoteNumber })
+        .from(quotes)
+        .where(eq(quotes.id, quoteId))
+        .limit(1);
+      const woNumber = await workOrderNumberForQuote(qForNumber?.quoteNumber, tx);
       const [wo] = await tx
         .insert(workOrders)
         .values({
@@ -262,13 +270,15 @@ export async function syncDealToWorkflow(
       });
       return { ok: false, reason: "no_target" };
     }
-    const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+    // Look the quote up first: the work order takes its number so the job
+    // reads the same across its documents.
     const [q] = await db
       .select()
       .from(quotes)
       .where(eq(quotes.dealId, dealId))
       .orderBy(desc(quotes.updatedAt))
       .limit(1);
+    const woNumber = await workOrderNumberForQuote(q?.quoteNumber);
     const [inserted] = await db
       .insert(workOrders)
       .values({

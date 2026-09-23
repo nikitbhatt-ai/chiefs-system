@@ -13,6 +13,7 @@ import { auth } from "@/auth";
 import { fmtDateTime } from "@/lib/datetime";
 import { poStatusLabel, poStatusColor, PO_MANUAL_STATUSES } from "@/lib/poStatus";
 import { SubmitButton } from "@/components/SubmitButton";
+import { nextDocNumber } from "@/lib/docNumbers";
 
 // Statuses offered in the list filter, in workflow order.
 const PO_STATUSES = ["pending", "ordered", "partially_received", "fulfilled"];
@@ -22,7 +23,7 @@ async function createPO(formData: FormData) {
   const vendorId = String(formData.get("vendorId") ?? "") || null;
   const statusRaw = String(formData.get("status") ?? "pending");
   const status = statusRaw === "ordered" ? "ordered" : "pending";
-  const poNumber = `PO-${Date.now().toString().slice(-7)}`;
+  const poNumber = await nextDocNumber("purchaseOrder");
   const [row] = await db
     .insert(purchaseOrders)
     .values({ poNumber, vendorId, status, lineItems: [] })

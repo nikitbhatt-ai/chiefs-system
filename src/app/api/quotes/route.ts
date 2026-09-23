@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { quotes } from "@/db/schema";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
+import { nextDocNumber } from "@/lib/docNumbers";
 
 export async function GET() {
   const session = await auth();
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
-  const quoteNumber = body.quoteNumber ?? `Q-${Date.now().toString().slice(-7)}`;
+  const quoteNumber = body.quoteNumber ?? (await nextDocNumber("quote"));
   const [row] = await db
     .insert(quotes)
     .values({
