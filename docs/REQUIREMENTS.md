@@ -3655,7 +3655,8 @@ scrollable on a phone:
   instead of crushing each field.
 - Anything driven by HTML5 drag-and-drop needs a touch alternative (phones
   have no HTML5 DnD): workflow cards have a "Move to…" menu that calls the
-  same endpoint as a drop.
+  same endpoint as a drop, and Pipeline (kanban) cards have a "Move to…"
+  bucket menu that runs the same move (override/reason prompts included).
 - Nav dropdowns shift left to stay on screen.
 
 ## Notes on building order

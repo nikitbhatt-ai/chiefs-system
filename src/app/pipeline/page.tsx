@@ -91,7 +91,7 @@ export default async function PipelinePage() {
   const customerOptions = customerRows.map((c) => ({ id: c.id, name: c.name }));
 
   return (
-    <AppShell title="Pipeline" subtitle="Kanban across the 7 deal-flow buckets">
+    <AppShell title="Pipeline" subtitle="Kanban across the 7 deal-flow buckets — drag cards, or use Move on a phone">
       <KanbanBoard
         buckets={PIPELINE_BUCKETS}
         cards={cards}
