@@ -12,6 +12,12 @@ export type POLine = {
   unitCost: number;
 };
 
+export type POFeeLine = {
+  description: string;
+  amount: number;
+  kind: "freight" | "other";
+};
+
 export type PurchaseOrderData = {
   id: string;
   poNumber: string | null;
@@ -26,6 +32,7 @@ export type PurchaseOrderData = {
   createdAt: Date;
   notes: string | null;
   lineItems: POLine[];
+  fees: POFeeLine[];
 };
 
 function money(n: number): string {
@@ -36,6 +43,14 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
   const styles = sharedStyles;
   const generated = new Date();
   const docNumber = data.poNumber ?? `PO-${data.id.slice(0, 8)}`;
+  // Fees are itemised under the line-item table so the vendor sees the same
+  // breakdown we do. Blank/zero rows never made it past the editor, but guard
+  // anyway so an old record can't print an empty "$0.00" row.
+  const fees = (data.fees ?? []).filter((f) => Number(f.amount) !== 0);
+  const partsSubtotal = (data.lineItems ?? []).reduce(
+    (s, l) => s + (l.quantity || 0) * (l.unitCost || 0),
+    0,
+  );
 
   return (
     <Document title={`PURCHASE ORDER ${docNumber}`} author={BRANDING.companyName} creator={BRANDING.companyName}>
@@ -116,6 +131,20 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
         </View>
 
         <View style={styles.totals}>
+          {fees.length > 0 ? (
+            <>
+              <View style={styles.totalRow}>
+                <Text>Parts subtotal</Text>
+                <Text>{money(partsSubtotal)}</Text>
+              </View>
+              {fees.map((f, idx) => (
+                <View key={idx} style={styles.totalRow}>
+                  <Text>{f.description?.trim() || (f.kind === "freight" ? "Shipping" : "Fee")}</Text>
+                  <Text>{money(f.amount || 0)}</Text>
+                </View>
+              ))}
+            </>
+          ) : null}
           <View style={styles.grandTotalRow}>
             <Text>Total</Text>
             <Text>{money(data.total)}</Text>

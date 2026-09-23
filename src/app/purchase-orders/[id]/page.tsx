@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { parts, purchaseOrders, vendors, type POLineItem } from "@/db/schema";
+import { parts, purchaseOrders, vendors, type POLineItem, type POFee } from "@/db/schema";
+import { FIXED_FREIGHT_LABEL, feeTotals, pruneFees } from "@/lib/poFees";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
 import { POScanReceive, type PartCodes, type ScanLine } from "./POScanReceive";
@@ -27,10 +28,24 @@ async function saveDraft(formData: FormData) {
     // not array position, and can build an idempotent receipt key.
     id: l.id ?? randomUUID(),
   }));
-  const total = lines.reduce(
+  // Fees: normalise, then drop the rows carrying nothing (a zero fixed row is
+  // re-synthesized by the editor, so it isn't worth storing). The fixed
+  // Freight/shipping row is always kind 'freight' whatever the client sent.
+  const fees = pruneFees(
+    (JSON.parse(String(formData.get("fees") ?? "[]")) as POFee[]).map((f) => ({
+      id: f.id ?? randomUUID(),
+      description: f.fixed ? FIXED_FREIGHT_LABEL : String(f.description ?? "").trim(),
+      amount: Number(f.amount) || 0,
+      kind: f.fixed || f.kind === "freight" ? ("freight" as const) : ("other" as const),
+      ...(f.fixed ? { fixed: true as const } : {}),
+    })),
+  );
+  const linesTotal = lines.reduce(
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,
   );
+  // The PO total is what the vendor will bill: parts plus every fee.
+  const total = linesTotal + feeTotals(fees).totalCents / 100;
   // Manual status (Pending/Ordered) — but never override an auto received/
   // fulfilled state from a plain save; those are driven by receiving.
   const [cur] = await db
@@ -50,6 +65,7 @@ async function saveDraft(formData: FormData) {
       notes,
       status: status as typeof purchaseOrders.$inferSelect.status,
       lineItems: lines as never,
+      fees: fees as never,
       total: total.toFixed(2),
       expectedAt: expectedAt ? new Date(expectedAt) : null,
       updatedAt: new Date(),
@@ -185,6 +201,7 @@ export default async function POPage({
         notes={po.notes ?? ""}
         expectedAt={po.expectedAt ? new Date(po.expectedAt).toISOString().slice(0, 10) : ""}
         initialLines={initial}
+        initialFees={(po.fees as POFee[]) ?? []}
         vendors={vendorRows}
         promos={activePromos}
         status={po.status}

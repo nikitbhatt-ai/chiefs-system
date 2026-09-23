@@ -20,7 +20,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
   const update: Record<string, unknown> = { updatedAt: new Date() };
-  for (const f of ["vendorId", "status", "lineItems", "notes", "expectedAt"]) {
+  for (const f of ["vendorId", "status", "lineItems", "fees", "notes", "expectedAt"]) {
     if (f in body) update[f] = body[f];
   }
   if ("total" in body) update.total = body.total != null ? String(body.total) : "0";
