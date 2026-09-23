@@ -95,7 +95,15 @@ export default async function PartDetailPage({
   const samples = [1, 5, 10, 25].filter((q) => q <= totalQty);
 
   return (
-    <AppShell title={`${p.sku}`} subtitle={p.name}>
+    <AppShell title={`${p.sku}`} subtitle={p.barcode ? `${p.name} · Barcode ${p.barcode}` : p.name}>
+      <div className="flex justify-end">
+        <a
+          href={`/inventory/labels?items=${p.id}:1`}
+          className="text-[11px] font-body bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold"
+        >
+          Print barcode label
+        </a>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Stat label="On hand" value={p.quantityOnHand.toString()} />
         <Stat

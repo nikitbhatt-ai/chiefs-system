@@ -16,7 +16,7 @@
 // and parts.cost follows it at 2dp (= ROUND(avg_cost, 2)). Both move at
 // RECEIPT, never at PO entry.
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   parts,
@@ -168,8 +168,21 @@ export type DrainResult = {
  */
 export async function drainLayersTx(
   tx: Tx,
-  opts: { partId: string; qty: number; workOrderId?: string | null },
+  opts: {
+    partId: string;
+    qty: number;
+    workOrderId?: string | null;
+    // Provenance for the issue rows (see inventory_issue.source). Default auto.
+    source?: "auto" | "scan";
+    reason?: string | null;
+    issuedBy?: string | null;
+    note?: string | null;
+  },
 ): Promise<DrainResult> {
+  // inventory_issue denormalizes the part SKU (NOT NULL in the live table).
+  const [pt] = await tx.select({ sku: parts.sku }).from(parts).where(eq(parts.id, opts.partId));
+  const sku = pt?.sku ?? "";
+
   const layers = await tx
     .select()
     .from(partReceipts)
@@ -190,10 +203,15 @@ export async function drainLayersTx(
       .where(eq(partReceipts.id, layer.id));
     await tx.insert(inventoryIssue).values({
       partId: opts.partId,
+      sku,
       workOrderId: opts.workOrderId ?? null,
       layerId: layer.id,
       qty: take,
       unitCost: layer.unitCost,
+      source: opts.source ?? "auto",
+      reason: opts.reason ?? null,
+      issuedBy: opts.issuedBy ?? null,
+      note: opts.note ?? null,
     });
     fifoCents += take * dollarsToCents(layer.unitCost);
     need -= take;
@@ -205,16 +223,19 @@ export async function drainLayersTx(
  * Reverse every issue this work order made for a part: add each slice's qty back
  * to its layer (capped at the layer's received qty) and delete the issue rows.
  * Returns units returned and their FIFO cents. Precise — it undoes exactly what
- * drainLayersTx recorded.
+ * drainLayersTx recorded. `source` limits it to one provenance (the build
+ * walk-back passes "auto" so scan-pulled parts stay pulled).
  */
 export async function reverseIssuesTx(
   tx: Tx,
-  opts: { partId: string; workOrderId: string },
+  opts: { partId: string; workOrderId: string; source?: "auto" | "scan" },
 ): Promise<{ given: number; fifoCents: number }> {
-  const issues = await tx
-    .select()
-    .from(inventoryIssue)
-    .where(and(eq(inventoryIssue.partId, opts.partId), eq(inventoryIssue.workOrderId, opts.workOrderId)));
+  const match = and(
+    eq(inventoryIssue.partId, opts.partId),
+    eq(inventoryIssue.workOrderId, opts.workOrderId),
+    opts.source ? eq(inventoryIssue.source, opts.source) : undefined,
+  );
+  const issues = await tx.select().from(inventoryIssue).where(match);
 
   let given = 0;
   let fifoCents = 0;
@@ -230,9 +251,49 @@ export async function reverseIssuesTx(
     given += iss.qty;
     fifoCents += iss.qty * dollarsToCents(iss.unitCost);
   }
-  await tx
-    .delete(inventoryIssue)
-    .where(and(eq(inventoryIssue.partId, opts.partId), eq(inventoryIssue.workOrderId, opts.workOrderId)));
+  await tx.delete(inventoryIssue).where(match);
+  return { given, fifoCents };
+}
+
+/**
+ * Return up to `qty` units of a part a work order was issued (a scan return:
+ * unused or wrong part brought back to the shelf). Undoes issue slices newest
+ * first — scan-pulled slices before auto-consumed ones — refilling each slice's
+ * layer, shrinking or deleting the slice. Returns units actually returned (≤ qty;
+ * you can't return more than the job was issued) and their FIFO cents. Does NOT
+ * touch parts.quantity_on_hand or the ledger — the caller owns those.
+ */
+export async function returnIssuedTx(
+  tx: Tx,
+  opts: { partId: string; workOrderId: string; qty: number },
+): Promise<{ given: number; fifoCents: number }> {
+  const issues = await tx
+    .select()
+    .from(inventoryIssue)
+    .where(and(eq(inventoryIssue.partId, opts.partId), eq(inventoryIssue.workOrderId, opts.workOrderId)))
+    .orderBy(sql`CASE WHEN ${inventoryIssue.source} = 'scan' THEN 0 ELSE 1 END`, desc(inventoryIssue.issuedAt))
+    .for("update");
+
+  let need = Math.max(0, Math.trunc(opts.qty));
+  let given = 0;
+  let fifoCents = 0;
+  for (const iss of issues) {
+    if (need <= 0) break;
+    const back = Math.min(need, iss.qty);
+    if (iss.layerId) {
+      await tx
+        .update(partReceipts)
+        .set({
+          quantityRemaining: sql`LEAST(${partReceipts.quantityReceived}, ${partReceipts.quantityRemaining} + ${back})`,
+        })
+        .where(eq(partReceipts.id, iss.layerId));
+    }
+    if (back === iss.qty) await tx.delete(inventoryIssue).where(eq(inventoryIssue.id, iss.id));
+    else await tx.update(inventoryIssue).set({ qty: iss.qty - back }).where(eq(inventoryIssue.id, iss.id));
+    given += back;
+    fifoCents += back * dollarsToCents(iss.unitCost);
+    need -= back;
+  }
   return { given, fifoCents };
 }
 

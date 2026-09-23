@@ -14,7 +14,6 @@ import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline, stageLabel, type DealStage } from "@/lib/pipelines";
 import { notify } from "@/lib/notifications";
 import { loadStageMapping, mapCrmToWorkflow, mapWorkflowToCrm, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
-import { reserveForWorkOrderTx } from "@/lib/reservations";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -117,9 +116,10 @@ export async function maybePromoteWonDeal(
       workOrderId = existingWo.id;
     }
 
-    // Reservation hook (Phase 5): entering `confirmed` claims the build's parts
-    // against on-hand. Idempotent — safe if the deal re-enters Won.
-    if (workOrderId) await reserveForWorkOrderTx(tx, workOrderId);
+    // Inventory policy (owner decision): a build takes no stock until it reaches
+    // In Progress, so promotion to `confirmed` does NOT reserve parts. Physical
+    // deduction happens later, on the in_progress crossing, via the
+    // workflow-stage path (consumeWorkOrderParts).
 
     return { ok: true, promotedQuoteId: quoteId, createdWorkOrderId, workOrderId };
   });

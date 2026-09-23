@@ -20,8 +20,12 @@ export async function GET(
   const url = new URL(req.url);
   const variant = url.searchParams.get("variant") === "invoice" ? "invoice" : "quote";
   const recordType = variant === "invoice" ? "invoice" : "quote";
+  // ?internal=1 renders the sales team's copy, with our cost and margin on
+  // every line. It is gated behind the same `auth()` check as the rest of this
+  // route, so it is never reachable by a customer following a document link.
+  const internal = url.searchParams.get("internal") === "1";
 
-  const result = await renderRecordPdf(recordType, id);
+  const result = await renderRecordPdf(recordType, id, { internal });
   if (!result) return NextResponse.json({ error: "not found" }, { status: 404 });
 
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 type NavItem = { href: string; label: string; roles?: readonly string[] };
 type NavGroup = { label: string; href?: string; children?: NavItem[]; roles?: readonly string[] };
@@ -27,6 +27,8 @@ const NAV: NavGroup[] = [
       { href: "/work-orders", label: "Work Orders" },
       { href: "/vehicles", label: "Vehicles" },
       { href: "/inventory", label: "Inventory" },
+      { href: "/inventory/pull", label: "Pull from Stock (scan)" },
+      { href: "/inventory/labels", label: "Barcode Labels" },
       { href: "/packages", label: "Packages" },
       { href: "/packages/import-template", label: "Import Package Template" },
       { href: "/purchase-orders", label: "Purchase Orders" },
@@ -76,6 +78,8 @@ export function TopNav({ role }: { role?: string | null }) {
   const pathname = usePathname() || "/";
   const [openIdx, setOpenIdx] = useState<number | null>(null);
   const navRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [menuShift, setMenuShift] = useState(0);
 
   // Filter the nav to what this role may see: drop role-gated items, then drop
   // any group left with no visible children.
@@ -88,6 +92,22 @@ export function TopNav({ role }: { role?: string | null }) {
     .filter((group) => !group.children || group.children.length > 0);
 
   useEffect(() => { setOpenIdx(null); }, [pathname]);
+
+  // On a phone a menu opened near the right edge (Admin, Operations) ran past
+  // the screen, and the page clips sideways overflow — so its right half was
+  // unreachable. Measure the open menu and slide it left just enough to fit.
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (openIdx === null || !el) {
+      setMenuShift(0);
+      return;
+    }
+    const margin = 8;
+    const rect = el.getBoundingClientRect();
+    const naturalLeft = rect.left - menuShift;
+    const overflow = naturalLeft + rect.width - (window.innerWidth - margin);
+    setMenuShift(overflow > 0 ? -Math.min(overflow, Math.max(0, naturalLeft - margin)) : 0);
+  }, [openIdx]);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
@@ -129,7 +149,7 @@ export function TopNav({ role }: { role?: string | null }) {
                 </svg>
               </button>
               {isOpen ? (
-                <div role="menu" className="absolute left-0 top-full mt-0 z-50 min-w-[180px] bg-zinc-950 border border-white/10 rounded-md shadow-lg py-1">
+                <div ref={menuRef} role="menu" style={{ transform: menuShift ? `translateX(${menuShift}px)` : undefined }} className="absolute left-0 top-full mt-0 z-50 min-w-[180px] max-w-[calc(100vw-1rem)] bg-zinc-950 border border-white/10 rounded-md shadow-lg py-1">
                   {group.children.map((child) => {
                     const childActive = isActive(pathname, child.href);
                     return (<Link key={child.href} href={child.href} role="menuitem" className={`block px-3 py-2 text-xs font-body transition-colors ${childActive ? "text-white bg-white/5" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}>{child.label}</Link>);

@@ -215,6 +215,26 @@ body {
   overflow-x: hidden;
 }
 
+/* A <select> is as wide as its LONGEST option, so one long vendor or customer
+   name made the "New PO" / "New quote" forms wider than a phone — and because
+   the page clips sideways overflow (above), the Create button past the edge
+   became unreachable. Capping every field at its container's width lets it
+   shrink instead (the browser ellipsizes the chosen option). A percentage
+   max-width also drops a select's min-content contribution to zero, so it
+   no longer props open a flex row or grid column either. */
+select,
+input,
+textarea {
+  max-width: 100%;
+}
+
+/* Swipe-scrolled rows (workflow board, wide line-item editors) keep the swipe
+   inside themselves instead of triggering the browser's back gesture. */
+.scroll-x {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
 /* Syne is a VARIABLE font with a 400–800 weight axis, and its glyphs widen
    sharply along it — measured at the same size, weight 780 renders ~35% wider
    than 700 ("Chiefs Pursuit Surplus" 332px vs 246px). So the app-wide weight

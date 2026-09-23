@@ -1233,6 +1233,143 @@ ALTER TYPE purchase_order_status ADD VALUE IF NOT EXISTS 'fulfilled';
       subtraction, work-order cross-PO stock math, and the PO PDF RECEIVED
       watermark.
 
+## Barcode scanning — Phase 1 (added 2026-09-22)
+
+Warehouse scans with a USB/Bluetooth scanner in **keyboard-wedge (HID)**
+mode — the scanner "types" the code then Enter, so no drivers — or with a
+**phone/tablet camera** (`@zxing/browser`, loaded only when the camera
+opens). Recommended test hardware: a 2D imager (e.g. Zebra DS2208 corded /
+DS2278 cordless, Honeywell Voyager 1470g/1472g) with Enter suffix on. The
+user asked that **PO receiving be central**: scanning what came in is
+compared against the PO before anything is received.
+
+**Schema (run in Neon's SQL Editor BEFORE deploying — every parts query
+selects this column):**
+
+```sql
+ALTER TABLE parts ADD COLUMN IF NOT EXISTS barcode text;
+CREATE INDEX IF NOT EXISTS parts_barcode_idx ON parts (barcode);
+```
+
+- [x] `parts.barcode` — the code on the box (vendor UPC/EAN). Not unique
+      (two SKUs may share a UPC; the scan picker lists both), but linking
+      from a scan refuses a barcode already on another part (409).
+- [x] **Scan lookup** `GET /api/scan?code=` (`src/lib/scan.ts`): exact,
+      case-insensitive match on part barcode / SKU / mfg part #, vehicle
+      VIN, and PO number. Tries alternate spellings of the same label
+      (UPC-A ↔ EAN-13 leading 0, Code 39 VIN "I" prefix) and strips scanner
+      control characters (`src/lib/scanCodes.ts`, client-safe).
+- [x] **Header Scan button** (`ScanButton`, every AppShell page): dialog
+      with an auto-focused box + "Use camera". One match → opens it; several
+      → pick; none → link the barcode to an existing part (saved, so it's
+      recognized next time) or "Create new part" (`/inventory?barcode=`
+      prefills the add form).
+- [x] **Scan from anywhere**: a wedge scan with no text box focused (burst
+      of keys <50 ms apart, ≥4 chars, Enter) opens the lookup. Pages can
+      claim scans instead via `src/components/scanCapture.ts`.
+- [x] **Scan to receive on the PO page** (`POScanReceive`): "Start
+      scanning" → each scan is matched to a PO line (part barcode / SKU /
+      mfg #) and counted, with a beep/vibrate. Per line: Ordered · Already
+      in · Scanned now (±, editable) · status (✓ matches / Short N / Over N /
+      nothing scanned). "Qty per scan" for cases. Flags **over**, **not on
+      this PO** (a known part — set aside), and **unknown barcode** (link it
+      to a PO line → saved on the part). Camera runs continuously (same code
+      ignored 1.5 s). Progress survives a refresh (localStorage, per PO).
+      "Receive scanned items" confirms the discrepancies, then posts through
+      the existing `receivePO` action (capped at what's open, so overs are
+      never received) and appends a stamped summary (received / short /
+      over / not on PO, with user + UTC time) to the PO notes. The manual
+      receive form stays for lines without a linked part.
+- [x] Barcode field on part add/edit forms and the part detail header;
+      CSV import accepts a `barcode` / `upc` / `ean` / `gtin` column (only
+      overwrites when the sheet has a value).
+
+### Scan parts OUT — pick to a job, return, pull without a job (added 2026-09-22)
+
+User asked for scanning to "work both ways": picked parts are scanned out
+of inventory. Owner decisions: **scan deducts immediately + In Progress is a
+safety net**, and **pulls without a work order are allowed with a reason**.
+
+**Schema (run in Neon's SQL Editor BEFORE deploying — every issue insert
+writes these columns):**
+
+```sql
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS source text NOT NULL DEFAULT 'auto';
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS reason text;
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS issued_by uuid REFERENCES users(id);
+ALTER TABLE inventory_issue ADD COLUMN IF NOT EXISTS note text;
+INSERT INTO gl_accounts (code, name, type, report_group, normal_balance) VALUES
+  ('5910', 'Inventory Shrinkage & Write-offs', 'cogs', 'cogs_other', 'debit')
+ON CONFLICT (code) DO NOTHING;
+```
+
+- [x] `inventory_issue.source` — `auto` (In Progress consumption, legacy and
+      override pulls; existing rows default to this) vs `scan` (warehouse
+      scan-pull). Plus `reason`, `issued_by`, `note`.
+- [x] **Work-order page "Scan parts out"** (`ScanPullPanel`): pick list of
+      the estimate's parts — Needs · Pulled · Scanning · status (still to
+      pick / ✓ all picked / more than needed / extra). Scans off the list are
+      allowed as extras (flagged). **Return to stock** mode puts unused/wrong
+      parts back (can't return more than the job was issued). Camera,
+      wedge-scan capture, qty-per-scan, unknown-barcode linking, localStorage
+      progress, same as PO receive.
+- [x] **In Progress safety net**: `consumeWorkOrderParts` issues only the
+      quote quantity beyond what is already issued to the job, so scanned
+      parts are never double-deducted and a forgotten scan is still covered.
+- [x] **Walk-back** (`restoreWorkOrderParts`) reverses only `auto` slices —
+      scanned parts physically left the shelf and return only via a scan
+      return. The legacy quote-refill fallback runs only when the job has no
+      issue rows at all (so an all-scanned job never gets refilled).
+- [x] **`/inventory/pull` "Pull from stock"** (nav: Operations → Pull from
+      Stock; button on /inventory): no work order, reason required —
+      Shop use → 6170, Damaged/scrapped → 5910 (new), Counter sale → 5100
+      (still invoice the customer). Dr account / Cr 1200 Inventory.
+- [x] `POST /api/inventory/pull` → `pullStock` in `src/lib/inventory.ts`: one
+      transaction, locks the work order (can't race In Progress). Pull drains
+      FIFO layers + on-hand (floored at 0, lenient — the part is in hand; a
+      shortfall is reported as "check this part's count"), posts Dr WIP / Cr
+      Inventory for a job. Return uses `returnIssuedTx` (newest, scanned
+      slices first), Dr Inventory / Cr WIP. Reorder-point check after pulls.
+- Verified against a throwaway local Postgres: scan-pull → In Progress →
+  walk-back → re-consume → over-return → no-WO pulls; on-hand, FIFO layers,
+  WIP/5910 balances and debits = credits all as expected.
+
+### Deferred (next phases)
+
+- Undo for a no-work-order pull; a per-part "movement history" view of
+  scan pulls/returns (rows are in `inventory_issue`).
+- Bin/shelf location labels, and a PO-number barcode on the PO PDF so
+  scanning the paperwork opens the PO.
+- Structured receiving-discrepancy records (today: PO notes) + vendor
+  claim workflow; cycle counts by scanning a bin.
+
+## Barcode label generator (added 2026-09-22)
+
+For products with no barcode. The user asked for a barcode generator. **No schema change.**
+
+- [x] Labels encode the part's **SKU** as **Code 128** (server-rendered SVG via
+      `bwip-js/node`, `src/lib/barcodeSvg.ts`). No new numbers: SKUs are
+      unique and the scan lookup already matches SKU exactly, so a printed
+      label scans to its part everywhere (Scan button, PO receive, work-order
+      pulls, pull from stock). A part with a vendor UPC can still get a label.
+- [x] **`/inventory/labels` builder** (nav: Operations → Barcode Labels;
+      button on /inventory): pick parts + copies, choose label stock, "skip N
+      used spots" for a partly used sheet. "Parts without a barcode" prints
+      one label for every active part with no box barcode (optionally one
+      category).
+- [x] **`/inventory/labels/print`** print view (no app chrome): `?items=id:qty,…`
+      or `?missing=1[&category=]`, `?format=`, `?skip=`. Formats
+      (`src/lib/labels.ts`): Avery 5160 Letter sheet (30/page, any office
+      printer), thermal 2"×1", thermal 2¼"×1¼", DYMO 30252 — thermal formats
+      print one label per page (@page sized to the label). Label = part name,
+      barcode, SKU text; side padding is the scanner quiet zone. Tells the
+      user to print at 100% / no margins. Capped at 1,500 labels per print.
+- [x] Shortcuts: **Print barcode label** on the part page; **Print labels for
+      this PO** on the PO page (one per unit ordered, for stock that arrives
+      unlabeled).
+- Verified: rendered labels in all four formats decode back to the exact SKU
+  with zxing (the phone-camera reader), including a SKU with "/".
+
 ## Procurement / lead-time management (PR 19)
 
 Procurement plans use a per-part `lead_time_days` and a per-WO target
@@ -1731,6 +1868,14 @@ guarded function.
   `moveStage` server action was removed — it duplicated the logic, ran
   no CRM sync, and failed silently (which read to users as the move
   "reverting"). The endpoint returns typed 400s the UI surfaces.
+- [x] **No stock effect before In Progress (owner policy, 2026-09).** A build
+  in `estimate` / `confirmed` / `awaiting_parts` / `next_in_line` takes nothing
+  out of inventory — those columns are scheduling only. Parts leave on-hand only
+  when the build reaches `in_progress` (or beyond) via `consumeWorkOrderParts`,
+  and come back if it's dragged back before `in_progress`. The workflow-stage
+  path and `maybePromoteWonDeal` therefore do **not** create reservations. This
+  also means a card move never touches the `inventory_reservation` table, so a
+  stage move can't fail on that table being absent (the original drag bug).
 - [x] **Approval gate before a build can start.** The
   `POST /api/quotes/[id]/workflow-stage` endpoint rejects any move to
   `in_progress` (or a later stage) unless `quotes.status` is `approved`
@@ -2500,6 +2645,14 @@ Phases (one at a time, approval between each):
       receipt, in the receive transaction, never at PO entry. On
       quote→invoice conversion, snapshot `avg_cost` onto the line items so the
       internal margin view reflects cost at sale, not today's average.
+  - **Drift fix 2026-09:** the live `inventory_issue` table carried a stray
+    `sku NOT NULL` column absent from `schema.ts` and this migration, so every
+    consumption insert (a build entering In Progress) failed with
+    `null value in column "sku" … violates not-null constraint`. Resolved by
+    adding the denormalized `sku` to `inventoryIssue` in `schema.ts` and
+    populating it in `drainLayersTx` (from `parts.sku`); the CREATE above now
+    includes it, with an idempotent backfill for older DBs. No production DB
+    action was required — the column already existed there.
 - [x] **Phase 3 — `vendor_promo` / `vendor_promo_line` + the allocation
       engine.** Pure, deterministic, unit-tested; rounding plug ties the
       allocation to the package price exactly; refuses any promo whose
@@ -2509,11 +2662,17 @@ Phases (one at a time, approval between each):
       partial receipt needs a cost already on the line). Individual POs
       never call it. PO lines stayed jsonb (extended, not promoted to a
       table — see PROMO_PACKAGES.md decision #5).
-- [x] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservations
-      fire when a work order enters `confirmed` (customer PO in hand, build
-      committed to the shop) — one `reserveForWorkOrder` called from
-      `maybePromoteWonDeal` and the `/workflow` board path. Every picking
-      screen reads available, never raw on-hand.
+- [x] **Phase 5 — `inventory_reservation` + available-to-pull.** Reservation
+      infrastructure (`src/lib/reservations.ts`, `inventory_reservation` table)
+      exists and available = on-hand − active reserved is read on the part page.
+      **Superseded 2026-09 by the "no stock before In Progress" owner policy
+      (below):** the workflow-stage path and `maybePromoteWonDeal` no longer
+      call `reserveForWorkOrder`, so nothing reserves at `confirmed`; reserved
+      is effectively always 0 and available == on-hand. The reservation reads
+      degrade to 0 when the `inventory_reservation` table has not been migrated
+      (`isMissingReservationTable`), so the part-detail and backfill pages never
+      crash on a not-yet-created table. Re-enabling soft-reserve later is a
+      matter of restoring those two write calls + running `promo_phase5.sql`.
 - [x] **Phase 6 — Reorder points, reserved-stock override, auto-backfill.**
       Pulling reserved stock requires an override that logs who/why and
       raises its own replacement requisition.
@@ -3327,6 +3486,225 @@ sell price. That says so plainly rather than blaming the bundle price.
 One caution worth recording: an earlier version of the quote check reported
 "PASSED" while running **zero** assertions, because the seed had no quotes to
 open. A check that cannot fail is not a check — assert that the fixture exists.
+
+## Invoice document format (user requirement, 2026-08-20)
+
+The user supplied a Shopmonkey work order (`Estimate #1938 — City of Navasota,
+2026 Chevrolet Silverado 1500 WT`) and asked that **downloaded invoices be
+formatted the same way**, naming six things they must carry:
+
+1. the vehicle info connected to the build
+2. the customer name
+3. contact info
+4. **discount percentage** by line item
+5. the Chiefs logo in the top left
+6. the assigned sales person
+
+Note what the reference document is and is not: it is a *work order*, with
+columns `Description | QTY | Part # | Vendor | Status` and **no prices at all**.
+So "the same way" means its **structure** — masthead, party blocks, grouped
+sections with their own table headers, running footer — with the money columns
+an invoice needs. `Vendor` and `Status` are deliberately NOT carried onto a
+customer invoice: they expose sourcing. `Part #` is, because a customer can
+cross-reference it.
+
+Invoices are converted quotes (no separate table — see the accounting section),
+so this is `templates/quote.tsx` plus `/quotes/[id]/print`, and both variants of
+the template get the new masthead.
+
+### What was built
+
+- **Running masthead**, repeated on every page (`fixed` + absolute, with
+  `pageWithRunningHeader` reserving 132pt): logo top-left over the company
+  address / phone / email / website, and on the right the document title,
+  number, date, and `Sales rep: <name>`. A three-page invoice identifies itself
+  on page 3, which the reference document does too.
+- **Bill to / Vehicle side by side.** Customer name, address, **phone**, email
+  (phone was in `customers` all along and simply never reached the PDF).
+  Vehicle is year/make/model/trim, VIN, unit #, colour, mileage.
+- **`Disc %` per line item**, computed from the dollars actually coming off
+  (`lineDiscount / lineGross`), so a **bundle-allocated promo line shows a real
+  percentage** rather than a blank where its stored `discount` is zero. A flat
+  `$125` off an `$850` line prints `14.71%`.
+- **`Part #` column** from `parts.mfg_part_number`, falling back to `parts.sku`
+  — the manufacturer's number is the one a customer can look up.
+- **`src/lib/quoteDocumentFacts.ts`** resolves customer contact, vehicle detail,
+  sales person and part numbers **once**, for both the PDF and the print view.
+  Two copies of these lookups is how an invoice ends up naming a different sales
+  rep than the screen — the same trap the discount arithmetic fell into before
+  it was consolidated.
+
+### Sales person and vehicle detail: where they come from
+
+Quotes have no rep of their own. The name resolves through the quote's deal:
+assigned user's display name → name → email, then the deal's free-text
+`sales_rep`, then **null** — an unassigned quote must not print somebody else's
+name. Colour and mileage come from the deal's linked `vehicles` row.
+
+**Engine size and transmission are on the reference document and are NOT
+printed**, because the app does not store them anywhere. A blank line beats an
+invented one on a document a customer signs. Adding them means new columns on
+`quotes` (or decoding more of the VIN response) — not done.
+
+### The logo — still needs the artwork
+
+There is **no Chiefs logo file anywhere in the repo**, and the reference PDF
+does not contain one either (its only images are Shopmonkey's own wordmark).
+`brandLogo()` / `brandLogoWebPath()` read `public/brand/chiefs-logo.png` (or
+`PDF_LOGO_PATH`) once and cache it; PNG or JPEG, roughly 4:1 landscape for the
+150×38pt slot. Until the file is dropped in, the header sets the company name as
+a wordmark so documents are never broken by a missing asset — they are just not
+branded yet.
+
+### Two defects the verification caught
+
+- **The totals block straddled a page break** — "Subtotal" on page 1, "Amount
+  due" on page 2. Fixed with `wrap={false}` on the totals view.
+- **`U+2212 MINUS SIGN` rendered as nothing.** The templates use standard-14
+  Helvetica with `/WinAnsiEncoding`, which has no U+2212; react-pdf emitted byte
+  `0x12` (undefined in that encoding), so the discount row printed
+  `Discount $530.00` with **no minus sign**. Replaced with ASCII hyphen in
+  `quote.tsx` and `upfit.tsx`. The check now scans for any byte undefined in
+  WinAnsi, so the whole class is caught rather than that one character.
+- Also: react-pdf hyphenates by default and printed `3M re-flective`. Disabled
+  via `Font.registerHyphenationCallback`.
+
+### Verified
+
+Against a seeded record on a **production** build — a converted quote for City
+of Navasota with a bundle-allocated promo group, a 10% line, a flat-$125 line,
+labor and a fee:
+
+- the downloaded PDF carries all six requested items, `Disc %` shows
+  `15.00 / 15.00 / 10.00 / 14.71`, the manufacturer part number prints, the
+  masthead and sales rep repeat on both pages, and
+  `$3,900.00 − $530.00 + $570.00 + $185.00 = $4,125.00` foots;
+- no character falls outside the font encoding;
+- no word is hyphenated mid-line;
+- the print view shows the same customer, vehicle, rep, percentages and grand
+  total as the PDF.
+
+One method note worth keeping: the first run of this check reported everything
+missing because the extractor only understood two-byte subset CIDs, while these
+documents use single-byte WinAnsi — it decoded 20 characters and would have
+reported a *pass* for every `contains` had the guard ("the PDF's text decoded")
+not been there. Assert that your extraction worked before trusting what it
+says about the content.
+
+## Internal cost on quotes and invoices (user requirement, 2026-09-22)
+
+> "i need the internal cost to show on every quote and invoice so that our sales
+> team knows what the internal avg cost is for each item"
+
+### Where it shows — and where it deliberately does not
+
+The stated purpose is for the **sales team** to know the cost. Printing it on the
+document that goes to the customer would hand them our margin, so the split is:
+
+| Surface | Internal cost? |
+| --- | --- |
+| Quote editor (`/quotes/[id]`) | **Yes** — per line, plus a quote-level rollup |
+| Internal copy PDF (`?internal=1`) | **Yes** — Avg cost + Margin columns |
+| Internal print view (`/print?internal=1`) | **Yes** |
+| Customer invoice / quote PDF | **No** |
+| Customer print view | **No** |
+
+The internal copy is reached from a distinct amber **"Internal copy (cost +
+margin)"** button next to the two customer downloads, is banner-marked
+`INTERNAL COPY — shows our cost and margin. Do not send to the customer.` on
+every page, and downloads as `Invoice_<no>_<date>_INTERNAL.pdf` — because what
+someone sees when attaching a file is the filename.
+
+Both internal surfaces sit behind the same auth as the rest of the app; neither
+is reachable from a customer-facing link.
+
+### Which cost, in what order
+
+`src/lib/lineCost.ts` owns this, shared by editor, print view and PDF:
+
+1. **A locked cost on the line wins.** That is a promo/package cost negotiated
+   for this build; today's moving average is not what we paid for it.
+2. Otherwise the part's **`avg_cost`** — the weighted-average basis job costing
+   uses, and what the request asked for.
+3. Otherwise any unlocked cost the line carries.
+4. Otherwise **null → renders `—`, never `$0.00`.** An uncosted part is not a
+   free part, and a rep must be able to tell the difference.
+
+Lines with no known cost are counted and declared (*"2 lines without a recorded
+average cost — excluded above"*) rather than silently treated as costing
+nothing, which would overstate margin.
+
+Margin is measured against **parts net only** — labor and fees have no part cost
+to compare against, and folding them in would flatter the number a rep
+negotiates on.
+
+Costs for parts picked during an edit are learned from the part-search response,
+so a freshly added line shows its margin immediately instead of reading `Cost —`
+until the quote is saved and reloaded.
+
+### The logo
+
+`public/brand/chiefs-logo.png` (800×270, from the user's 2000×676 artwork). The
+slot is 164×55pt, sized to the mark's ~2.96:1 ratio. `brandLogo()` inlines it as
+a data URI for react-pdf and caches it for the process; `brandLogoWebPath()`
+serves it to the print view. The wordmark fallback remains for anyone running
+without the file.
+
+### Three rendering defects found while verifying
+
+- **React-PDF inserts a hyphen wherever it breaks a word.** Letting it break a
+  part number turned `KIT-23S1-CC0713-OS` into `KIT-23S1--CC0713-OS` — a
+  corrupted value someone could order against. Hyphenation stays off; long codes
+  are wrapped explicitly by `splitCode()`, which breaks only after separators the
+  code already contains, so the pieces concatenate back to the original exactly.
+- **Part # overflowed into Qty** on the narrower internal layout before that fix.
+- **A bordered table split across a page break** left an empty box on one page
+  and "FEES & ADD-ONS" stranded at the foot of the other. Short sections
+  (≤12 rows) are now pinned with `wrap={false}`; longer ones still wrap, because
+  a `wrap={false}` block taller than a page cannot be laid out.
+
+### Verified
+
+`scripts`-free, against a seeded record on a **production** build whose costs are
+known exactly (locked 800 ×1, avg 75 ×4, avg 700 ×1 = $1,800, plus two lines with
+no cost at all):
+
+- the customer PDF and print view contain **no** cost, margin, banner, or any of
+  the figures $800 / $75 / $700 / $1,800;
+- the internal copy shows a locked promo cost **beating** the part average
+  ($800, not $1,000) and the average **beating** the catalogue cost ($75 not $70,
+  $700 not $600) — the $1,800 total proves it, since catalogue costs would give
+  $1,780;
+- parts margin = (subtotal − discount) − parts cost, to the cent;
+- uncosted lines render `—` and are declared;
+- no character falls outside the font encoding;
+- the editor shows per-line cost, `$75.00 × 4 = $300.00` for quantities, margin
+  percentages, and the labelled internal rollup.
+
+## Mobile layout (user requirement, 2026-09-23)
+
+Sales and techs use the app from phone browsers. Every screen — especially
+Time Clock, Purchase Orders, Workflow and Quotes — must be fully usable and
+scrollable on a phone:
+
+- Nothing may run off the right edge unreachable. The page itself clips
+  sideways overflow (`html, body { overflow-x: hidden }`), so wide content
+  must either wrap/stack or scroll inside its own `.scroll-x` /
+  `overflow-x-auto` box.
+- Form fields never exceed their container (`select, input, textarea
+  { max-width: 100% }` in globals.css) — a `<select>` is otherwise as wide as
+  its longest option, which pushed the New PO / New quote "Create draft"
+  button off screen.
+- Button rows and create forms use `flex-wrap`; grid/flex children that hold
+  fields get `min-w-0`.
+- Wide 12-column line editors (PO lines, quote lines) sit in a `.scroll-x`
+  box with a fixed min width, so they swipe sideways like a spreadsheet
+  instead of crushing each field.
+- Anything driven by HTML5 drag-and-drop needs a touch alternative (phones
+  have no HTML5 DnD): workflow cards have a "Move to…" menu that calls the
+  same endpoint as a drop, and Pipeline (kanban) cards have a "Move to…"
+  bucket menu that runs the same move (override/reason prompts included).
+- Nav dropdowns shift left to stay on screen.
 
 ## Notes on building order
 

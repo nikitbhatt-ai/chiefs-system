@@ -21,10 +21,16 @@
 //   - Consumption is reversible: walking a build back restores the exact
 //     inventory_issue slices it drained (with a legacy fallback for work orders
 //     consumed before Phase 2, which have no issue rows).
+//   - Scan-pulls (pullStock, source = 'scan') take stock out as the warehouse
+//     picks. In Progress consumption is then a safety net: it issues only what
+//     the quote needs BEYOND what is already issued to the job, so nothing is
+//     double-counted and a forgotten scan is still covered. Walking a build back
+//     reverses only the automatic ('auto') slices; scanned parts come back only
+//     through a scan return.
 //   - PO receiving is idempotent under concurrency: the PO row is locked and
 //     re-read inside the transaction.
 
-import { asc, eq, sql } from "drizzle-orm";
+import { asc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   workOrders,
@@ -50,9 +56,12 @@ import {
   recordReceiptLayer,
   drainLayersTx,
   reverseIssuesTx,
+  returnIssuedTx,
   chargeCents,
   getCostingMethodTx,
 } from "@/lib/costing";
+import { postInventoryWriteOff } from "@/lib/inventoryLedger";
+import { pullReason } from "@/lib/pullReasons";
 
 type StockLine = { kind?: string; partId?: string; quantity?: number };
 
@@ -81,9 +90,10 @@ export type ConsumeResult = {
 
 // Idempotent, transactional consumption of a work order's quote parts. Locks the
 // work_orders row FOR UPDATE; if parts_consumed is already true this is a no-op.
-// Drains the oldest layers first (writing inventory_issue provenance rows),
-// decrements on-hand by what actually left the layers, and charges WIP at the
-// active costing method.
+// Issues only the shortfall beyond what is already issued to the job (scan-
+// pulls), drains the oldest layers first (writing inventory_issue provenance
+// rows), decrements on-hand by what actually left the layers, and charges WIP
+// at the active costing method.
 export async function consumeWorkOrderParts(workOrderId: string): Promise<ConsumeResult> {
   return db.transaction(async (tx) => {
     const [wo] = await tx
@@ -103,12 +113,17 @@ export async function consumeWorkOrderParts(workOrderId: string): Promise<Consum
       byPart = rollupPartQuantities(q?.lineItems);
     }
 
+    // Already issued to this job (warehouse scan-pulls) counts toward the BOM.
+    const already = await issuedByPartTx(tx, wo.id);
+
     const method = await getCostingMethodTx(tx);
     const shortages: { partId: string; shortBy: number }[] = [];
     // Cost charged to the job under the active method (avg by default, FIFO
     // otherwise). The layer drain preserves provenance regardless.
     let chargeTotalCents = 0;
-    for (const [partId, qty] of byPart) {
+    for (const [partId, needed] of byPart) {
+      const qty = needed - (already.get(partId) ?? 0);
+      if (qty <= 0) continue;
       const [p] = await tx.select({ avgCost: parts.avgCost }).from(parts).where(eq(parts.id, partId));
       const drain = await drainLayersTx(tx, { partId, qty, workOrderId: wo.id });
       if (drain.shortBy > 0) shortages.push({ partId, shortBy: drain.shortBy });
@@ -156,15 +171,18 @@ export async function restoreWorkOrderParts(workOrderId: string): Promise<{ rest
     let chargeTotalCents = 0;
 
     const issued = await tx
-      .selectDistinct({ partId: inventoryIssue.partId })
+      .selectDistinct({ partId: inventoryIssue.partId, source: inventoryIssue.source })
       .from(inventoryIssue)
       .where(eq(inventoryIssue.workOrderId, wo.id));
+    const autoPartIds = [...new Set(issued.filter((r) => r.source === "auto").map((r) => r.partId))];
 
     if (issued.length > 0) {
-      // Precise path: undo exactly what was issued.
-      for (const { partId } of issued) {
+      // Precise path: undo exactly what the automatic consumption issued. Scan-
+      // pulled slices stay — those parts physically left the shelf. (If every
+      // part was scan-pulled first, there is nothing automatic to undo.)
+      for (const partId of autoPartIds) {
         const [p] = await tx.select({ avgCost: parts.avgCost }).from(parts).where(eq(parts.id, partId));
-        const rev = await reverseIssuesTx(tx, { partId, workOrderId: wo.id });
+        const rev = await reverseIssuesTx(tx, { partId, workOrderId: wo.id, source: "auto" });
         chargeTotalCents += chargeCents(method, { qty: rev.given, fifoCents: rev.fifoCents, avgCost: p?.avgCost ?? null });
         await tx
           .update(parts)
@@ -354,4 +372,159 @@ export async function receivePurchaseOrder(
 
     return { ok: true, status: nextStatus, anyReceived: anyReceivedThisRound };
   });
+}
+
+// Units of each part currently issued to a work order (all provenances).
+async function issuedByPartTx(tx: Tx, workOrderId: string): Promise<Map<string, number>> {
+  const rows = await tx
+    .select({
+      partId: inventoryIssue.partId,
+      qty: sql<number>`COALESCE(SUM(${inventoryIssue.qty}), 0)`.mapWith(Number),
+    })
+    .from(inventoryIssue)
+    .where(eq(inventoryIssue.workOrderId, workOrderId))
+    .groupBy(inventoryIssue.partId);
+  return new Map(rows.map((r) => [r.partId, r.qty]));
+}
+
+/** issuedByPartTx outside a transaction — for the work-order scan panel. */
+export async function issuedByPartForWorkOrder(workOrderId: string): Promise<Map<string, number>> {
+  return db.transaction((tx) => issuedByPartTx(tx, workOrderId));
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+export type PullItemResult = {
+  partId: string;
+  sku: string;
+  requested: number;
+  // Units that actually moved (pull: left the layers; return: went back).
+  moved: number;
+  // Why moved < requested, if it is.
+  problem: string | null;
+};
+
+// Scan-pull / scan-return, the warehouse's two directions out of the stockroom:
+//   - pull + workOrderId: parts picked for a job → Dr WIP / Cr Inventory.
+//   - return + workOrderId: unused/wrong parts back to the shelf → reverse.
+//   - pull + reason (no work order): shop use / damaged / counter sale →
+//     Dr <reason's account> / Cr Inventory (src/lib/pullReasons.ts).
+// One transaction for the whole batch; the work-order row is locked so a scan
+// can't race the In Progress consumption. Lenient on short stock like the
+// consumption path: the physical part is in hand, so a pull takes what the
+// layers hold, floors on-hand at 0, and reports the gap (the count is off)
+// rather than refusing.
+export async function pullStock(input: {
+  mode: "pull" | "return";
+  workOrderId?: string | null;
+  reason?: string | null;
+  note?: string | null;
+  userId?: string | null;
+  items: { partId: string; qty: number }[];
+}): Promise<{ ok: true; results: PullItemResult[] } | { ok: false; error: string }> {
+  const items = input.items
+    .map((i) => ({ partId: i.partId, qty: Math.trunc(Number(i.qty) || 0) }))
+    .filter((i) => i.partId && i.qty > 0);
+  if (items.length === 0) return { ok: false, error: "Nothing to pull." };
+  const reason = input.workOrderId ? null : pullReason(input.reason);
+  if (!input.workOrderId) {
+    if (input.mode !== "pull") return { ok: false, error: "Returns must be against a work order." };
+    if (!reason) return { ok: false, error: "Pick a reason for pulling stock without a work order." };
+  }
+  const note = input.note?.trim().slice(0, 500) || null;
+
+  const out = await db.transaction(async (tx) => {
+    let woNumber: string | null = null;
+    if (input.workOrderId) {
+      const [wo] = await tx
+        .select({ id: workOrders.id, woNumber: workOrders.woNumber })
+        .from(workOrders)
+        .where(eq(workOrders.id, input.workOrderId))
+        .for("update");
+      if (!wo) return { ok: false as const, error: "Work order not found." };
+      woNumber = wo.woNumber;
+    }
+
+    const partRows = await tx
+      .select({ id: parts.id, sku: parts.sku, avgCost: parts.avgCost })
+      .from(parts)
+      .where(inArray(parts.id, items.map((i) => i.partId)))
+      .for("update");
+    const partById = new Map(partRows.map((p) => [p.id, p]));
+
+    const method = await getCostingMethodTx(tx);
+    let chargeTotalCents = 0;
+    const results: PullItemResult[] = [];
+    for (const it of items) {
+      const p = partById.get(it.partId);
+      if (!p) {
+        results.push({ partId: it.partId, sku: "?", requested: it.qty, moved: 0, problem: "Part not found." });
+        continue;
+      }
+      if (input.mode === "pull") {
+        const drain = await drainLayersTx(tx, {
+          partId: p.id,
+          qty: it.qty,
+          workOrderId: input.workOrderId ?? null,
+          source: "scan",
+          reason: reason?.key ?? null,
+          issuedBy: input.userId ?? null,
+          note,
+        });
+        await tx
+          .update(parts)
+          .set({ quantityOnHand: sql`GREATEST(0, ${parts.quantityOnHand} - ${it.qty})`, updatedAt: new Date() })
+          .where(eq(parts.id, p.id));
+        chargeTotalCents += chargeCents(method, { qty: drain.taken, fifoCents: drain.fifoCents, avgCost: p.avgCost });
+        results.push({
+          partId: p.id,
+          sku: p.sku,
+          requested: it.qty,
+          moved: it.qty,
+          problem:
+            drain.shortBy > 0
+              ? `Only ${drain.taken} of ${p.sku} had cost records, so ${drain.shortBy} came off on-hand at no cost — check this part's count.`
+              : null,
+        });
+      } else {
+        const back = await returnIssuedTx(tx, { partId: p.id, workOrderId: input.workOrderId!, qty: it.qty });
+        if (back.given > 0) {
+          await tx
+            .update(parts)
+            .set({ quantityOnHand: sql`${parts.quantityOnHand} + ${back.given}`, updatedAt: new Date() })
+            .where(eq(parts.id, p.id));
+        }
+        chargeTotalCents += chargeCents(method, { qty: back.given, fifoCents: back.fifoCents, avgCost: p.avgCost });
+        results.push({
+          partId: p.id,
+          sku: p.sku,
+          requested: it.qty,
+          moved: back.given,
+          problem:
+            back.given < it.qty
+              ? `Only ${back.given} of ${p.sku} were issued to this job, so only ${back.given} went back.`
+              : null,
+        });
+      }
+    }
+
+    if (input.workOrderId) {
+      const post = input.mode === "pull" ? postInventoryIssue : postInventoryRestore;
+      await post(tx, {
+        totalCents: chargeTotalCents,
+        workOrderId: input.workOrderId,
+        woNumber,
+        createdBy: input.userId ?? null,
+      });
+    } else if (reason) {
+      await postInventoryWriteOff(tx, {
+        totalCents: chargeTotalCents,
+        accountCode: reason.account,
+        memo: `Stock pulled — ${reason.label}${note ? ` (${note})` : ""}`,
+        createdBy: input.userId ?? null,
+      });
+    }
+    return { ok: true as const, results };
+  });
+  return out;
 }

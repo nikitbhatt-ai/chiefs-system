@@ -102,11 +102,11 @@ export default async function PurchaseOrdersPage({
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New PO
         </h3>
-        <form action={createPO} className="flex gap-3 items-end">
+        <form action={createPO} className="flex flex-wrap gap-3 items-end">
           <select
             name="vendorId"
             defaultValue=""
-            className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            className="w-full sm:w-auto sm:flex-1 min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           >
             <option value="">— Vendor (optional) —</option>
             {vendorRows.map((v) => (
@@ -119,7 +119,7 @@ export default async function PurchaseOrdersPage({
             name="status"
             defaultValue="pending"
             title="Received and Fulfilled are set automatically as parts are received"
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            className="flex-1 sm:flex-none min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           >
             {PO_MANUAL_STATUSES.map((s) => (
               <option key={s.value} value={s.value}>

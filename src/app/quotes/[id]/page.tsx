@@ -9,6 +9,7 @@ import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
 import { quoteTotals } from "@/lib/quoteTotals";
+import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
 export const dynamic = "force-dynamic";
 
@@ -118,6 +119,9 @@ export default async function QuotePage({
     .orderBy(customers.name);
 
   const initial = (q.lineItems as unknown as QuoteLine[]) ?? [];
+  // Internal average cost per part, so the editor can show cost and margin per
+  // line. Same resolver the documents use, so the numbers agree.
+  const { partCosts } = await quoteDocumentFacts(q);
 
   return (
     <AppShell
@@ -126,7 +130,7 @@ export default async function QuotePage({
     >
       <QuoteTabs quoteId={q.id} active="quote" />
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <a
           href={`/api/pdf/quotes/${q.id}`}
           target="_blank"
@@ -153,6 +157,18 @@ export default async function QuotePage({
         >
           Open print view
         </a>
+        {/* The internal copy carries our cost and margin on every line. Styled
+            amber and labelled so it is never confused with the two customer
+            documents sitting next to it. */}
+        <a
+          href={`/api/pdf/quotes/${q.id}?internal=1${q.status === "converted" ? "&variant=invoice" : ""}`}
+          target="_blank"
+          rel="noopener"
+          title="Sales copy: shows our average cost and margin per line. Do not send to the customer."
+          className="text-[11px] font-body bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-md px-3 py-1.5"
+        >
+          Internal copy (cost + margin)
+        </a>
       </div>
 
       <QuoteWorkflowStrip
@@ -174,6 +190,7 @@ export default async function QuotePage({
         initialVehicleModel={q.vehicleModel ?? ""}
         initialVehicleTrim={q.vehicleTrim ?? ""}
         initialUnitNumber={q.unitNumber ?? ""}
+        partCosts={partCosts}
         action={saveQuote}
       />
     </AppShell>

@@ -120,7 +120,7 @@ export default async function WorkflowPage() {
   });
 
   return (
-    <AppShell title="Workflow" subtitle="Build pipeline — drag cards between stages">
+    <AppShell title="Workflow" subtitle="Build pipeline — drag cards between stages, or use Move on a phone">
       <WorkflowBoard stages={STAGES} cards={cards} />
     </AppShell>
   );

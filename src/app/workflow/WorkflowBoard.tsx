@@ -86,7 +86,9 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
           <button onClick={() => setError(null)} className="text-red-300 hover:text-red-100">dismiss</button>
         </div>
       )}
-      <div className="flex gap-3 overflow-x-auto pb-4">
+      {/* Swipe sideways through the stages on a phone; each column snaps into
+          place so a swipe lands on a stage instead of halfway between two. */}
+      <div className="scroll-x flex gap-3 pb-4 snap-x snap-mandatory md:snap-none">
         {stages.map((stage) => {
           const items = cardsByStage.get(stage.key) ?? [];
           const isHover = hoverStage === stage.key;
@@ -110,7 +112,7 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
                 setDraggingId(null);
                 if (id) moveTo(id, stage.key);
               }}
-              className={`min-w-[260px] w-[260px] rounded-lg flex-shrink-0 transition-colors border ${
+              className={`min-w-[260px] w-[260px] snap-start rounded-lg flex-shrink-0 transition-colors border ${
                 isHover
                   ? "bg-amber-500/10 border-amber-500/40"
                   : "bg-surface-2 border-white/5"
@@ -189,7 +191,22 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
                           <span className="text-[11px] font-body font-semibold text-green-400">
                             {fmtMoney(q.grandTotal) ?? "—"}
                           </span>
-                          <span className="text-[9px] uppercase tracking-wider text-zinc-600">drag to move</span>
+                          {/* Phones and tablets have no HTML5 drag-and-drop, so
+                              this is the touch way to move a card — same
+                              moveTo() and endpoint as a drop. */}
+                          <select
+                            aria-label="Move to stage"
+                            value={stage.key}
+                            onChange={(e) => moveTo(q.id, e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            className="text-[10px] font-body bg-black/40 border border-white/10 rounded px-1.5 py-1 text-zinc-300 max-w-[9.5rem]"
+                          >
+                            {stages.map((s) => (
+                              <option key={s.key} value={s.key}>
+                                {s.key === stage.key ? "Move to…" : `${s.index}. ${s.label}`}
+                              </option>
+                            ))}
+                          </select>
                         </div>
                       </div>
                     );
@@ -201,7 +218,7 @@ export function WorkflowBoard({ stages, cards: initialCards }: Props) {
         })}
       </div>
       <p className="text-[10px] text-zinc-600 font-body">
-        Drag a card to a different column to advance or back-step the build. Updates are server-side and trigger the CRM sync automatically.
+        Drag a card to a different column (or use its Move menu on a phone) to advance or back-step the build. Updates are server-side and trigger the CRM sync automatically.
       </p>
     </div>
   );

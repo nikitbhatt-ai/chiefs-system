@@ -1,9 +1,9 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { workOrders, customers, vehicles, quotes, users, qcChecklists, type QCItem } from "@/db/schema";
+import { workOrders, customers, vehicles, quotes, users, qcChecklists, parts, type QCItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 import { getOrCreateChecklist, setChecklistItems, qcComplete } from "@/lib/qc";
@@ -12,6 +12,8 @@ import { laborByWorkOrder } from "@/lib/timeclock";
 import { blendedRateCents } from "@/lib/laborRates";
 import { fmtCents } from "@/lib/accounting";
 import { SubmitButton } from "@/components/SubmitButton";
+import { ScanPullPanel, type ExpectedPart } from "@/components/ScanPullPanel";
+import { issuedByPartForWorkOrder } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -86,8 +88,48 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
     ? await db.select().from(vehicles).where(eq(vehicles.id, wo.vehicleId))
     : [undefined];
   const [quote] = wo.quoteId
-    ? await db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber }).from(quotes).where(eq(quotes.id, wo.quoteId))
+    ? await db
+        .select({ id: quotes.id, quoteNumber: quotes.quoteNumber, lineItems: quotes.lineItems })
+        .from(quotes)
+        .where(eq(quotes.id, wo.quoteId))
     : [undefined];
+
+  // Pick list for the scan-out panel: what the estimate needs per part vs what
+  // has already been issued to this job (scan-pulls or In Progress), plus any
+  // extras already pulled so they can be returned.
+  const neededByPart = new Map<string, number>();
+  for (const l of (quote?.lineItems as { kind?: string; partId?: string; quantity?: number }[] | null) ?? []) {
+    if (l?.kind !== "item" || !l.partId) continue;
+    const q = Number(l.quantity || 0);
+    if (q > 0) neededByPart.set(l.partId, (neededByPart.get(l.partId) ?? 0) + q);
+  }
+  const issuedByPart = await issuedByPartForWorkOrder(id);
+  const pickPartIds = [...new Set([...neededByPart.keys(), ...issuedByPart.keys()])];
+  const pickRows = pickPartIds.length
+    ? await db
+        .select({
+          id: parts.id,
+          sku: parts.sku,
+          name: parts.name,
+          quantityOnHand: parts.quantityOnHand,
+          barcode: parts.barcode,
+          mfgPartNumber: parts.mfgPartNumber,
+        })
+        .from(parts)
+        .where(inArray(parts.id, pickPartIds))
+    : [];
+  const pickList: ExpectedPart[] = pickRows
+    .map((p) => ({
+      partId: p.id,
+      sku: p.sku,
+      name: p.name,
+      needed: neededByPart.get(p.id) ?? 0,
+      issued: issuedByPart.get(p.id) ?? 0,
+      onHand: p.quantityOnHand,
+      barcode: p.barcode,
+      mfgPartNumber: p.mfgPartNumber,
+    }))
+    .sort((a, b) => Number(b.needed > 0) - Number(a.needed > 0) || a.sku.localeCompare(b.sku));
 
   const userRows = await db
     .select({ id: users.id, name: users.name, email: users.email })
@@ -226,6 +268,10 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="mt-6">
+        <ScanPullPanel workOrderId={wo.id} expected={pickList} />
       </div>
 
       {/* QC checklist */}

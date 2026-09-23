@@ -7,9 +7,12 @@ import { SubmitButton } from "@/components/SubmitButton";
 export function PartAddForm({
   action,
   vendors,
+  defaultBarcode = "",
 }: {
   action: (formData: FormData) => Promise<void>;
   vendors: { id: string; name: string }[];
+  // Prefilled when arriving from the Scan dialog's "Create new part".
+  defaultBarcode?: string;
 }) {
   const [cost, setCost] = useState("");
   const [price, setPrice] = useState("");
@@ -32,7 +35,7 @@ export function PartAddForm({
   }
 
   return (
-    <div className="bg-surface border border-white/5 rounded-lg p-4">
+    <div id="add-part" className="bg-surface border border-white/5 rounded-lg p-4">
       <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
         Add part
       </h3>
@@ -57,6 +60,14 @@ export function PartAddForm({
           <input
             name="mfgPartNumber"
             placeholder="Mfg part #"
+            className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
+          />
+        </FormField>
+        <FormField label="Barcode" hint="UPC on the box — scan it in">
+          <input
+            name="barcode"
+            defaultValue={defaultBarcode}
+            placeholder="Scan or type"
             className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
           />
         </FormField>

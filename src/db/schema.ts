@@ -265,6 +265,10 @@ export const parts = pgTable("parts", {
   name: text("name").notNull(),
   description: text("description"),
   mfgPartNumber: text("mfg_part_number"),
+  // The code printed on the physical box (vendor UPC/EAN, or a label we print).
+  // Often differs from our SKU, so a scan matches this first. Not unique: two
+  // SKUs can legitimately share a vendor UPC; the scan UI lists both.
+  barcode: text("barcode"),
   category: text("category"),
   quantityOnHand: integer("quantity_on_hand").notNull().default(0),
   quantityOnOrder: integer("quantity_on_order").notNull().default(0),
@@ -285,7 +289,7 @@ export const parts = pgTable("parts", {
   leadTimeDays: integer("lead_time_days").notNull().default(0),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-}, (t) => [index("parts_sku_idx").on(t.sku)]);
+}, (t) => [index("parts_sku_idx").on(t.sku), index("parts_barcode_idx").on(t.barcode)]);
 
 // Provenance of a cost layer / issue. `individual` = full-price single-SKU buy,
 // `package` = part of a vendor promo (Phase 3/4, carries promo_id), `backfill`
@@ -336,11 +340,26 @@ export const partReceipts = pgTable("part_receipts", {
 export const inventoryIssue = pgTable("inventory_issue", {
   id: uuid("id").defaultRandom().primaryKey(),
   partId: uuid("part_id").notNull().references(() => parts.id, { onDelete: "cascade" }),
+  // Denormalized part SKU (1:1 with part_id, parts.sku is unique). The live DB
+  // has this as NOT NULL, so every issue slice must carry it — populated from
+  // the part in drainLayersTx. Matches the sku denormalization on
+  // inventory_reservation / backfill_requisition / stock_override_log.
+  sku: text("sku").notNull(),
   workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
   layerId: uuid("layer_id").references(() => partReceipts.id, { onDelete: "set null" }),
   qty: integer("qty").notNull(),
   unitCost: numeric("unit_cost", { precision: 12, scale: 2 }).notNull(),
   issuedAt: timestamp("issued_at").notNull().defaultNow(),
+  // How the stock left. `auto` = the In Progress consumption of the quote's
+  // parts (and legacy/override pulls); `scan` = a warehouse scan-pull. Walking
+  // a build back out of In Progress reverses only `auto` rows — scanned parts
+  // physically left the shelf and come back only via a scan return.
+  source: text("source").notNull().default("auto"),
+  // Set on pulls with no work order: shop_use | damaged | counter_sale (see
+  // src/lib/pullReasons.ts), which decides the GL account charged.
+  reason: text("reason"),
+  issuedBy: uuid("issued_by").references(() => users.id),
+  note: text("note"),
 }, (t) => [
   index("inventory_issue_part_idx").on(t.partId),
   index("inventory_issue_work_order_idx").on(t.workOrderId),

@@ -149,7 +149,7 @@ export function KanbanBoard({
           <button onClick={() => setError(null)} className="ml-3 text-red-300 hover:text-white">dismiss</button>
         </div>
       )}
-      <div className="grid grid-cols-1 lg:grid-cols-7 gap-2 overflow-x-auto pb-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-2 pb-2">
         {buckets.map((b) => {
           const bucketCards = cardsByBucket.get(b.slug) ?? [];
           const isHover = hoverBucket === b.slug;
@@ -214,6 +214,23 @@ export function KanbanBoard({
                         {c.assignedTo && (<span className="truncate">→ {c.assignedTo}</span>)}
                         {c.openTaskCount > 0 && (<span className="text-amber-300">{c.openTaskCount} task{c.openTaskCount === 1 ? "" : "s"}</span>)}
                       </div>
+                      {/* Phones and tablets have no HTML5 drag-and-drop, so
+                          this is the touch way to move a deal between buckets —
+                          same moveBucket() (and override prompts) as a drop.
+                          Clicks stop here so choosing doesn't open the card. */}
+                      <select
+                        aria-label="Move to bucket"
+                        value={b.slug}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={(e) => void moveBucket(c.id, e.target.value as BucketSlug)}
+                        className="w-full bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-zinc-300"
+                      >
+                        {buckets.map((opt) => (
+                          <option key={opt.slug} value={opt.slug}>
+                            {opt.slug === b.slug ? "Move to…" : opt.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
                   ))
                 )}
@@ -330,12 +347,12 @@ function DealModal({
             </ul>
           </div>
         )}
-        <div className="border-t border-white/5 pt-3 flex items-center gap-2">
+        <div className="border-t border-white/5 pt-3 flex flex-wrap items-center gap-2">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500">Move to stage</span>
           <select
             value={stage}
             onChange={(e) => setStage(e.target.value)}
-            className="flex-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white"
+            className="flex-1 min-w-[10rem] bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white"
           >
             {card.availableStages.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
           </select>
@@ -406,7 +423,7 @@ function DealModal({
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-[10px] uppercase tracking-wider text-zinc-500">{label}</div>
       <div className="text-zinc-200 mt-0.5 truncate">{value}</div>
     </div>
