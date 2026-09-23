@@ -8,7 +8,14 @@
 // freight/other split is respected. Exits non-zero on any failure.
 
 import assert from "node:assert/strict";
-import { allocateFreight, feeTotals, landedUnitCost } from "./poFees";
+import {
+  FIXED_FREIGHT_LABEL,
+  allocateFreight,
+  feeTotals,
+  landedUnitCost,
+  pruneFees,
+  withFixedFreight,
+} from "./poFees";
 
 let passed = 0;
 function test(name: string, fn: () => void) {
@@ -160,6 +167,70 @@ test("allocation + landed cost — a realistic shipping charge lands in part cos
   assert.deepEqual(alloc, [3000, 1500]);
   assert.equal(landedUnitCost(100, 3, alloc[0]), 110); // $100 + $30/3
   assert.equal(landedUnitCost(75, 2, alloc[1]), 82.5); // $75 + $15/2
+});
+
+// ── withFixedFreight / pruneFees ─────────────────────────────────────────────
+
+test("withFixedFreight synthesizes the standing row when a PO has none", () => {
+  const out = withFixedFreight([{ description: "Handling", amount: 15, kind: "other" }]);
+  assert.equal(out.length, 2);
+  assert.equal(out[0].fixed, true);
+  assert.equal(out[0].kind, "freight");
+  assert.equal(out[0].amount, 0);
+  assert.equal(out[0].description, FIXED_FREIGHT_LABEL);
+  assert.equal(out[1].description, "Handling");
+});
+
+test("withFixedFreight keeps the existing fixed row and hoists it to the front", () => {
+  const out = withFixedFreight([
+    { description: "Handling", amount: 15, kind: "other" },
+    { description: FIXED_FREIGHT_LABEL, amount: 40, kind: "freight", fixed: true },
+  ]);
+  assert.equal(out.length, 2, "must not add a second fixed row");
+  assert.equal(out[0].fixed, true);
+  assert.equal(out[0].amount, 40, "the entered freight amount survives");
+  assert.equal(out[1].description, "Handling");
+});
+
+test("withFixedFreight on an empty/null list still yields exactly the fixed row", () => {
+  for (const input of [[], null, undefined]) {
+    const out = withFixedFreight(input);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].fixed, true);
+  }
+});
+
+test("the synthesized fixed row is an ordinary freight fee to the rest of the pipeline", () => {
+  // It must flow through feeTotals as freight with no special-casing.
+  const fees = withFixedFreight([]).map((f) => ({ ...f, amount: 30 }));
+  assert.equal(feeTotals(fees).freightCents, 3000);
+  assert.equal(feeTotals(fees).otherCents, 0);
+});
+
+test("pruneFees drops a zero fixed row and blank custom rows, keeps the rest", () => {
+  const out = pruneFees([
+    { description: FIXED_FREIGHT_LABEL, amount: 0, kind: "freight", fixed: true },
+    { description: "", amount: 0, kind: "other" },
+    { description: "Handling", amount: 15, kind: "other" },
+    { description: "Noted but unpriced", amount: 0, kind: "other" },
+  ]);
+  assert.equal(out.length, 2);
+  assert.deepEqual(
+    out.map((f) => f.description),
+    ["Handling", "Noted but unpriced"],
+  );
+});
+
+test("pruneFees keeps a fixed row that carries an amount", () => {
+  const out = pruneFees([{ description: FIXED_FREIGHT_LABEL, amount: 40, kind: "freight", fixed: true }]);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].amount, 40);
+});
+
+test("withFixedFreight after pruneFees round-trips — a zeroed row comes back", () => {
+  const saved = pruneFees(withFixedFreight([]));
+  assert.deepEqual(saved, [], "nothing stored when freight is untouched");
+  assert.equal(withFixedFreight(saved).length, 1, "editor still shows the row");
 });
 
 console.log(`\n${passed} tests passed.`);

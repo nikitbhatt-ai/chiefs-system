@@ -1458,13 +1458,29 @@ ALTER TABLE work_orders ADD COLUMN IF NOT EXISTS safety_buffer_days int NOT NULL
       - Logs `part_cost_history` entry.
       - Updates PO status to `partially_received` or `received`.
 - [x] Status badges (pending/pending_review/po_received/partially_received/received).
-- [x] **Fee section** — a PO carries named fee rows (`purchase_orders.fees`
-      jsonb: `{ id, description, amount, kind }`) for vendor charges that
-      aren't parts. Add/remove rows in the PO editor with "+ Shipping" /
-      "+ Other fee"; the totals roll-up shows Parts subtotal → Shipping &
-      freight → Other fees → Total, and `purchase_orders.total` is
-      lines + fees. Fees are itemised under the line-item table on the PO
-      PDF so the vendor sees the same breakdown.
+- [x] **Freight/shipping section** — a PO carries named fee rows
+      (`purchase_orders.fees` jsonb:
+      `{ id, description, amount, kind, fixed? }`) for vendor charges that
+      aren't parts, in a section titled **Freight/shipping**.
+
+      It always opens with a **fixed** line labelled "Freight/shipping":
+      the team types the shipping cost straight in, with no add-a-row step.
+      It's always `kind = freight`, its label is not editable, and it can't
+      be removed — only zeroed. Below it, **"+ Add custom line"** adds the
+      team's own rows (description, amount, and a Shipping/freight vs Other
+      fee selector), which are removable. Mirrors the fixed-vs-custom fee
+      split already used on quotes.
+
+      A zeroed fixed row isn't stored — `withFixedFreight` re-synthesizes it
+      on every render, so the section is never empty and the record stays
+      clean (`pruneFees`, both in `src/lib/poFees.ts`). The fixed row is an
+      ordinary freight fee to everything downstream: no special case in the
+      receive path.
+
+      The totals roll-up shows Parts subtotal → Shipping & freight → Other
+      fees → Total, and `purchase_orders.total` is lines + fees. Fees are
+      itemised under the line-item table on the PO PDF so the vendor sees
+      the same breakdown.
 
       Each fee has a **kind**, and the kind drives the accounting
       (`src/lib/poFees.ts`, pure + unit-tested in `poFees.test.ts`):

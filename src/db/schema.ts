@@ -643,11 +643,16 @@ export const purchaseOrders = pgTable("purchase_orders", {
 // A non-part charge on a purchase order. `kind` drives the accounting:
 //   freight → capitalized into the received parts' landed cost (FIFO layer).
 //   other   → expensed to 5230 Purchase Fees & Surcharges on first receipt.
+// `fixed` marks the standing Freight/shipping row the PO editor always shows
+// (mirrors the fixed-vs-custom fee split on quotes). There is at most one, it
+// is always kind 'freight', and it can't be removed — only zeroed. Custom rows
+// are the ones the team adds themselves and may be either kind.
 export type POFee = {
   id?: string;
   description: string;
   amount: number;
   kind: "freight" | "other";
+  fixed?: boolean;
 };
 
 // Purchase-order line. Stored in purchase_orders.line_items (jsonb). Phase 4

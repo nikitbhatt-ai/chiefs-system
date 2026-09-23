@@ -5,7 +5,7 @@ import { eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { parts, purchaseOrders, vendors, type POLineItem, type POFee } from "@/db/schema";
-import { feeTotals } from "@/lib/poFees";
+import { FIXED_FREIGHT_LABEL, feeTotals, pruneFees } from "@/lib/poFees";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
 import { POScanReceive, type PartCodes, type ScanLine } from "./POScanReceive";
@@ -28,15 +28,18 @@ async function saveDraft(formData: FormData) {
     // not array position, and can build an idempotent receipt key.
     id: l.id ?? randomUUID(),
   }));
-  // Fees: drop blank rows, normalise the kind, and keep a stable id per row.
-  const fees = (JSON.parse(String(formData.get("fees") ?? "[]")) as POFee[])
-    .map((f) => ({
+  // Fees: normalise, then drop the rows carrying nothing (a zero fixed row is
+  // re-synthesized by the editor, so it isn't worth storing). The fixed
+  // Freight/shipping row is always kind 'freight' whatever the client sent.
+  const fees = pruneFees(
+    (JSON.parse(String(formData.get("fees") ?? "[]")) as POFee[]).map((f) => ({
       id: f.id ?? randomUUID(),
-      description: String(f.description ?? "").trim(),
+      description: f.fixed ? FIXED_FREIGHT_LABEL : String(f.description ?? "").trim(),
       amount: Number(f.amount) || 0,
-      kind: f.kind === "freight" ? ("freight" as const) : ("other" as const),
-    }))
-    .filter((f) => f.description !== "" || f.amount !== 0);
+      kind: f.fixed || f.kind === "freight" ? ("freight" as const) : ("other" as const),
+      ...(f.fixed ? { fixed: true as const } : {}),
+    })),
+  );
   const linesTotal = lines.reduce(
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,

@@ -25,7 +25,51 @@
 /** Fee kinds. `freight` capitalizes into part cost; `other` is expensed. */
 export type POFeeKind = "freight" | "other";
 
+/** Label of the standing Freight/shipping row every PO shows. */
+export const FIXED_FREIGHT_LABEL = "Freight/shipping";
+
 const toCents = (n: number) => Math.round((Number(n) || 0) * 100);
+
+type FeeLike = { description?: string; amount?: number; kind?: string; fixed?: boolean };
+
+/** Structurally the schema's POFee — kept local so this module stays pure. */
+export type FeeRow = {
+  id?: string;
+  description: string;
+  amount: number;
+  kind: POFeeKind;
+  fixed?: boolean;
+};
+
+/**
+ * Put the fee list in the shape the editor renders: exactly one fixed
+ * Freight/shipping row, first, followed by the custom rows in their own order.
+ *
+ * The fixed row is synthesized when a PO has none — every PO shows a freight
+ * line whether or not anyone has typed an amount into it yet, so the team fills
+ * it in directly instead of adding a row first. It carries no special meaning
+ * downstream: it's an ordinary `kind: 'freight'` fee, so receiving capitalizes
+ * it through the same path as any other freight, with no special case.
+ */
+export function withFixedFreight(fees: readonly FeeRow[] | null | undefined): FeeRow[] {
+  const list = [...(fees ?? [])];
+  const at = list.findIndex((f) => f?.fixed);
+  if (at >= 0) return [list[at], ...list.filter((_, i) => i !== at)];
+  return [{ description: FIXED_FREIGHT_LABEL, amount: 0, kind: "freight", fixed: true }, ...list];
+}
+
+/**
+ * Drop the rows that carry nothing: a zero-amount fixed row (the editor
+ * re-synthesizes it every render, so persisting an empty one only clutters the
+ * record) and any blank custom row.
+ */
+export function pruneFees<T extends FeeLike>(fees: readonly T[] | null | undefined): T[] {
+  return (fees ?? []).filter((f) => {
+    const amount = Number(f?.amount) || 0;
+    if (f?.fixed) return amount !== 0;
+    return amount !== 0 || String(f?.description ?? "").trim() !== "";
+  });
+}
 
 export type FeeTotals = {
   /** Σ freight-kind fees, integer cents. Capitalized into landed cost. */
