@@ -13,6 +13,7 @@ import { auth } from "@/auth";
 import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
 import { fmtDateTime } from "@/lib/datetime";
 import { SubmitButton } from "@/components/SubmitButton";
+import { nextDocNumber } from "@/lib/docNumbers";
 
 const QUOTE_STATUSES = ["draft", "sent", "approved", "converted"];
 
@@ -26,7 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
 async function createQuote(formData: FormData) {
   "use server";
   const customerId = String(formData.get("customerId") ?? "") || null;
-  const quoteNumber = `Q-${Date.now().toString().slice(-7)}`;
+  const quoteNumber = await nextDocNumber("quote");
   const [row] = await db
     .insert(quotes)
     .values({

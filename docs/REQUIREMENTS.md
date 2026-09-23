@@ -3499,6 +3499,96 @@ no cost at all):
 - the editor shows per-line cost, `$75.00 × 4 = $300.00` for quantities, margin
   percentages, and the labelled internal rollup.
 
+## Document numbers: one job number, fixed widths (user requirement, 2026-09-23)
+
+> "I need them to be 4 digit invoice and quote numbers for the entire system"
+> then, refined: "Move Purchase orders to 6 digit, and quotes and invoices to 5
+> digit" and "work orders and invoice numbers should match each other so its
+> easily tracked"
+
+### One job, one number
+
+A quote, the invoice it becomes and the work order that builds it are the same
+job, so they share a number and differ only by prefix — which is how the shop's
+previous system worked (Estimate #1938 and Work Order #1938 were one job):
+
+    Q-01938   quote          WO-01938  work order for that job
+    Q-01938   invoice (a converted quote IS the invoice — same row)
+
+Purchase orders are **not** part of a job's identity: one PO can supply several
+jobs and a job can need several POs. They run on their own series, six digits.
+
+| | Was | Now |
+| --- | --- | --- |
+| Quotes / invoices | `Q-6639059` | `Q-02042` (5) |
+| Work orders | `WO-1234567` | `WO-02042` (5, its quote's number) |
+| Purchase orders | `PO-1234567` | `PO-000001` (6, own series) |
+| Accounting INV/RCPT/BILL/PAY | `INV-0001` | unchanged — already 4-digit |
+
+Padding is a **minimum, not a cap**: past 99999 a job number becomes six digits
+rather than colliding or erroring. Running out is not a failure mode.
+
+### Why sequences, not the clock
+
+Numbers were `Q-${Date.now().toString().slice(-7)}` in **ten** places. Two
+records created in the same millisecond got the same number, and these are
+UNIQUE columns, so the second insert failed. A clock slice is also not a count:
+`Q-6639059` says nothing about whether it came before `Q-1234567`. Postgres
+sequences are atomic across concurrent serverless instances, and they count.
+`src/lib/docNumbers.ts` is the single owner; `nextval` is not rolled back, so an
+aborted insert burns a number — a gap is invisible to a customer, two documents
+sharing a number is not.
+
+### Importing from the previous system
+
+The requirement: an imported invoice keeps the number the customer already has.
+
+`legacy_number` on `quotes`, `work_orders` and `purchase_orders` holds what the
+old system called a record. The migration renumbers **only** rows it can prove
+the app created — `legacy_number IS NULL` **and** the number is prefix + exactly
+7 digits, which is precisely what the clock produced — so an import is never
+rewritten, and a re-run is a no-op.
+
+Imports are written into **both** `quote_number` and `legacy_number`
+(`'Q-01938'`, `'1938'`). The sequence is parked above everything already in the
+series *before* renumbering, so the series simply continues: with 2041 the
+highest imported number, the next new job is Q-02042. **Import first, then
+re-run the file** — importing after new jobs are numbered risks a collision the
+UNIQUE constraint will reject.
+
+Search matches on digits with padding stripped, so "1938", "Q-01938" and a
+record's superseded "6639059" all find it.
+
+### Two bugs caught by running it
+
+- **The first guard skipped everything.** `quote_number !~ '^Q-\d{5,}$'` treats
+  the old 7-digit `Q-6639059` as "already new format", so the first run
+  renumbered nothing and parked the sequences at the old clock values. The test
+  is "exactly 7 digits", not "5 or more".
+- **Off-by-one on an empty series.** `setval(seq, 1)` marks 1 as *used*, so the
+  first purchase order came out `PO-000002`. Fixed with the three-argument form,
+  `setval(seq, GREATEST(m,1), m > 0)`.
+
+### Verified
+
+Against a database seeded in the state the live one is actually in — clock-based
+numbers, work orders both with and without quotes, plus two rows standing in for
+an import:
+
+- imported `Q-01938` / `Q-02041` untouched, legacy preserved;
+- app-created quotes renumbered oldest-first and **continuing the imported
+  series** — Q-02042, Q-02043, Q-02044;
+- each work order carries its quote's number (`Q-02042` ↔ `WO-02042`) and burns
+  no sequence value; a standalone one draws its own;
+- POs renumbered to `PO-000001`, `PO-000002` on a separate series;
+- **ten quotes created concurrently** got ten distinct, contiguous numbers —
+  the exact case the clock scheme failed;
+- search found a record by new number, superseded number and bare digits;
+- three consecutive migration runs produced an identical hash of every number.
+
+Work orders were not in the user's stated scope but are included, because
+sharing the quote's number is the whole point of the matching requirement.
+
 ## Notes on building order
 
 When extending a feature, re-read this file first. When adding a NEW

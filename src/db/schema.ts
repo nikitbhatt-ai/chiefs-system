@@ -222,6 +222,10 @@ export const quotes = pgTable("quotes", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   quoteNumber: text("quote_number").unique(),
+  // The number this record carried in the system it was imported from, kept
+  // verbatim so a customer quoting their old paperwork can still be found.
+  // Null for records this app created. See docs/sql/doc_numbers.sql.
+  legacyNumber: text("legacy_number"),
   customerId: uuid("customer_id").references(() => customers.id),
   dealId: uuid("deal_id").references(() => deals.id),
   status: quoteStatus("status").notNull().default("draft"),
@@ -606,6 +610,8 @@ export const purchaseOrders = pgTable("purchase_orders", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   poNumber: text("po_number").unique(),
+  /** Number from the system this PO was imported from, kept verbatim. */
+  legacyNumber: text("legacy_number"),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   status: purchaseOrderStatus("status").notNull().default("pending"),
   total: numeric("total", { precision: 12, scale: 2 }).default("0"),

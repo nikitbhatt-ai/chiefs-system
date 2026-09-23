@@ -30,6 +30,7 @@ import { availableForPart, isMissingReservationTable } from "@/lib/reservations"
 import { issueStock } from "@/lib/costing";
 import { currentAlacarteCost } from "@/lib/vendorPricing";
 import { randomUUID } from "node:crypto";
+import { nextDocNumber } from "@/lib/docNumbers";
 
 // ── Reorder points ─────────────────────────────────────────────────────────────
 
@@ -271,7 +272,7 @@ export async function createPOFromRequisition(reqId: string): Promise<{ purchase
     if (alacarte != null) unitCost = alacarte;
   }
 
-  const poNumber = `PO-${Date.now().toString().slice(-7)}`;
+  const poNumber = await nextDocNumber("purchaseOrder");
   const line: POLineItem = {
     id: randomUUID(),
     partId: part.id,

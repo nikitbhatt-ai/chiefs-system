@@ -7,6 +7,7 @@ import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
 import { checkReordersForWorkOrder } from "@/lib/backfill";
 import { qcComplete } from "@/lib/qc";
+import { nextDocNumber, workOrderNumberForQuote } from "@/lib/docNumbers";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +52,7 @@ export async function POST(
     const [q] = await db
       .select({
         id: quotes.id,
+        quoteNumber: quotes.quoteNumber,
         customerId: quotes.customerId,
         dealId: quotes.dealId,
         status: quotes.status,
@@ -101,7 +103,9 @@ export async function POST(
     }
 
     if (!wo && stage !== "estimate") {
-      const woNumber = `WO-${Date.now().toString().slice(-7)}`;
+      // Same number as the quote, so quote / invoice / work order all
+      // read as one job.
+      const woNumber = await workOrderNumberForQuote(q.quoteNumber);
       const inserted = await db
         .insert(workOrders)
         .values({
