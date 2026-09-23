@@ -3724,14 +3724,80 @@ one that left and came back).
 > the browser's broken-image icon. Fixing it needs an onError handler, which
 > would make the thumbnail a client component. Not worth it unless it happens.
 
+### Phase 9 — vehicle-to-deal linking (done, 2026-09-23)
+
+Core logic in `src/lib/dealVehicles.ts`; `"use server"` wrappers in
+`src/lib/dealVehicleActions.ts` so both UI entry points call the same code.
+
+- [x] `linkVehicleToDeal(vehicleId, dealId)`, in a transaction, in order:
+      office/admin only → refuse if already linked, **naming the deal** →
+      insert the link with `linked_by` → promote `lot_status` → copy deal
+      fields.
+- [x] **The refusal names the existing deal** ("Already attached to Waller
+      County SO (deal ae051a10)"). "Already linked" sends someone hunting.
+- [x] `lot_status` is promoted to `on_lot_assigned` **only from
+      `on_lot_available`**. A vehicle in a bay stays `in_shop`: where it
+      physically is does not change because paperwork did.
+- [x] VIN / year / make / model are copied onto the deal **only where blank**,
+      using `coalesce` + `nullif` so an empty string counts as blank and a deal
+      that already names a vehicle is never quietly overwritten.
+- [x] `unlinkVehicleFromDeal(linkId)` stamps `unlinked_at` / `unlinked_by`.
+      **Never deletes** — the history is the point. Detaching twice is refused
+      rather than silently repeated.
+- [x] The partial unique index is the real guard: two people hitting "attach"
+      at the same moment both pass the in-code check and one lands on a 23505,
+      which is caught and reported in plain language.
+- [x] **Entry point A — lot view.** An unassigned vehicle shows "Attach to
+      deal"; the picker searches deals by customer name or by the short id the
+      deal page titles itself with. Not offered for a departed vehicle.
+- [x] **Entry point B — deal page.** A "Vehicles" panel lists what is
+      attached, with Detach, and "Add vehicle" searches by VIN/make/model or
+      browses. **The browse list defaults to on-lot and unassigned** — short,
+      and almost always what is wanted. Vehicles already on another deal never
+      appear. Previously-attached vehicles show in a collapsed history list.
+- [x] **No PO, bay or parts logic anywhere in this flow.** Linking makes a
+      vehicle eligible for scheduling; the scheduler enforces the PO gate.
+- [x] **Backfill**: `docs/sql/vehicle_checkin_phase9.sql` copies the legacy
+      `deals.vehicle_id` attachments into `deal_vehicles`, so the
+      single-active-link guardrail can see them. Re-runnable. It re-checks for
+      conflicts before writing and skips itself with a notice if any vehicle
+      is on two open deals. Backfilled rows are attributed to the oldest admin
+      account and stamped with the deal's own `created_at`, so the history
+      reads as migrated rather than as somebody's action. `deals.vehicle_id`
+      is not removed and nothing is overwritten.
+- [x] Verification: `scripts/verify-deal-linking.ts`, 39 checks against a
+      **throwaway** database:
+      `POSTGRES_URL=... npx tsx scripts/verify-deal-linking.ts`.
+
+**Verified in a real browser**, both entry points, against a seeded lot:
+
+- Lot view → Attach to deal → picker lists deals, search narrows to one,
+  attaching succeeds, the row then shows the customer and **lot status is
+  promoted to assigned**. Zero page errors.
+- Deal page → Vehicles panel renders, browse defaults to on-lot unassigned,
+  and a vehicle already on another deal is correctly absent.
+- A `warehouse` account sees **0** "Attach to deal" buttons while keeping its
+  lot-status dropdowns.
+- Server gate proven separately: `warehouse`, `tech` and `accountant` are all
+  refused when calling `linkVehicleToDeal` directly, and warehouse cannot
+  detach either.
+
+**Backfill SQL tested through four scenarios**: clean copy (2 rows, archived
+deals and vehicle-less deals correctly skipped); a re-run copying 0; a vehicle
+on two open deals blocking the copy and writing nothing; and the copy
+completing once that conflict was resolved, leaving `still_missing` at 0.
+
+> **Open question — lot status on detach.** The brief specifies the status
+> change on link but says only "stamps `unlinked_at` and `unlinked_by`" for
+> unlink, so detaching deliberately leaves `lot_status` alone. That is
+> faithful to the brief, but it means a detached vehicle can sit at
+> "on lot — assigned" with no deal. Mirroring the link step (assigned →
+> available on detach, leaving `in_shop` alone) would close that, and is a
+> two-line change. Say which you want. In the meantime the lot view fixes it
+> in one tap.
+
 ### Remaining phases (not yet built)
 
-- [ ] **Phase 9** — `linkVehicleToDeal(vehicleId, dealId)`: office/admin
-      only; refuse if an active link exists, naming the existing deal;
-      insert link; set `lot_status` to `on_lot_assigned` **only if currently
-      `on_lot_available`** (do not clobber `in_shop`); copy VIN/year/make/
-      model onto the deal **only where blank**. All in a transaction. Plus
-      `unlinkVehicleFromDeal(linkId)`. No PO/bay/parts logic here.
 - [ ] **Phase 10** — departure: stamp `departed_at` on the most recent open
       check-in, set `lot_status` to `departed`, optional notes and departure
       photos (new `departure` photo slot). A returning vehicle gets a **new

@@ -28,6 +28,9 @@ import { parseMentions } from "@/lib/mentions";
 import { notify, notifyMany } from "@/lib/notifications";
 import { loadStageMapping, mapCrmToWorkflow, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
 import { SubmitButton } from "@/components/SubmitButton";
+import { DealVehicles } from "@/components/DealVehicles";
+import { getDealVehicles } from "@/lib/dealVehicles";
+import { can } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -65,6 +68,10 @@ export default async function DealEntityPage({
     db.select({ id: workOrders.id, woNumber: workOrders.woNumber, status: workOrders.status }).from(workOrders).where(eq(workOrders.dealId, id)).orderBy(desc(workOrders.updatedAt)).limit(1),
     loadStageMapping(),
   ]);
+  // Every vehicle this deal has carried, plus whether the viewer may change
+  // that. `session` here is the page's own — the nested server actions each
+  // read their own, and re-check server-side regardless.
+  const [linkedVehicles, pageSession] = await Promise.all([getDealVehicles(id), auth()]);
   const customer = customerRow[0] ?? null;
   const assignee = assigneeRow[0] ?? null;
   const partner = partnerRow[0] ?? null;
@@ -476,6 +483,11 @@ export default async function DealEntityPage({
           <Stat label="Open tasks" value={taskRows.filter((tk) => !tk.completedAt).length} />
         </div>
       </div>
+      <DealVehicles
+        dealId={d.id}
+        rows={linkedVehicles}
+        canEdit={can(pageSession, "vehicle:linkDeal")}
+      />
       {pipeline.hardGate ? (
         <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <div className="flex items-center justify-between">

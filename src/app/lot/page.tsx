@@ -16,6 +16,7 @@ import {
   type Ownership,
 } from "@/lib/lot";
 import { LotStatusControl, StatusBadge } from "./LotStatusControl";
+import { AttachToDealButton } from "@/components/AttachToDealButton";
 
 export const metadata = { title: "Lot" };
 // Days-on-lot moves with the clock, so this page is never cached.
@@ -51,6 +52,8 @@ export default async function LotPage({
   if (!session?.user) redirect("/signin");
 
   const canEditStatus = can(session, "vehicle:setLotStatus");
+  // Attaching a vehicle to a deal is commercial, so office and admin only.
+  const canLinkDeal = can(session, "vehicle:linkDeal");
   const sp = await searchParams;
   const filters = parseFilters(sp);
   const rows = await getLotRows(filters);
@@ -144,7 +147,7 @@ export default async function LotPage({
                           <Days days={days} />
                         </td>
                         <td className="px-3 py-2.5 text-[13px]">
-                          <Deal row={r} />
+                          <Deal row={r} canLink={canLinkDeal} />
                         </td>
                       </tr>
                     );
@@ -174,7 +177,7 @@ export default async function LotPage({
                           <span>{r.lotLocation ?? "No location"}</span>
                         </div>
                         <div className="mt-1 text-[12px]">
-                          <Deal row={r} />
+                          <Deal row={r} canLink={canLinkDeal} />
                         </div>
                       </div>
                     </div>
@@ -243,8 +246,18 @@ function Owner({ ownership }: { ownership: Ownership | null }) {
   return <span className="text-zinc-300 font-body">{OWNERSHIP_LABELS[ownership]}</span>;
 }
 
-function Deal({ row }: { row: LotRow }) {
+function Deal({ row, canLink }: { row: LotRow; canLink: boolean }) {
   if (!row.dealId) {
+    // Entry point A. Only offered for a vehicle actually here — attaching one
+    // that has already left is almost always a mistake.
+    if (canLink && row.lotStatus !== "departed") {
+      return (
+        <AttachToDealButton
+          vehicleId={row.vehicleId}
+          label={`${[row.year, row.make, row.model].filter(Boolean).join(" ") || "Vehicle"} · ${row.vin}`}
+        />
+      );
+    }
     return <span className="text-zinc-500 font-body">No deal</span>;
   }
   return (
