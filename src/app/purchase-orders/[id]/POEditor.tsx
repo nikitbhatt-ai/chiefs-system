@@ -124,7 +124,7 @@ export function POEditor({
             value={vendorId}
             onChange={(e) => setVendorId(e.target.value)}
             disabled={fullyReceived}
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           >
             <option value="">— Vendor —</option>
             {vendors.map((v) => (
@@ -138,7 +138,7 @@ export function POEditor({
             type="date"
             defaultValue={expectedAt}
             disabled={fullyReceived}
-            className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           />
           {statusIsAuto ? (
             // Auto-managed once receiving starts — show it read-only, and keep
@@ -162,7 +162,7 @@ export function POEditor({
               ))}
             </select>
           )}
-          <div className="text-right text-sm font-body text-white">
+          <div className="md:text-right text-sm font-body text-white self-center">
             <span className="text-zinc-500 mr-2">Total:</span>
             <span className="font-bold">{fmt(total)}</span>
           </div>
@@ -211,6 +211,10 @@ export function POEditor({
               </button>
             ) : null}
           </div>
+          {/* The 12-column line grid needs ~720px; on a phone it scrolls
+              sideways inside this box instead of crushing every field. */}
+          <div className="scroll-x">
+          <div className="min-w-[720px]">
           {lines.length > 0 ? (
             <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
               <span className="col-span-2">Part #</span>
@@ -309,6 +313,8 @@ export function POEditor({
               })
             )}
           </div>
+          </div>
+          </div>
         </div>
 
         <div className="bg-surface border border-white/5 rounded-lg p-4">
@@ -322,7 +328,7 @@ export function POEditor({
           />
         </div>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <a
             href="/purchase-orders"
             className="text-xs font-body text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2"
@@ -356,11 +362,11 @@ export function POEditor({
                 const remaining = (l.quantity || 0) - (l.quantityReceived || 0);
                 return (
                   <div key={l.id ?? i} className="grid grid-cols-12 items-center text-xs font-body gap-2">
-                    <span className="col-span-7 text-white truncate">
+                    <span className="col-span-12 sm:col-span-7 text-white truncate">
                       <span className="text-zinc-500">[{l.sku || "no part #"}]</span>{" "}
                       {l.description || `Line ${i + 1}`} <span className="text-zinc-500">@ {fmt(Number(l.unitCost) || 0)}</span>
                     </span>
-                    <span className="col-span-2 text-zinc-500 text-right">remaining {remaining}</span>
+                    <span className="col-span-6 sm:col-span-2 text-zinc-500 sm:text-right">remaining {remaining}</span>
                     <input
                       name={`receive_${i}`}
                       type="number"
@@ -369,7 +375,7 @@ export function POEditor({
                       defaultValue={remaining}
                       disabled={remaining <= 0 || !l.partId}
                       placeholder="Receive"
-                      className="col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right disabled:opacity-40"
+                      className="col-span-6 sm:col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right disabled:opacity-40"
                     />
                   </div>
                 );

@@ -325,10 +325,10 @@ export function QuoteEditor({
   function renderAddControls(withSave: boolean) {
     return (
       <div className="flex gap-2 items-center flex-wrap justify-end">
-        <div className="w-[240px]">
+        <div className="w-full sm:w-[240px]">
           <PartSearchCombobox mode="adder" placeholder="+ Search inventory to add…" onPick={addPart} />
         </div>
-        <div className="w-[220px]">
+        <div className="w-full sm:w-[220px]">
           <PackageSearchCombobox placeholder="+ Add package…" onPick={addPackage} />
         </div>
         <button
@@ -767,7 +767,7 @@ export function QuoteEditor({
           key={`customer-${customerId ?? ""}`}
           name="customerId"
           defaultValue={customerId ?? ""}
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+          className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         >
           <option value="">— No customer —</option>
           {customers.map((c) => (
@@ -780,7 +780,7 @@ export function QuoteEditor({
           key={`status-${status}`}
           name="status"
           defaultValue={status}
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+          className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         >
           <option value="draft">Draft</option>
           <option value="sent">Sent</option>
@@ -795,7 +795,7 @@ export function QuoteEditor({
           value={taxRate}
           onChange={(e) => setTaxRate(e.target.value)}
           placeholder="Tax rate %"
-          className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+          className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         />
       </div>
 
@@ -817,7 +817,7 @@ export function QuoteEditor({
             value={vin}
             onChange={(e) => setVin(e.target.value.toUpperCase())}
             placeholder="VIN (17 chars)"
-            className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
+            className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 font-mono"
           />
           <button
             type="button"
@@ -886,7 +886,7 @@ export function QuoteEditor({
       </div>
 
       <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
-        <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
+        <div className="px-4 py-2.5 border-b border-white/5 flex flex-wrap items-center justify-between gap-2">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Line items
           </h3>
@@ -926,8 +926,11 @@ export function QuoteEditor({
             }
           });
 
+          // The 12-column line grid needs ~760px; on a phone it scrolls
+          // sideways inside this box instead of crushing every field.
           return (
-            <div>
+            <div className="scroll-x">
+            <div className="min-w-[760px]">
               {/* Package groups render as titled sections (Shopmonkey-style). */}
               {groupOrder.map((gid) => {
                 const idxs = groupIdx.get(gid)!;
@@ -961,6 +964,7 @@ export function QuoteEditor({
               {/* Loose lines keep the Parts / Labor / Fees sections + reorder. */}
               {looseIdx.length > 0 &&
                 renderKindSections(looseIdx, { withReorder: true, banners: true })}
+            </div>
             </div>
           );
         })()}
@@ -1025,7 +1029,7 @@ export function QuoteEditor({
         </div>
       </div>
 
-      <div className="flex justify-between items-center gap-2">
+      <div className="flex flex-wrap justify-between items-center gap-2">
         <div className="flex gap-2">
           <a
             href={`/quotes/${id}/print`}
