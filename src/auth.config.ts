@@ -40,6 +40,13 @@ export const microsoftEnabled =
 export const emailMagicLinkEnabled =
   !!process.env.EMAIL_SERVER_HOST && !!process.env.EMAIL_FROM;
 
+const SHOPIFY_LEAD_FORM_PATHS = new Set([
+  "/api/leads/contact",
+  "/api/leads/parts-inquiry",
+  "/api/leads/inventory-inquiry",
+  "/api/leads/vehicle-inquiry",
+]);
+
 export const authConfig: NextAuthConfig = {
   pages: {
     signIn: "/signin",
@@ -60,7 +67,10 @@ export const authConfig: NextAuthConfig = {
         // allowlist on the /web variant) instead of a user session.
         // The route handlers themselves enforce the relevant check.
         path.startsWith("/api/leads/capture") ||
-        path.startsWith("/api/cron/");
+        path.startsWith("/api/cron/") ||
+        // Shopify storefront form posts (anonymous, cross-domain). Exact
+        // paths only — the rest of /api/leads stays behind login.
+        SHOPIFY_LEAD_FORM_PATHS.has(path);
       if (isPublicRoute) return true;
       return isLoggedIn;
     },

@@ -262,10 +262,10 @@ field names must not change.
   `docs/sql/inbound_leads.sql`). Deliberately separate from `leads`:
   public-form spam lands here, good rows are promoted later. Do not
   modify `leads` or existing lead logic for this.
-- [ ] Intake handler + four routes: honeypot (`company_website`),
+- [x] Intake handler + four routes: honeypot (`company_website`),
   min-fill-time (`ts`), per-IP-hash rate limit, 303 redirect back to
   `page_url` only if its host is in `ALLOWED_REDIRECT_HOSTS`.
-- [ ] Open exactly these four paths in `auth.config.ts` public routes
+- [x] Open exactly these four paths in `auth.config.ts` public routes
   (not the whole `/api/leads/` prefix).
 - [ ] Promote-to-lead step (`inbound_leads` → `leads`).
 
