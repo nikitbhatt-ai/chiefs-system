@@ -54,7 +54,9 @@ function trim(value: FormDataEntryValue | null, max = 2000): string | null {
  * Falls back to the site root if the submitted URL isn't one of ours.
  */
 function safeRedirect(pageUrl: string | null, flag: string): string {
-  const fallback = process.env.PUBLIC_SITE_URL ?? "/";
+  // Must be an absolute URL — NextResponse.redirect throws on "/".
+  const fallback =
+    process.env.PUBLIC_SITE_URL || "https://chiefs-pursuit-surplus.myshopify.com";
 
   if (!pageUrl) return fallback;
 
