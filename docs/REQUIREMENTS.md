@@ -245,6 +245,30 @@ shared body shape — no per-source code path.
 - **Response**: `201 { ok: true, id }` on success, `401` on bad
   secret, `400` on invalid payload.
 
+### Shopify form intake → `inbound_leads` quarantine table
+
+The Shopify storefront has four forms that submit by plain HTML `POST`
+(form-encoded, not JSON). The Shopify side is already built and its
+field names must not change.
+
+| Form | Endpoint | `source_channel` |
+|---|---|---|
+| General contact | `POST /api/leads/contact` | `shopify_contact` |
+| Parts inquiry | `POST /api/leads/parts-inquiry` | `shopify_parts_inquiry` |
+| Inventory inquiry | `POST /api/leads/inventory-inquiry` | `shopify_inventory_inquiry` |
+| Vehicle inquiry | `POST /api/leads/vehicle-inquiry` | `shopify_vehicle_inquiry` |
+
+- [x] `inbound_leads` table (`src/db/schema.ts :: inboundLeads`, SQL in
+  `docs/sql/inbound_leads.sql`). Deliberately separate from `leads`:
+  public-form spam lands here, good rows are promoted later. Do not
+  modify `leads` or existing lead logic for this.
+- [ ] Intake handler + four routes: honeypot (`company_website`),
+  min-fill-time (`ts`), per-IP-hash rate limit, 303 redirect back to
+  `page_url` only if its host is in `ALLOWED_REDIRECT_HOSTS`.
+- [ ] Open exactly these four paths in `auth.config.ts` public routes
+  (not the whole `/api/leads/` prefix).
+- [ ] Promote-to-lead step (`inbound_leads` → `leads`).
+
 ### Required env var
 
 `LEAD_CAPTURE_SECRET` — generate with `openssl rand -hex 32` and

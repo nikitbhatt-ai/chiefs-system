@@ -1398,6 +1398,83 @@ export const qboSyncLog = pgTable("qbo_sync_log", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, (t) => [index("qbo_sync_log_created_idx").on(t.createdAt)]);
 
+/**
+ * Every lead that arrives from an outside form lands here first.
+ *
+ * This is deliberately a raw intake table, NOT the main `leads` table.
+ * Public forms receive spam and malformed data, and that mess should land
+ * somewhere quarantined. A human (or a job) promotes good rows into the
+ * real leads pipeline. Written by /api/leads/{contact,parts-inquiry,
+ * inventory-inquiry,vehicle-inquiry}. SQL: docs/sql/inbound_leads.sql.
+ */
+export const inboundLeads = pgTable("inbound_leads", {
+  id: uuid("id").primaryKey().defaultRandom(),
+
+  // Which form this came from. Keep these values stable — reporting uses them.
+  //   'shopify_contact'            -> general contact page
+  //   'shopify_parts_inquiry'      -> bottom of the Products collection
+  //   'shopify_inventory_inquiry'  -> bottom of the Inventory collection
+  //   'shopify_vehicle_inquiry'    -> a specific vehicle listing
+  sourceChannel: text("source_channel").notNull(),
+
+  // Who's reaching out
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  agency: text("agency"),
+  // How sales decides who to call first. Required on the form, but
+  // nullable here so a missing value never costs a lead.
+  position: text("position"),
+
+  // What they said
+  subject: text("subject"),
+  message: text("message"),
+  quantity: integer("quantity"),
+
+  // Contact form
+  topic: text("topic"),
+
+  // Parts form
+  partNumber: text("part_number"),
+  vehicleFitment: text("vehicle_fitment"),
+  installNeeded: text("install_needed"),
+
+  // Inventory form — the ones sales will filter on
+  vehicleType: text("vehicle_type"),
+  upfitNeeded: text("upfit_needed"),
+  timeline: text("timeline"),
+  purchaseMethod: text("purchase_method"),
+
+  // Product context — populated for vehicle inquiries, null for general
+  // contact. This is what makes a lead callable.
+  productTitle: text("product_title"),
+  productId: text("product_id"),
+  productHandle: text("product_handle"),
+  variantId: text("variant_id"),
+  pageUrl: text("page_url"),
+
+  // Diagnostics. A HASH of the IP, never the IP itself — enough to
+  // rate-limit, not enough to be personal data.
+  ipHash: text("ip_hash"),
+  userAgent: text("user_agent"),
+
+  // Everything exactly as submitted, so a parsing mistake can be replayed.
+  rawPayload: jsonb("raw_payload").notNull(),
+
+  // 'new' -> 'promoted' -> 'spam' / 'closed'
+  status: text("status").notNull().default("new"),
+
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("inbound_leads_created_idx").on(t.createdAt),
+  index("inbound_leads_email_idx").on(t.email),
+  // Used by the rate limiter — keep this one.
+  index("inbound_leads_ip_recent_idx").on(t.ipHash, t.createdAt),
+]);
+
+export type InboundLead = typeof inboundLeads.$inferSelect;
+export type NewInboundLead = typeof inboundLeads.$inferInsert;
+
 export const usersRelations = relations(users, ({ many }) => ({ deals: many(deals), timeEntries: many(timeEntries), notes: many(notes) }));
 export const customersRelations = relations(customers, ({ many }) => ({ deals: many(deals), quotes: many(quotes), workOrders: many(workOrders) }));
 export const dealsRelations = relations(deals, ({ one }) => ({ customer: one(customers, { fields: [deals.customerId], references: [customers.id] }), assignee: one(users, { fields: [deals.assignedTo], references: [users.id] }) }));
