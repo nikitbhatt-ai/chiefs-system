@@ -13,7 +13,12 @@ export type WorkOrderLine = {
   brand: string | null;
   partNumber: string | null;
   quantity: number;
+  /** Sales' shop note, printed under the part. Build sheet only. */
+  notes?: string | null;
 };
+
+/** A note sales left on a labor / fee line — no part, so it prints on its own. */
+export type WorkOrderNote = { label: string; notes: string };
 
 export type WorkOrderData = {
   workOrderId: string;
@@ -26,6 +31,8 @@ export type WorkOrderData = {
   vehicleSummary: string | null;
   lineItems: WorkOrderLine[];
   notes: string | null;
+  /** Notes from labor / fee lines, which carry no part of their own. */
+  lineNotes?: WorkOrderNote[];
 };
 
 export function WorkOrderDocument({ data }: { data: WorkOrderData }) {
@@ -87,17 +94,46 @@ export function WorkOrderDocument({ data }: { data: WorkOrderData }) {
           ) : (
             data.lineItems.map((l, idx) => {
               const last = idx === data.lineItems.length - 1;
+              const note = (l.notes ?? "").trim();
               return (
-                <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "45%" }]}>{l.name}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>{l.brand ?? "—"}</Text>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "20%" }]}>{l.partNumber ?? "—"}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
+                <View key={idx} wrap={false}>
+                  <View style={note ? styles.tableRow : last ? styles.tableRowLast : styles.tableRow}>
+                    <Text style={[styles.tableCell, styles.cellLeft, { width: "45%" }]}>{l.name}</Text>
+                    <Text style={[styles.tableCell, styles.cellLeft, { width: "25%" }]}>{l.brand ?? "—"}</Text>
+                    <Text style={[styles.tableCell, styles.cellLeft, { width: "20%" }]}>{l.partNumber ?? "—"}</Text>
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
+                  </View>
+                  {note ? (
+                    // Sales' note for this part, indented under it so the shop
+                    // reads it with the line it belongs to.
+                    <View style={last ? styles.tableRowLast : styles.tableRow}>
+                      <Text
+                        style={[styles.tableCell, styles.cellLeft, { width: "100%", paddingLeft: 14, color: "#444" }]}
+                      >
+                        Note: {note}
+                      </Text>
+                    </View>
+                  ) : null}
                 </View>
               );
             })
           )}
         </View>
+
+        {/* Notes sales left on labor / fee lines. Those carry no part, so they
+            can't ride the table above — but they're still shop instructions, so
+            they print here rather than being dropped. Label only: no hours,
+            rate, or amount reaches this sheet. */}
+        {data.lineNotes && data.lineNotes.length > 0 ? (
+          <View>
+            <Text style={styles.sectionTitle}>Additional notes</Text>
+            {data.lineNotes.map((n, idx) => (
+              <Text key={idx} style={styles.blockLabel}>
+                {n.label}: {n.notes}
+              </Text>
+            ))}
+          </View>
+        ) : null}
 
         {data.notes ? (
           <View>

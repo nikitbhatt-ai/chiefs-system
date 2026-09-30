@@ -2046,6 +2046,29 @@ manufacturer part number, and quantity** per line.
   add + edit forms. The work-order PDF prints `mfg_part_number` and
   falls back to `sku` when it's blank. "Brand" = the part's manufacturer
   vendor name (`parts.manufacturer_id`).
+- [x] **Download from the quote.** The estimate's action bar carries a
+  "Download work order" button, so sales pulls the build sheet where
+  they already are instead of navigating to the work order. It hits
+  `GET /api/pdf/work-orders/by-quote/[quoteId]` (record type
+  `work_order_from_quote`), which renders the SAME template from the
+  estimate. Keying it on the quote means it also works **before** a work
+  order exists — one is only created when the deal reaches Won /
+  confirmed. When a work order does exist, its number and status are
+  borrowed so both documents agree; otherwise the sheet reports the
+  estimate's own workflow stage and its number.
+- [x] **Per-line shop notes.** Every quote line — part, labor and fee —
+  carries an optional `notes` string the sales team types into a field
+  under the line in the quote editor. It is a SHOP note: it prints on
+  the build sheet and nowhere else. It never appears on the customer
+  quote, the invoice, or the print view, so a rep can write plainly
+  ("mount driver side", "customer supplies bracket") without it reaching
+  the customer. Notes on part lines print indented under their part;
+  labor and fee lines carry no part and so can't ride the parts table —
+  their notes print in an "Additional notes" block (label + note only,
+  never hours, rate or amount) rather than being silently dropped. The
+  work-order detail page shows the same notes on screen so paper and
+  screen agree. Stored in the existing `quotes.line_items` jsonb, so
+  **no migration is required**.
 
 #### Schema addition (Phase 3a) — run in Neon's SQL Editor
 

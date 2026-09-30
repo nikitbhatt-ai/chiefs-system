@@ -258,7 +258,14 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
               ) : (
                 partLines.map((l, i) => (
                   <tr key={i} className="border-t border-white/5">
-                    <td className="px-3 py-2 text-xs text-white">{l.name}</td>
+                    <td className="px-3 py-2 text-xs text-white">
+                      {l.name}
+                      {/* Sales' note for this line — same text the printed
+                          build sheet carries, so screen and paper agree. */}
+                      {l.notes ? (
+                        <span className="block text-[11px] text-amber-300/80 mt-0.5">Note: {l.notes}</span>
+                      ) : null}
+                    </td>
                     <td className="px-3 py-2 text-xs">{l.brand ?? "—"}</td>
                     <td className="px-3 py-2 text-xs font-mono">{l.partNumber ?? "—"}</td>
                     <td className="px-3 py-2 text-xs text-right">{l.quantity}</td>

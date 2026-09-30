@@ -13,9 +13,36 @@ export type WorkOrderPartLine = {
   brand: string | null;
   partNumber: string | null;
   quantity: number;
+  /** Sales' shop note for this line. Build sheet only — never a customer doc. */
+  notes: string | null;
 };
 
-type QuoteLineItem = { kind?: string; partId?: string; description?: string; quantity?: number };
+/**
+ * A note sales left on a labor or fee line. Those lines carry no parts, so they
+ * never reach the parts table above — but their notes are still instructions for
+ * the shop, so they're surfaced separately rather than silently dropped. Only
+ * the label and the note travel: hours, rates and amounts stay off the de-priced
+ * build sheet.
+ */
+export type WorkOrderNoteLine = { label: string; notes: string };
+
+type QuoteLineItem = {
+  kind?: string;
+  partId?: string;
+  description?: string;
+  quantity?: number;
+  notes?: string;
+};
+
+/** Notes left on non-part (labor / fee) lines, in line order. Pure — no I/O. */
+export function otherLineNotes(lineItems: unknown): WorkOrderNoteLine[] {
+  return ((lineItems as QuoteLineItem[] | null) ?? [])
+    .filter((l) => l?.kind && l.kind !== "item" && String(l.notes ?? "").trim() !== "")
+    .map((l) => ({
+      label: String(l.description ?? "").trim() || (l.kind === "labor" ? "Labor" : "Fee"),
+      notes: String(l.notes).trim(),
+    }));
+}
 
 // Resolve from a quote's already-loaded line items (avoids a re-query when the
 // caller already has them).
@@ -52,6 +79,7 @@ export async function resolvePartsFromLineItems(lineItems: unknown): Promise<Wor
       brand,
       partNumber: p ? p.mfgPartNumber || p.sku : null,
       quantity: Number(l.quantity || 0),
+      notes: String(l.notes ?? "").trim() || null,
     };
   });
 }
