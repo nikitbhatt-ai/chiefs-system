@@ -1713,9 +1713,44 @@ user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
       segmented choices (`.seg-btn`), lens dots — all in `globals.css`.
       Applied to the configurator and new estimate pieces first; roll out
       app-wide once approved.
+- [x] **Reset builder** (2026-09-30) — button in the configurator header.
+      Confirms, then deletes ONLY this estimate's `upfit_configs` row
+      (vehicle, lights, build notes) and its customer-folder spec link, and
+      returns to "Pick a vehicle to begin". The estimate's line items,
+      prices and status are never touched. "Clear all" still removes just
+      the lights.
 - [ ] Snap points (preset positions markers snap to) + "Edit snap points".
 - [ ] Starter packages for the diagram (apply a common layout in one click).
 - [ ] Editable light-type list in Settings (today it's the code list above).
+
+### Auto-save everywhere on the estimate (2026-09-30)
+
+User requirement: working in the estimate and the builder side by side must
+never lose work — everything auto-saves.
+
+- [x] **Estimate editor auto-saves** ~1s after any change (lines, customer,
+      status, tax rate, vehicle/VIN, notes) via the shared
+      `src/lib/useAutosave.ts` hook the configurator also uses. Status reads
+      Saving… / All changes saved / Couldn't save — retrying. "Save quote"
+      became **Save now** (saves immediately). Closing the tab with an
+      unsaved change warns.
+- [x] **Save before acting** — Email to Customer, Download PDF, invoice PDF,
+      print view, internal copy, Spec sheet PDF, Configure Vehicle / Edit
+      Configuration, Back, and workflow-stage moves all flush the editor's
+      pending save first (`src/lib/quoteFlush.ts`, `FlushLink`), so what
+      they read or send matches the screen.
+- [x] **Stale-tab protection** — the editor only sends `customerId` and
+      `status` when the rep changed them in that editor; `saveQuote` keeps the
+      stored value otherwise. So an old tab can't undo "sent" (from Email to
+      Customer) or "converted".
+- [x] **Tax rate fix** — the editor used to open every quote at 0% and the
+      next save wiped the tax. It now opens at the rate the quote was saved
+      at (`impliedTaxRatePct` recovers it from the stored tax; no schema
+      change).
+- The estimate (quote row) and the configuration (`upfit_configs` row) are
+  separate records, so the editor and the configurator open at the same
+  time never overwrite each other. The same estimate open in two tabs is
+  still last-save-wins.
 
 ### Estimate page redesign (next, from the same upfithq screenshots)
 
@@ -1730,7 +1765,8 @@ user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
 - [ ] Line items grouped by manufacturer (Whelen, Havis, Setina, SoundOff,
       Troy, Pro-Gard…) each with its own + Add.
 - [ ] Right sidebar: Customer card (View Full Profile) + Tax-exempt toggle.
-- [ ] "Today" home dashboard (asked whether to include — pending answer).
+- ~~"Today" home dashboard~~ — **skipped** (2026-09-30): the Sales and Ops
+  home pages already cover it; the user doesn't want a second home page.
 
 ### Schema additions (Upfit Builder)
 

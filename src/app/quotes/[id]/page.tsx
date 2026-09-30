@@ -5,13 +5,14 @@ import { db } from "@/db";
 import { quotes, customers, upfitConfigs } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { EmailCustomerButton } from "@/components/EmailCustomerButton";
+import { FlushLink } from "@/components/FlushLink";
 import { UpfitDiagramPreview } from "@/components/upfit/UpfitDiagramPreview";
 import { getTemplate } from "@/lib/upfit/templates";
 import { BRANDING } from "@/lib/pdf/branding";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
-import { quoteTotals } from "@/lib/quoteTotals";
+import { quoteTotals, impliedTaxRatePct } from "@/lib/quoteTotals";
 import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
 export const dynamic = "force-dynamic";
@@ -20,13 +21,19 @@ async function saveQuote(formData: FormData) {
   "use server";
   const id = String(formData.get("id") ?? "");
   if (!id) return;
-  const customerId = String(formData.get("customerId") ?? "") || null;
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const linesJson = String(formData.get("lines") ?? "[]");
   const lines = JSON.parse(linesJson) as QuoteLine[];
 
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) return;
+
+  // The editor only sends customerId / status when the rep changed them, so a
+  // stale tab can't put back a value someone else has since changed. Absent →
+  // keep what's stored.
+  const customerId = formData.has("customerId")
+    ? String(formData.get("customerId") ?? "") || null
+    : q.customerId;
 
   // Only accept a recognized status. If the field is missing or garbage,
   // keep the quote's existing status rather than silently clobbering it back
@@ -149,44 +156,40 @@ export default async function QuotePage({
           hasConfiguration={!!config}
           companyName={BRANDING.companyName}
         />
-        <a
+        <FlushLink
+          newTab
           href={`/api/pdf/quotes/${q.id}`}
-          target="_blank"
-          rel="noopener"
           className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
         >
           Download PDF
-        </a>
+        </FlushLink>
         {q.status === "converted" && (
-          <a
+          <FlushLink
+            newTab
             href={`/api/pdf/quotes/${q.id}?variant=invoice`}
-            target="_blank"
-            rel="noopener"
             className="text-[11px] font-body bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-500/30 rounded-md px-3 py-1.5"
           >
             Download invoice PDF
-          </a>
+          </FlushLink>
         )}
-        <a
+        <FlushLink
+          newTab
           href={`/quotes/${q.id}/print`}
-          target="_blank"
-          rel="noopener"
           className="text-[11px] font-body bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10 rounded-md px-3 py-1.5"
         >
           Open print view
-        </a>
+        </FlushLink>
         {/* The internal copy carries our cost and margin on every line. Styled
             amber and labelled so it is never confused with the two customer
             documents sitting next to it. */}
-        <a
+        <FlushLink
+          newTab
           href={`/api/pdf/quotes/${q.id}?internal=1${q.status === "converted" ? "&variant=invoice" : ""}`}
-          target="_blank"
-          rel="noopener"
           title="Sales copy: shows our average cost and margin per line. Do not send to the customer."
           className="text-[11px] font-body bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-md px-3 py-1.5"
         >
           Internal copy (cost + margin)
-        </a>
+        </FlushLink>
       </div>
 
       <QuoteWorkflowStrip
@@ -202,12 +205,12 @@ export default async function QuotePage({
           <h2 className="font-ui font-bold text-lg text-white">Vehicle &amp; Lights</h2>
           {config ? (
             <div className="flex flex-wrap gap-2">
-              <a href={`/api/pdf/upfit/${q.id}`} className="btn-outline btn-sm">
+              <FlushLink href={`/api/pdf/upfit/${q.id}`} className="btn-outline btn-sm">
                 Spec sheet PDF
-              </a>
-              <a href={`/quotes/${q.id}/upfit`} className="btn-outline btn-sm">
+              </FlushLink>
+              <FlushLink href={`/quotes/${q.id}/upfit`} className="btn-outline btn-sm">
                 Edit Configuration
-              </a>
+              </FlushLink>
             </div>
           ) : null}
         </div>
@@ -229,9 +232,9 @@ export default async function QuotePage({
               Add a vehicle to draw the lighting layout. The diagram is visual only — parts are quoted as
               line items separately.
             </p>
-            <a href={`/quotes/${q.id}/upfit`} className="btn-cta mt-5">
+            <FlushLink href={`/quotes/${q.id}/upfit`} className="btn-cta mt-5">
               + Configure Vehicle
-            </a>
+            </FlushLink>
           </div>
         )}
       </section>
@@ -249,6 +252,7 @@ export default async function QuotePage({
         initialVehicleModel={q.vehicleModel ?? ""}
         initialVehicleTrim={q.vehicleTrim ?? ""}
         initialUnitNumber={q.unitNumber ?? ""}
+        initialTaxRate={String(impliedTaxRatePct(initial, Number(q.taxTotal ?? 0)))}
         partCosts={partCosts}
         action={saveQuote}
       />

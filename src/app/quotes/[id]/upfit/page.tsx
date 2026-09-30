@@ -6,7 +6,7 @@ import { quotes, upfitConfigs, type UpfitPin } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { UpfitBuilder } from "@/components/UpfitBuilder";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
-import { upsertUpfitLink } from "@/lib/customerDocLinks";
+import { removeUpfitLink, upsertUpfitLink } from "@/lib/customerDocLinks";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +55,26 @@ async function saveUpfit(formData: FormData) {
   if (quoteRow?.customerId) revalidatePath(`/crm/${quoteRow.customerId}`);
 }
 
+// "Reset builder": delete this estimate's vehicle configuration (vehicle,
+// lights, build notes) so sales can start over. Touches ONLY the
+// configuration — the estimate's line items, prices and status are left
+// exactly as they are (the diagram never fed the price anyway).
+async function resetUpfit(formData: FormData) {
+  "use server";
+  const quoteId = String(formData.get("quoteId") ?? "");
+  if (!quoteId) return;
+  await db.delete(upfitConfigs).where(eq(upfitConfigs.quoteId, quoteId));
+  try {
+    await removeUpfitLink(quoteId);
+  } catch (err) {
+    console.error("removeUpfitLink failed:", err);
+  }
+  revalidatePath(`/quotes/${quoteId}/upfit`);
+  revalidatePath(`/quotes/${quoteId}`);
+  const [quoteRow] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (quoteRow?.customerId) revalidatePath(`/crm/${quoteRow.customerId}`);
+}
+
 export default async function UpfitPage({
   params,
 }: {
@@ -83,6 +103,7 @@ export default async function UpfitPage({
         initialPins={config?.pins ?? []}
         initialNotes={config?.notes ?? ""}
         action={saveUpfit}
+        resetAction={resetUpfit}
       />
     </AppShell>
   );

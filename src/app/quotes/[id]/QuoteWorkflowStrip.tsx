@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { flushQuoteEditor } from "@/lib/quoteFlush";
 
 // Workflow-stage strip on the quote page. Posts to the same
 // /api/quotes/[id]/workflow-stage endpoint the /workflow board uses, so a
@@ -29,6 +30,9 @@ export function QuoteWorkflowStrip({
     setError(null);
     setBusyStage(stage);
     try {
+      // The move reads the saved quote (approval gate, stock deduction from
+      // its lines), so save any pending edits in the editor first.
+      if (!(await flushQuoteEditor())) return;
       const res = await fetch(`/api/quotes/${quoteId}/workflow-stage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

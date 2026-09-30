@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { PartSearchCombobox, type PartHit } from "@/components/PartSearchCombobox";
 import { MoneyInput, QtyInput, HoursInput, PercentInput } from "@/components/MoneyInput";
 import { fmtUSD } from "@/lib/money";
@@ -8,7 +8,8 @@ import { PackageSearchCombobox, type PackageHit } from "@/components/PackageSear
 import { expandPackageWithBundlePrice } from "@/lib/packages";
 import { quoteTotals, lineNet, round2 } from "@/lib/quoteTotals";
 import { lineUnitCost, lineExtCost, costRollup, type PartCostMap } from "@/lib/lineCost";
-import { SubmitButton } from "@/components/SubmitButton";
+import { useAutosave, autosaveLabel } from "@/lib/useAutosave";
+import { registerQuoteFlusher } from "@/lib/quoteFlush";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -72,6 +73,7 @@ export function QuoteEditor({
   initialVehicleModel = "",
   initialVehicleTrim = "",
   initialUnitNumber = "",
+  initialTaxRate = "0",
   partCosts = {},
   action,
 }: {
@@ -87,6 +89,8 @@ export function QuoteEditor({
   initialVehicleModel?: string;
   initialVehicleTrim?: string;
   initialUnitNumber?: string;
+  /** Tax rate (percent) the quote was saved at. */
+  initialTaxRate?: string;
   /**
    * partId → internal weighted-average cost, for the margin readouts. Resolved
    * server-side because a saved line stores only `partId`; a line added from a
@@ -96,7 +100,23 @@ export function QuoteEditor({
   action: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<QuoteLine[]>(initialLines);
-  const [taxRate, setTaxRate] = useState("0");
+  const [taxRate, setTaxRate] = useState(initialTaxRate);
+  // Customer / status / notes are controlled so auto-save can read them.
+  // Customer and status are only SENT when changed here ("touched"), so a
+  // tab opened before someone else moved the quote to Sent / Converted
+  // can't quietly put the old value back. Untouched, they follow the
+  // server (e.g. Email to Customer flipping a draft to sent).
+  const [customerSel, setCustomerSel] = useState(customerId ?? "");
+  const [statusSel, setStatusSel] = useState<string>(status);
+  const [notesVal, setNotesVal] = useState(notes);
+  const customerTouched = useRef(false);
+  const statusTouched = useRef(false);
+  useEffect(() => {
+    if (!customerTouched.current) setCustomerSel(customerId ?? "");
+  }, [customerId]);
+  useEffect(() => {
+    if (!statusTouched.current) setStatusSel(status);
+  }, [status]);
   // Vehicle (VIN decoder). Ties the exact car to this quote/invoice.
   const [vin, setVin] = useState(initialVin);
   const [vehYear, setVehYear] = useState(initialVehicleYear);
@@ -751,22 +771,72 @@ export function QuoteEditor({
     );
   };
 
+  // --- Auto-save ---------------------------------------------------------
+  // Everything on screen saves ~1s after the last change (same behavior as
+  // the vehicle configurator). Buttons elsewhere on the page flush it first
+  // via registerQuoteFlusher so PDFs, emails and workflow moves always see
+  // the latest version.
+  const snapshot = {
+    customerSel,
+    statusSel,
+    notesVal,
+    lines,
+    taxRate,
+    vin,
+    vehYear,
+    vehMake,
+    vehModel,
+    vehTrim,
+    unitNumber,
+  };
+  const autosave = useAutosave(snapshot, async (snap) => {
+    const fd = new FormData();
+    fd.set("id", id);
+    fd.set("lines", JSON.stringify(snap.lines));
+    fd.set("notes", snap.notesVal);
+    fd.set("taxRate", snap.taxRate);
+    fd.set("vin", snap.vin);
+    fd.set("vehicleYear", snap.vehYear);
+    fd.set("vehicleMake", snap.vehMake);
+    fd.set("vehicleModel", snap.vehModel);
+    fd.set("vehicleTrim", snap.vehTrim);
+    fd.set("unitNumber", snap.unitNumber);
+    const sentCustomer = customerTouched.current;
+    const sentStatus = statusTouched.current;
+    if (sentCustomer) fd.set("customerId", snap.customerSel);
+    if (sentStatus) fd.set("status", snap.statusSel);
+    await action(fd);
+    // Saved: from here on these follow the server again, unless the user
+    // changed them again while the save was in flight.
+    if (sentCustomer && latestSel.current.customerSel === snap.customerSel) customerTouched.current = false;
+    if (sentStatus && latestSel.current.statusSel === snap.statusSel) statusTouched.current = false;
+  });
+  const latestSel = useRef({ customerSel, statusSel });
+  latestSel.current = { customerSel, statusSel };
+  const { flush } = autosave;
+  useEffect(() => registerQuoteFlusher(flush), [flush]);
+
   return (
-    <form action={action} className="space-y-4">
-      <input type="hidden" name="id" value={id} />
-      <input type="hidden" name="lines" value={JSON.stringify(lines)} />
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        void flush();
+      }}
+      className="space-y-4"
+    >
 
       <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Uncontrolled selects: React 19 auto-resets the <form> after a
-            server action, which snaps a *controlled* select back to its
-            first option (Draft) and then won't re-sync the DOM — that was
-            the "reverts to draft" bug. An uncontrolled select resets to its
-            defaultValue instead, and the `key` re-reads defaultValue after a
-            save changes the saved value, so the box always shows the truth. */}
+        {/* Controlled selects are safe again: the form no longer posts via
+            a React server-action `action` prop (that auto-reset the form and
+            caused the old "reverts to draft" bug). Saves go through
+            auto-save, which never resets the form. */}
         <select
-          key={`customer-${customerId ?? ""}`}
           name="customerId"
-          defaultValue={customerId ?? ""}
+          value={customerSel}
+          onChange={(e) => {
+            customerTouched.current = true;
+            setCustomerSel(e.target.value);
+          }}
           className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         >
           <option value="">— No customer —</option>
@@ -777,9 +847,12 @@ export function QuoteEditor({
           ))}
         </select>
         <select
-          key={`status-${status}`}
           name="status"
-          defaultValue={status}
+          value={statusSel}
+          onChange={(e) => {
+            statusTouched.current = true;
+            setStatusSel(e.target.value);
+          }}
           className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
         >
           <option value="draft">Draft</option>
@@ -881,7 +954,7 @@ export function QuoteEditor({
           />
         </label>
         <p className="text-[10px] text-zinc-500 font-body">
-          Decode auto-fills year / make / model / trim; edit any field by hand. Saved with the quote (Save button below).
+          Decode auto-fills year / make / model / trim; edit any field by hand. Saves automatically with the quote.
         </p>
       </div>
 
@@ -980,7 +1053,8 @@ export function QuoteEditor({
           </label>
           <textarea
             name="notes"
-            defaultValue={notes}
+            value={notesVal}
+            onChange={(e) => setNotesVal(e.target.value)}
             rows={6}
             className="w-full bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500"
             placeholder="Internal notes for this quote"
@@ -1034,23 +1108,49 @@ export function QuoteEditor({
           <a
             href={`/quotes/${id}/print`}
             target="_blank"
+            onClick={async (e) => {
+              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+              e.preventDefault();
+              await flush();
+              window.open(`/quotes/${id}/print`, "_blank");
+            }}
             className="text-xs font-body text-zinc-300 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors"
           >
             Print / Save as PDF
           </a>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          <span
+            aria-live="polite"
+            className={`text-xs font-body mr-1 ${
+              autosave.state === "error"
+                ? "text-red-400"
+                : autosave.state === "saved"
+                  ? "text-green-400"
+                  : "text-zinc-400"
+            }`}
+          >
+            {autosaveLabel(autosave.state)}
+          </span>
           <a
             href="/quotes"
+            onClick={async (e) => {
+              if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return;
+              e.preventDefault();
+              await flush();
+              window.location.href = "/quotes";
+            }}
             className="text-xs font-body text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors"
           >
             Back
           </a>
-          <SubmitButton
-            className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
+          <button
+            type="submit"
+            disabled={autosave.state === "saving"}
+            className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors disabled:opacity-60"
           >
-            Save quote
-          </SubmitButton>
+            Save now
+          </button>
         </div>
       </div>
     </form>

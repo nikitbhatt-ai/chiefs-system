@@ -26,6 +26,7 @@ import {
   type PinSizeKey,
 } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
+import { useAutosave, autosaveLabel, type AutosaveState } from "@/lib/useAutosave";
 import { LightSwatch, PinOnDiagram } from "@/components/upfit/PinGraphics";
 
 export type UpfitBuilderProps = {
@@ -37,11 +38,12 @@ export type UpfitBuilderProps = {
   initialPins: UpfitPin[];
   initialNotes: string;
   action: (formData: FormData) => Promise<void>;
+  // Deletes this estimate's configuration (not the estimate) — "Reset builder".
+  resetAction: (formData: FormData) => Promise<void>;
 };
 
 type Shape = NonNullable<UpfitPin["shape"]>;
 type Orientation = NonNullable<UpfitPin["orientation"]>;
-type SaveState = "saved" | "dirty" | "saving" | "error";
 
 const DEFAULT_LENSES: LensColorKey[] = ["red", "blue", "amber"];
 const LAYOUTS = [
@@ -67,7 +69,6 @@ const SIZE_CHOICES: { key: PinSizeKey; label: string }[] = [
 // Below this distance (fraction of the image box) a pointerdown is a
 // click-to-select rather than a drag, so tapping a light doesn't nudge it.
 const DRAG_THRESHOLD = 0.01;
-const AUTOSAVE_MS = 900;
 
 function randomId(): string {
   return Math.random().toString(36).slice(2, 10);
@@ -88,6 +89,7 @@ export function UpfitBuilder({
   initialPins,
   initialNotes,
   action,
+  resetAction,
 }: UpfitBuilderProps) {
   const router = useRouter();
   const backHref = `/quotes/${quoteId}`;
@@ -121,66 +123,26 @@ export function UpfitBuilder({
   const activePin = pins.find((p) => p.id === activePinId) ?? null;
 
   // --- Auto-save -----------------------------------------------------------
-  // Every change is saved ~1s after the last edit. Saves run one at a
-  // time, in order, and only when something actually changed since the
-  // last successful save.
-  const snapshot = { bodyStyle, vehicleLabel, pins, notes };
-  const latestRef = useRef(snapshot);
-  latestRef.current = snapshot;
-  const lastSavedRef = useRef(JSON.stringify(snapshot));
-  const timerRef = useRef<number | null>(null);
-  const chainRef = useRef<Promise<void>>(Promise.resolve());
-  const [saveState, setSaveState] = useState<SaveState>("saved");
-
-  const flushSave = useCallback((): Promise<void> => {
-    if (timerRef.current) {
-      window.clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-    chainRef.current = chainRef.current.then(async () => {
-      const snap = latestRef.current;
-      const serialized = JSON.stringify(snap);
-      if (serialized === lastSavedRef.current || !snap.bodyStyle) return;
-      setSaveState("saving");
+  // Every change is saved ~1s after the last edit (shared hook, same as the
+  // estimate editor). Nothing saves until a vehicle is picked.
+  const autosave = useAutosave(
+    { bodyStyle, vehicleLabel, pins, notes },
+    async (snap) => {
+      if (!snap.bodyStyle) return;
       const fd = new FormData();
       fd.set("quoteId", quoteId);
       fd.set("bodyStyle", snap.bodyStyle);
       fd.set("vehicleLabel", snap.vehicleLabel);
       fd.set("pins", JSON.stringify(snap.pins));
       fd.set("notes", snap.notes);
-      try {
-        await action(fd);
-        lastSavedRef.current = serialized;
-        setSaveState(JSON.stringify(latestRef.current) === serialized ? "saved" : "dirty");
-      } catch {
-        setSaveState("error");
-        // Try again shortly; the next edit also retries.
-        timerRef.current = window.setTimeout(() => void flushSave(), 5000);
-      }
-    });
-    return chainRef.current;
-  }, [action, quoteId]);
-
-  const serializedNow = JSON.stringify(snapshot);
-  useEffect(() => {
-    if (serializedNow === lastSavedRef.current) return;
-    setSaveState("dirty");
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => void flushSave(), AUTOSAVE_MS);
-  }, [serializedNow, flushSave]);
-
-  // Warn before closing the tab with an unsaved change.
-  useEffect(() => {
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (JSON.stringify(latestRef.current) !== lastSavedRef.current) e.preventDefault();
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, []);
+      await action(fd);
+    },
+    { enabled: !!bodyStyle },
+  );
+  const flushSave = autosave.flush;
 
   const finish = async () => {
-    await flushSave();
-    if (JSON.stringify(latestRef.current) !== lastSavedRef.current && latestRef.current.bodyStyle) {
+    if (!(await flushSave())) {
       window.alert("Couldn't save the layout. Check your connection and try again.");
       return;
     }
@@ -192,6 +154,41 @@ export function UpfitBuilder({
     // The PDF route answers with Content-Disposition: attachment, so this
     // downloads without leaving the page.
     window.location.href = `/api/pdf/upfit/${quoteId}`;
+  };
+
+  // "Reset builder": start over from "Pick a vehicle". Deletes only this
+  // estimate's configuration; the estimate's line items and prices are
+  // untouched.
+  const [resetting, setResetting] = useState(false);
+  const resetBuilder = async () => {
+    if (
+      !window.confirm(
+        "Reset the builder? This removes the vehicle, all lights and the build notes so you can start over. " +
+          "The estimate's line items and prices are NOT changed.",
+      )
+    ) {
+      return;
+    }
+    setResetting(true);
+    try {
+      // Let any in-flight save land first so it can't re-create the
+      // configuration right after it's deleted.
+      await flushSave();
+      const fd = new FormData();
+      fd.set("quoteId", quoteId);
+      await resetAction(fd);
+      setBodyStyle(null);
+      setPins([]);
+      setNotes("");
+      setVehicleLabel("");
+      setActivePinId(null);
+      setLightTypeKey("");
+      setJustAdded(null);
+    } catch {
+      window.alert("Couldn't reset the builder. Check your connection and try again.");
+    } finally {
+      setResetting(false);
+    }
   };
 
   // --- Vehicle -------------------------------------------------------------
@@ -376,9 +373,9 @@ export function UpfitBuilder({
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-5 border-b border-white/10">
         <div className="min-w-0">
           <div className="label-caps">
-            <a href={backHref} className="text-[var(--color-cta)] hover:underline">
+            <button type="button" onClick={finish} className="text-[var(--color-cta)] hover:underline uppercase">
               {quoteNumber}
-            </a>{" "}
+            </button>{" "}
             / Configurator
           </div>
           <h1 className="font-ui font-bold text-3xl text-white mt-1">Vehicle Configurator</h1>
@@ -389,11 +386,22 @@ export function UpfitBuilder({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
-          <SaveBadge state={saveState} hasVehicle={!!bodyStyle} />
+          <SaveBadge state={autosave.state} hasVehicle={!!bodyStyle} />
           {bodyStyle ? (
-            <button type="button" onClick={downloadSpec} className="btn-outline btn-sm">
-              Spec sheet PDF
-            </button>
+            <>
+              <button type="button" onClick={downloadSpec} className="btn-outline btn-sm">
+                Spec sheet PDF
+              </button>
+              <button
+                type="button"
+                onClick={resetBuilder}
+                disabled={resetting}
+                className="btn-outline btn-sm"
+                title="Start over: clears the vehicle, lights and build notes. The estimate is not changed."
+              >
+                {resetting ? "Resetting…" : "Reset builder"}
+              </button>
+            </>
           ) : null}
           <button type="button" onClick={finish} className="btn-outline">
             ← Back to estimate
@@ -786,18 +794,14 @@ function Panel({
   );
 }
 
-function SaveBadge({ state, hasVehicle }: { state: SaveState; hasVehicle: boolean }) {
+function SaveBadge({ state, hasVehicle }: { state: AutosaveState; hasVehicle: boolean }) {
   if (!hasVehicle) return null;
-  const text =
-    state === "saving"
-      ? "Saving…"
-      : state === "dirty"
-        ? "Unsaved changes"
-        : state === "error"
-          ? "Couldn't save — retrying"
-          : "All changes saved";
   const tone = state === "error" ? "text-red-400" : state === "saved" ? "text-green-400" : "text-zinc-400";
-  return <span className={`text-xs mr-1 ${tone}`} aria-live="polite">{text}</span>;
+  return (
+    <span className={`text-xs mr-1 ${tone}`} aria-live="polite">
+      {autosaveLabel(state)}
+    </span>
+  );
 }
 
 // Solo / Duo / Trio + a color row per lens (+ optional pattern repeat).

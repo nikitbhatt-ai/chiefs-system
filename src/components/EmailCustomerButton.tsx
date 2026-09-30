@@ -7,6 +7,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { flushQuoteEditor } from "@/lib/quoteFlush";
 
 export function EmailCustomerButton({
   quoteId,
@@ -46,6 +47,8 @@ export function EmailCustomerButton({
     setSending(true);
     setError(null);
     try {
+      // The PDFs are built from the saved estimate — save pending edits first.
+      if (!(await flushQuoteEditor())) return;
       const res = await fetch(`/api/quotes/${quoteId}/email`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
