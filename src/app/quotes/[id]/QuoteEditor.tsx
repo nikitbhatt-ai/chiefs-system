@@ -10,6 +10,7 @@ import { quoteTotals, lineNet, round2 } from "@/lib/quoteTotals";
 import { lineUnitCost, lineExtCost, costRollup, type PartCostMap } from "@/lib/lineCost";
 import { useAutosave, autosaveLabel } from "@/lib/useAutosave";
 import { registerQuoteFlusher } from "@/lib/quoteFlush";
+import { CustomerPicker, type PickerCustomer } from "@/components/CustomerPicker";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -80,6 +81,14 @@ export function QuoteEditor({
   initialVehicleTrim = "",
   initialUnitNumber = "",
   initialTaxRate = "0",
+  quoteNumber = "",
+  createdAt = "",
+  initialTitle = "",
+  initialCustomerPo = "",
+  initialValidUntil = "",
+  initialHideLinePrices = false,
+  initialTaxExempt = false,
+  vehicleSlot,
   partCosts = {},
   action,
 }: {
@@ -88,7 +97,7 @@ export function QuoteEditor({
   status: "draft" | "sent" | "approved" | "converted";
   notes: string;
   initialLines: QuoteLine[];
-  customers: { id: string; name: string }[];
+  customers: PickerCustomer[];
   initialVin?: string;
   initialVehicleYear?: string;
   initialVehicleMake?: string;
@@ -97,6 +106,17 @@ export function QuoteEditor({
   initialUnitNumber?: string;
   /** Tax rate (percent) the quote was saved at. */
   initialTaxRate?: string;
+  quoteNumber?: string;
+  /** Formatted estimate date for the Bill To block. */
+  createdAt?: string;
+  initialTitle?: string;
+  initialCustomerPo?: string;
+  /** YYYY-MM-DD */
+  initialValidUntil?: string;
+  initialHideLinePrices?: boolean;
+  initialTaxExempt?: boolean;
+  /** Server-rendered "Vehicle & Lights" card, shown at the top of the main column. */
+  vehicleSlot?: React.ReactNode;
   /**
    * partId → internal weighted-average cost, for the margin readouts. Resolved
    * server-side because a saved line stores only `partId`; a line added from a
@@ -115,6 +135,12 @@ export function QuoteEditor({
   const [customerSel, setCustomerSel] = useState(customerId ?? "");
   const [statusSel, setStatusSel] = useState<string>(status);
   const [notesVal, setNotesVal] = useState(notes);
+  const [title, setTitle] = useState(initialTitle);
+  const [customerPo, setCustomerPo] = useState(initialCustomerPo);
+  const [validUntil, setValidUntil] = useState(initialValidUntil);
+  const [hideLinePrices, setHideLinePrices] = useState(initialHideLinePrices);
+  const [taxExempt, setTaxExempt] = useState(initialTaxExempt);
+  const [changingCustomer, setChangingCustomer] = useState(false);
   const customerTouched = useRef(false);
   const statusTouched = useRef(false);
   useEffect(() => {
@@ -175,8 +201,8 @@ export function QuoteEditor({
 
   const totals = useMemo(() => {
     // Shared helper rounds each line before summing, so the rows foot to grand.
-    return quoteTotals(lines, Number(taxRate) || 0);
-  }, [lines, taxRate]);
+    return quoteTotals(lines, taxExempt ? 0 : Number(taxRate) || 0);
+  }, [lines, taxRate, taxExempt]);
 
   function updateLine(i: number, patch: Partial<QuoteLine>) {
     setLines((prev) =>
@@ -813,6 +839,11 @@ export function QuoteEditor({
     vehModel,
     vehTrim,
     unitNumber,
+    title,
+    customerPo,
+    validUntil,
+    hideLinePrices,
+    taxExempt,
   };
   const autosave = useAutosave(snapshot, async (snap) => {
     const fd = new FormData();
@@ -826,6 +857,11 @@ export function QuoteEditor({
     fd.set("vehicleModel", snap.vehModel);
     fd.set("vehicleTrim", snap.vehTrim);
     fd.set("unitNumber", snap.unitNumber);
+    fd.set("title", snap.title);
+    fd.set("customerPo", snap.customerPo);
+    fd.set("validUntil", snap.validUntil);
+    fd.set("hideLinePrices", snap.hideLinePrices ? "1" : "0");
+    fd.set("taxExempt", snap.taxExempt ? "1" : "0");
     const sentCustomer = customerTouched.current;
     const sentStatus = statusTouched.current;
     if (sentCustomer) fd.set("customerId", snap.customerSel);
@@ -841,61 +877,109 @@ export function QuoteEditor({
   const { flush } = autosave;
   useEffect(() => registerQuoteFlusher(flush), [flush]);
 
+  const selectedCustomer = customers.find((c) => c.id === customerSel) ?? null;
+  const pickCustomer = (cid: string | null) => {
+    customerTouched.current = true;
+    setCustomerSel(cid ?? "");
+    setChangingCustomer(false);
+    // A tax-exempt customer makes the estimate tax-exempt (still switchable).
+    const c = customers.find((x) => x.id === cid);
+    if (c?.taxExempt) setTaxExempt(true);
+  };
+
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
         void flush();
       }}
-      className="space-y-4"
+      className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_320px] gap-5 items-start"
     >
+      <div className="space-y-4 min-w-0">
+      {vehicleSlot}
 
-      <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-        {/* Controlled selects are safe again: the form no longer posts via
-            a React server-action `action` prop (that auto-reset the form and
-            caused the old "reverts to draft" bug). Saves go through
-            auto-save, which never resets the form. */}
-        <select
-          name="customerId"
-          value={customerSel}
-          onChange={(e) => {
-            customerTouched.current = true;
-            setCustomerSel(e.target.value);
-          }}
-          className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-        >
-          <option value="">— No customer —</option>
-          {customers.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <select
-          name="status"
-          value={statusSel}
-          onChange={(e) => {
-            statusTouched.current = true;
-            setStatusSel(e.target.value);
-          }}
-          className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-        >
-          <option value="draft">Draft</option>
-          <option value="sent">Sent</option>
-          <option value="approved">Approved</option>
-          <option value="converted">Converted</option>
-        </select>
-        <input
-          name="taxRate"
-          type="number"
-          min="0"
-          step="0.01"
-          value={taxRate}
-          onChange={(e) => setTaxRate(e.target.value)}
-          placeholder="Tax rate %"
-          className="min-w-0 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-        />
-      </div>
+      {/* Bill To — who it's for, and the estimate's own numbers. */}
+      <section className="bg-surface border border-white/10 rounded-2xl overflow-hidden">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 sm:p-6">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <span className="label-caps">Bill to</span>
+              <button type="button" onClick={() => setChangingCustomer((v) => !v)} className="btn-outline btn-sm">
+                {changingCustomer ? "Cancel" : selectedCustomer ? "Change" : "Choose customer"}
+              </button>
+            </div>
+            {changingCustomer ? (
+              <div className="mt-3">
+                <CustomerPicker customers={customers} value={customerSel || null} onChange={pickCustomer} autoFocus />
+              </div>
+            ) : selectedCustomer ? (
+              <div className="mt-3 space-y-1">
+                <div className="font-ui font-bold text-xl text-white">{selectedCustomer.name}</div>
+                {selectedCustomer.address ? (
+                  <div className="text-sm text-zinc-300 whitespace-pre-line">{selectedCustomer.address}</div>
+                ) : null}
+                <div className="text-sm text-zinc-400">
+                  {[selectedCustomer.email, selectedCustomer.phone].filter(Boolean).join(" · ")}
+                </div>
+                {taxExempt ? (
+                  <span className="inline-block mt-2 label-caps !text-[var(--color-cta)] border border-[color-mix(in_srgb,var(--color-cta)_50%,transparent)] rounded-full px-3 py-1">
+                    Tax exempt
+                  </span>
+                ) : null}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-zinc-500">No customer on this estimate yet.</p>
+            )}
+          </div>
+
+          <dl className="grid grid-cols-[auto_1fr] gap-x-5 gap-y-3 items-center text-sm self-start">
+            <dt className="label-caps">Estimate #</dt>
+            <dd className="text-white font-mono">{quoteNumber || "—"}</dd>
+            <dt className="label-caps">Estimate date</dt>
+            <dd className="text-white">{createdAt || "—"}</dd>
+            <dt className="label-caps">PO #</dt>
+            <dd>
+              <input
+                value={customerPo}
+                onChange={(e) => setCustomerPo(e.target.value)}
+                placeholder="add"
+                aria-label="Customer PO number"
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder:text-zinc-500"
+              />
+            </dd>
+            <dt className="label-caps">Valid until</dt>
+            <dd>
+              <input
+                type="date"
+                value={validUntil}
+                onChange={(e) => setValidUntil(e.target.value)}
+                aria-label="Valid until"
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-white"
+              />
+            </dd>
+            <dt className="label-caps">Title</dt>
+            <dd>
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. 2024 Tahoe PPV Upfit"
+                aria-label="Estimate title"
+                className="w-full bg-black/30 border border-white/10 rounded-lg px-2.5 py-1.5 text-sm text-white placeholder:text-zinc-500"
+              />
+            </dd>
+          </dl>
+        </div>
+
+        <label className="flex items-start justify-between gap-4 border-t border-white/10 px-5 sm:px-6 py-4 cursor-pointer">
+          <span>
+            <span className="block text-sm text-white">Hide individual prices from the customer</span>
+            <span className="block text-xs text-zinc-400 mt-0.5">
+              They see the parts, the quantities and one total — on the PDF and the print view. You keep every price here.
+            </span>
+          </span>
+          <Toggle checked={hideLinePrices} onChange={setHideLinePrices} label="Hide individual prices" />
+        </label>
+      </section>
 
       {/* Vehicle — VIN decoder. The exact car this quote (and, once
           converted, this invoice) is for. Decoded fields post with the
@@ -1090,7 +1174,7 @@ export function QuoteEditor({
           <Row label="Discount" value={`− ${fmt(totals.discountTotal)}`} />
           <Row label="Labor" value={fmt(totals.laborTotal)} />
           <Row label="Fees" value={fmt(totals.feeTotal)} />
-          <Row label={`Tax (${Number(taxRate) || 0}%)`} value={fmt(totals.tax)} />
+          <Row label={taxExempt ? "Tax (exempt)" : `Tax (${Number(taxRate) || 0}%)`} value={fmt(totals.tax)} />
           <div className="border-t border-white/10 pt-2 mt-2">
             <Row
               label="Grand total"
@@ -1178,7 +1262,114 @@ export function QuoteEditor({
           </button>
         </div>
       </div>
+      </div>
+
+      {/* Sidebar: customer card, tax, status. */}
+      <aside className="space-y-4 lg:sticky lg:top-4">
+        <section className="bg-surface border border-white/10 rounded-2xl p-5">
+          <h3 className="font-ui font-bold text-lg text-white">Customer</h3>
+          {selectedCustomer ? (
+            <div className="mt-3 space-y-3 text-sm">
+              <div className="font-ui font-bold text-base text-white">{selectedCustomer.name}</div>
+              <SideRow label="Email" value={selectedCustomer.email} />
+              <SideRow label="Phone" value={selectedCustomer.phone ?? null} />
+              <SideRow label="Location" value={selectedCustomer.address} />
+              <a href={`/crm/${selectedCustomer.id}`} className="btn-outline btn-sm w-full">
+                View Full Profile
+              </a>
+            </div>
+          ) : (
+            <p className="mt-2 text-sm text-zinc-500">Choose a customer in Bill To.</p>
+          )}
+        </section>
+
+        <section className="bg-surface border border-white/10 rounded-2xl p-5 space-y-4">
+          <h3 className="font-ui font-bold text-lg text-white">Tax</h3>
+          <label className="flex items-center justify-between gap-4 cursor-pointer">
+            <span>
+              <span className={`block text-sm ${taxExempt ? "text-[var(--color-cta)]" : "text-white"}`}>Tax Exempt</span>
+              <span className="block text-xs text-zinc-400">
+                {taxExempt ? "No sales tax applied." : "Sales tax applies at the rate below."}
+              </span>
+            </span>
+            <Toggle checked={taxExempt} onChange={setTaxExempt} label="Tax exempt" />
+          </label>
+          {!taxExempt ? (
+            <label className="block">
+              <span className="label-caps">Tax rate %</span>
+              <input
+                name="taxRate"
+                type="number"
+                min="0"
+                step="0.01"
+                value={taxRate}
+                onChange={(e) => setTaxRate(e.target.value)}
+                placeholder="e.g. 8.25"
+                className="mt-1.5 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+              />
+            </label>
+          ) : null}
+        </section>
+
+        <section className="bg-surface border border-white/10 rounded-2xl p-5">
+          <label className="block">
+            <span className="label-caps">Status</span>
+            <select
+              name="status"
+              value={statusSel}
+              onChange={(e) => {
+                statusTouched.current = true;
+                setStatusSel(e.target.value);
+              }}
+              className="mt-1.5 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value="draft">Draft</option>
+              <option value="sent">Sent</option>
+              <option value="approved">Accepted (sales order)</option>
+              <option value="converted">Converted</option>
+            </select>
+          </label>
+          <p className="text-xs text-zinc-500 mt-2">Usually set for you by the buttons at the top.</p>
+        </section>
+      </aside>
     </form>
+  );
+}
+
+function SideRow({ label, value }: { label: string; value: string | null | undefined }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <span className="text-zinc-400 shrink-0">{label}</span>
+      <span className="text-white text-right break-words min-w-0">{value}</span>
+    </div>
+  );
+}
+
+// On/off switch styled like the upfithq toggles.
+function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      onClick={(e) => {
+        e.preventDefault();
+        onChange(!checked);
+      }}
+      className={`relative shrink-0 w-12 h-7 rounded-full border transition-colors ${
+        checked
+          ? "bg-[var(--color-cta)] border-transparent"
+          : "bg-white/10 border-white/15"
+      }`}
+    >
+      <span
+        className={`absolute top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-white shadow transition-all ${
+          checked ? "left-6" : "left-1"
+        }`}
+      />
+    </button>
   );
 }
 

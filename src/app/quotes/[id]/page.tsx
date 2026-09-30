@@ -2,12 +2,14 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers, upfitConfigs } from "@/db/schema";
+import { desc } from "drizzle-orm";
+import { quotes, customers, upfitConfigs, workOrders, invoices } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
-import { EmailCustomerButton } from "@/components/EmailCustomerButton";
+import { EstimateSteps, type EstimateStep } from "@/components/EstimateSteps";
 import { FlushLink } from "@/components/FlushLink";
 import { UpfitDiagramPreview } from "@/components/upfit/UpfitDiagramPreview";
 import { getTemplate } from "@/lib/upfit/templates";
+import { normalizePins } from "@/lib/upfit/composites";
 import { BRANDING } from "@/lib/pdf/branding";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
@@ -50,10 +52,20 @@ async function saveQuote(formData: FormData) {
   // longer enforced anywhere — they were blocking saves silently and
   // surfacing as a "status revert to draft" on the quote editor.
 
-  const taxRate = Number(formData.get("taxRate") ?? "0") || 0;
+  const taxRate = Math.max(0, Number(formData.get("taxRate") ?? "0") || 0);
+  // Estimate-level fields. Absent (older client) → keep what's stored.
+  const has = (k: string) => formData.has(k);
+  const str = (k: string, max: number) => String(formData.get(k) ?? "").trim().slice(0, max) || null;
+  const taxExempt = has("taxExempt") ? formData.get("taxExempt") === "1" : q.taxExempt;
+  const hideLinePrices = has("hideLinePrices") ? formData.get("hideLinePrices") === "1" : q.hideLinePrices;
+  const title = has("title") ? str("title", 200) : q.title;
+  const customerPo = has("customerPo") ? str("customerPo", 100) : q.customerPo;
+  const validRaw = has("validUntil") ? String(formData.get("validUntil") ?? "") : (q.validUntil ?? "");
+  const validUntil = /^\d{4}-\d{2}-\d{2}$/.test(validRaw) ? validRaw : null;
   // Round each line before summing (shared helper) so the stored totals foot to
-  // the per-line totals shown on the quote/PDF.
-  const { subtotal, tax: taxTotal, grand: grandTotal } = quoteTotals(lines, taxRate);
+  // the per-line totals shown on the quote/PDF. Exempt → no tax, but the rate
+  // is kept so switching exemption off restores it.
+  const { subtotal, tax: taxTotal, grand: grandTotal } = quoteTotals(lines, taxExempt ? 0 : taxRate);
 
   // Vehicle (from the in-editor VIN decoder). Blank fields clear.
   const vin = String(formData.get("vin") ?? "").trim().toUpperCase() || null;
@@ -82,6 +94,12 @@ async function saveQuote(formData: FormData) {
       vehicleModel,
       vehicleTrim,
       unitNumber,
+      title,
+      customerPo,
+      validUntil,
+      hideLinePrices,
+      taxExempt,
+      taxRate: String(taxRate),
       updatedAt: new Date(),
     })
     .where(eq(quotes.id, id));
@@ -97,6 +115,27 @@ async function saveQuote(formData: FormData) {
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/workflow");
   if (customerId) revalidatePath(`/crm/${customerId}`);
+}
+
+// Status change from the estimate's "what's next" banner (Mark Accepted,
+// Undo accept). Converted is set by invoicing, never from here.
+async function setQuoteStatus(formData: FormData) {
+  "use server";
+  const id = String(formData.get("id") ?? "");
+  const next = String(formData.get("status") ?? "");
+  if (!id || !["draft", "sent", "approved"].includes(next)) return;
+  await db
+    .update(quotes)
+    .set({ status: next as "draft" | "sent" | "approved", updatedAt: new Date() })
+    .where(eq(quotes.id, id));
+  try {
+    await upsertQuoteLink(id);
+  } catch (err) {
+    console.error("upsertQuoteLink failed:", err);
+  }
+  revalidatePath("/quotes");
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/workflow");
 }
 
 // Ordered workflow stages, shared with the client strip below. The stage
@@ -123,137 +162,192 @@ export default async function QuotePage({
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) notFound();
 
-  const customerRows = await db
-    .select({ id: customers.id, name: customers.name })
+  const allCustomers = await db
+    .select({
+      id: customers.id,
+      name: customers.name,
+      address: customers.address,
+      email: customers.email,
+      phone: customers.phone,
+      taxExempt: customers.taxExempt,
+      archived: customers.archived,
+    })
     .from(customers)
     .orderBy(customers.name);
+  // Archived customers drop out of the picker, except the one already on it.
+  const customerRows = allCustomers
+    .filter((c) => !c.archived || c.id === q.customerId)
+    .map(({ archived: _archived, ...c }) => c);
+  const customer = allCustomers.find((c) => c.id === q.customerId) ?? null;
 
   const initial = (q.lineItems as unknown as QuoteLine[]) ?? [];
   const [config] = await db.select().from(upfitConfigs).where(eq(upfitConfigs.quoteId, q.id));
-  const [customer] = q.customerId
-    ? await db
-        .select({ name: customers.name, email: customers.email })
-        .from(customers)
-        .where(eq(customers.id, q.customerId))
-    : [];
+  const [wo] = await db
+    .select({ id: workOrders.id, number: workOrders.woNumber, status: workOrders.status })
+    .from(workOrders)
+    .where(eq(workOrders.quoteId, q.id));
+  const [inv] = await db
+    .select({ id: invoices.id, number: invoices.documentNumber })
+    .from(invoices)
+    .where(eq(invoices.quoteId, q.id))
+    .orderBy(desc(invoices.createdAt))
+    .limit(1);
+  const step: EstimateStep =
+    inv || q.status === "converted"
+      ? "invoice"
+      : wo
+        ? "work_order"
+        : q.status === "approved"
+          ? "sales_order"
+          : "estimate";
   const configTemplate = config ? getTemplate(config.bodyStyle) : null;
   const lightCount = config?.pins?.length ?? 0;
   // Internal average cost per part, so the editor can show cost and margin per
   // line. Same resolver the documents use, so the numbers agree.
   const { partCosts } = await quoteDocumentFacts(q);
+  const fmtDate = (d: Date) =>
+    d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
+  const statusLabel: Record<string, string> = {
+    draft: "Draft",
+    sent: "Sent",
+    approved: "Accepted",
+    converted: "Invoiced",
+  };
 
-  return (
-    <AppShell
-      title={q.quoteNumber ?? "Quote"}
-      subtitle={`Status: ${q.status} · Stage: ${q.workflowStage.replace(/_/g, " ")}`}
-    >
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <EmailCustomerButton
-          quoteId={q.id}
-          quoteNumber={q.quoteNumber ?? "estimate"}
-          customerName={customer?.name ?? null}
-          defaultTo={customer?.email ?? ""}
-          hasConfiguration={!!config}
-          companyName={BRANDING.companyName}
-        />
-        {/* Two documents come off a quote and they must never be confused, so
-            each button names its audience rather than saying "Download PDF":
-            this one is the priced customer quote, the blue one below is the
-            de-priced shop build sheet. */}
-        <FlushLink
-          newTab
-          href={`/api/pdf/quotes/${q.id}`}
-          title="The priced quote you send the customer: unit price, discounts, labor, fees and total."
-          className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
-        >
-          Download customer PDF
-        </FlushLink>
-        {q.status === "converted" && (
-          <FlushLink
-            newTab
-            href={`/api/pdf/quotes/${q.id}?variant=invoice`}
-            className="text-[11px] font-body bg-green-500/20 hover:bg-green-500/30 text-green-300 border border-green-500/30 rounded-md px-3 py-1.5"
-          >
-            Download invoice PDF
-          </FlushLink>
-        )}
-        {/* The shop's build sheet: the same line items with every price
-            stripped out. Keyed on the estimate so it's here rather than only on
-            the work-order page, and so it works before a work order exists. */}
-        <FlushLink
-          newTab
-          href={`/api/pdf/work-orders/by-quote/${q.id}`}
-          title="Build sheet for the shop: part, brand, part # and qty, plus any line notes. No pricing of any kind."
-          className="text-[11px] font-body bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 rounded-md px-3 py-1.5 font-semibold"
-        >
-          Download work order PDF
-        </FlushLink>
-        <FlushLink
-          newTab
-          href={`/quotes/${q.id}/print`}
-          className="text-[11px] font-body bg-white/5 hover:bg-white/10 text-zinc-300 border border-white/10 rounded-md px-3 py-1.5"
-        >
-          Open print view
-        </FlushLink>
-        {/* The internal copy carries our cost and margin on every line. Styled
-            amber and labelled so it is never confused with the two customer
-            documents sitting next to it. */}
-        <FlushLink
-          newTab
-          href={`/api/pdf/quotes/${q.id}?internal=1${q.status === "converted" ? "&variant=invoice" : ""}`}
-          title="Sales copy: shows our average cost and margin per line. Do not send to the customer."
-          className="text-[11px] font-body bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-md px-3 py-1.5"
-        >
-          Internal copy (cost + margin)
-        </FlushLink>
-      </div>
-
-      <QuoteWorkflowStrip
-        quoteId={q.id}
-        stages={WORKFLOW_STAGES}
-        currentStage={q.workflowStage}
-      />
-
-      {/* Vehicle & Lights — the lighting layout for this estimate. Visual
-          only: the parts are quoted as line items below. */}
-      <section className="bg-surface border border-white/10 rounded-2xl p-5 sm:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h2 className="font-ui font-bold text-lg text-white">Vehicle &amp; Lights</h2>
-          {config ? (
-            <div className="flex flex-wrap gap-2">
-              <FlushLink href={`/api/pdf/upfit/${q.id}`} className="btn-outline btn-sm">
-                Spec sheet PDF
-              </FlushLink>
-              <FlushLink href={`/quotes/${q.id}/upfit`} className="btn-outline btn-sm">
-                Edit Configuration
-              </FlushLink>
-            </div>
-          ) : null}
-        </div>
-        {config && configTemplate ? (
-          <div className="mt-4 space-y-3">
-            <div className="font-ui font-bold text-base text-white">
-              {config.vehicleLabel?.trim() || configTemplate.label}
-              <span className="text-sm text-zinc-400 font-body font-normal">
-                {" "}
-                · {lightCount} {lightCount === 1 ? "light" : "lights"}
-              </span>
-            </div>
-            <UpfitDiagramPreview bodyStyle={config.bodyStyle} pins={config.pins ?? []} />
-          </div>
-        ) : (
-          <div className="text-center py-8">
-            <div className="font-ui font-bold text-xl text-white">No vehicle configured</div>
-            <p className="text-sm text-zinc-400 mt-2 max-w-xl mx-auto">
-              Add a vehicle to draw the lighting layout. The diagram is visual only — parts are quoted as
-              line items separately.
-            </p>
-            <FlushLink href={`/quotes/${q.id}/upfit`} className="btn-cta mt-5">
-              + Configure Vehicle
+  const vehicleCard = (
+    /* Vehicle & Lights — the lighting layout for this estimate. Visual
+       only: the parts are quoted as line items below. */
+    <section className="bg-surface border border-white/10 rounded-2xl p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-ui font-bold text-lg text-white">Vehicle &amp; Lights</h2>
+        {config ? (
+          <div className="flex flex-wrap gap-2">
+            <FlushLink href={`/api/pdf/upfit/${q.id}`} className="btn-outline btn-sm">
+              Spec sheet PDF
+            </FlushLink>
+            <FlushLink href={`/quotes/${q.id}/upfit`} className="btn-outline btn-sm">
+              Edit Configuration
             </FlushLink>
           </div>
-        )}
-      </section>
+        ) : null}
+      </div>
+      {config && configTemplate ? (
+        <div className="mt-4 space-y-3">
+          <div className="font-ui font-bold text-base text-white">
+            {config.vehicleLabel?.trim() || configTemplate.label}
+            <span className="text-sm text-zinc-400 font-body font-normal">
+              {" "}
+              · {lightCount} {lightCount === 1 ? "light" : "lights"}
+            </span>
+          </div>
+          <UpfitDiagramPreview bodyStyle={config.bodyStyle} pins={normalizePins(config.bodyStyle, config.pins ?? [])} />
+        </div>
+      ) : (
+        <div className="text-center py-8">
+          <div className="font-ui font-bold text-xl text-white">No vehicle configured</div>
+          <p className="text-sm text-zinc-400 mt-2 max-w-xl mx-auto">
+            Add a vehicle to draw the lighting layout. The diagram is visual only — parts are quoted as
+            line items separately.
+          </p>
+          <FlushLink href={`/quotes/${q.id}/upfit`} className="btn-cta mt-5">
+            + Configure Vehicle
+          </FlushLink>
+        </div>
+      )}
+    </section>
+  );
+
+  return (
+    <AppShell title="Estimate" subtitle={q.quoteNumber ?? "Estimate"}>
+      {/* Header: title + badges, then the two documents. */}
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 pb-5 border-b border-white/10">
+        <div className="min-w-0">
+          <div className="label-caps">
+            <a href="/quotes" className="text-[var(--color-cta)] hover:underline">
+              Estimates
+            </a>{" "}
+            / {q.quoteNumber ?? "Estimate"}
+          </div>
+          <div className="flex flex-wrap items-center gap-3 mt-1">
+            <h1 className={`font-ui font-bold text-3xl ${q.title ? "text-white" : "text-zinc-400"}`}>
+              {q.title || "Estimate — add a title"}
+            </h1>
+            <span className="label-caps !text-zinc-200 border border-white/20 rounded-full px-3 py-1">
+              ● {statusLabel[q.status] ?? q.status}
+            </span>
+            {q.taxExempt ? (
+              <span className="label-caps !text-[var(--color-cta)] border border-[color-mix(in_srgb,var(--color-cta)_50%,transparent)] rounded-full px-3 py-1">
+                Tax exempt
+              </span>
+            ) : null}
+          </div>
+          <p className="text-sm text-zinc-400 mt-1.5">
+            {[q.quoteNumber, customer?.name, `Created ${fmtDate(q.createdAt)}`].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {/* Two documents come off an estimate and they must never be
+              confused, so each button names its audience: the priced customer
+              copy, and the de-priced shop packing slip / build sheet. */}
+          <FlushLink
+            newTab
+            href={`/api/pdf/quotes/${q.id}${q.status === "converted" ? "?variant=invoice" : ""}`}
+            title="The priced estimate you send the customer."
+            className="btn-outline"
+          >
+            View PDF
+          </FlushLink>
+          <FlushLink
+            newTab
+            href={`/api/pdf/work-orders/by-quote/${q.id}`}
+            title="Build sheet for the shop: part, brand, part # and qty, plus any line notes. No pricing of any kind."
+            className="btn-outline"
+          >
+            Packing slip
+          </FlushLink>
+          <details className="relative">
+            <summary className="btn-outline list-none cursor-pointer">More ▾</summary>
+            <div className="absolute right-0 z-30 mt-2 w-64 bg-surface border border-white/15 rounded-xl p-2 shadow-xl flex flex-col">
+              <FlushLink newTab href={`/quotes/${q.id}/print`} className="px-3 py-2 rounded-lg text-sm text-zinc-200 hover:bg-white/5">
+                Open print view
+              </FlushLink>
+              {/* Internal copy: our cost and margin on every line. */}
+              <FlushLink
+                newTab
+                href={`/api/pdf/quotes/${q.id}?internal=1${q.status === "converted" ? "&variant=invoice" : ""}`}
+                title="Sales copy: shows our average cost and margin per line. Do not send to the customer."
+                className="px-3 py-2 rounded-lg text-sm text-amber-300 hover:bg-white/5"
+              >
+                Internal copy (cost + margin)
+              </FlushLink>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <EstimateSteps
+        quoteId={q.id}
+        quoteNumber={q.quoteNumber ?? "estimate"}
+        status={q.status}
+        step={step}
+        workOrder={wo ? { id: wo.id, number: wo.number, status: wo.status } : null}
+        invoice={inv ? { id: inv.id, number: inv.number } : null}
+        email={{
+          customerName: customer?.name ?? null,
+          defaultTo: customer?.email ?? "",
+          hasConfiguration: !!config,
+          companyName: BRANDING.companyName,
+        }}
+        setStatusAction={setQuoteStatus}
+      />
+
+      {/* Shop progress (the Workflow board's stages) once the build exists. */}
+      {wo ? (
+        <div className="space-y-2">
+          <div className="label-caps">Shop progress</div>
+          <QuoteWorkflowStrip quoteId={q.id} stages={WORKFLOW_STAGES} currentStage={q.workflowStage} />
+        </div>
+      ) : null}
 
       <QuoteEditor
         id={q.id}
@@ -268,7 +362,19 @@ export default async function QuotePage({
         initialVehicleModel={q.vehicleModel ?? ""}
         initialVehicleTrim={q.vehicleTrim ?? ""}
         initialUnitNumber={q.unitNumber ?? ""}
-        initialTaxRate={String(impliedTaxRatePct(initial, Number(q.taxTotal ?? 0)))}
+        initialTaxRate={
+          q.taxRate != null
+            ? String(Number(q.taxRate))
+            : String(impliedTaxRatePct(initial, Number(q.taxTotal ?? 0)))
+        }
+        quoteNumber={q.quoteNumber ?? ""}
+        createdAt={fmtDate(q.createdAt)}
+        initialTitle={q.title ?? ""}
+        initialCustomerPo={q.customerPo ?? ""}
+        initialValidUntil={q.validUntil ?? ""}
+        initialHideLinePrices={q.hideLinePrices}
+        initialTaxExempt={q.taxExempt}
+        vehicleSlot={vehicleCard}
         partCosts={partCosts}
         action={saveQuote}
       />

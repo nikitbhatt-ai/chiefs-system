@@ -20,6 +20,8 @@ import {
   getTemplate,
   getViews,
   isPushbarShape,
+  lensLabel,
+  pinColorWords,
   pinLensState,
   type LensColorKey,
   type LightTypeGroup,
@@ -214,6 +216,8 @@ export function UpfitBuilder({
       setShape(t.shape);
       setSize(t.size);
     }
+    // The label starts as the light's name ("Lightbar"); edit it freely.
+    setCaption(t ? t.label : "");
   };
 
   const addToDiagram = () => {
@@ -251,6 +255,10 @@ export function UpfitBuilder({
     setPins((cur) => renumber([...cur, ...added]));
     setActivePinId(added[added.length - 1].id);
     setJustAdded(n);
+    // Start the next light fresh so its label isn't carried over.
+    setLightTypeKey("");
+    setCaption("");
+    setHowMany(1);
   };
 
   // --- Edit placed lights --------------------------------------------------
@@ -727,9 +735,11 @@ export function UpfitBuilder({
                             <LightSwatch pin={pin} />
                             <span className="min-w-0">
                               <span className="block text-sm text-white truncate">{pin.label}</span>
-                              {pin.caption || views.length > 1 ? (
+                              {pin.caption || views.length > 1 || !isPushbarShape(pin.shape) ? (
                                 <span className="block text-xs text-zinc-500 truncate">
                                   {[
+                                    // Colors in words, for color-blind reps.
+                                    isPushbarShape(pin.shape) ? null : pinColorWords(pin),
                                     pin.caption,
                                     views.length > 1 ? views.find((v) => v.key === pinViewKey(pin))?.label : null,
                                   ]
@@ -836,22 +846,31 @@ function LensPicker({
       </div>
       <div className="divide-y divide-white/10">
         {lenses.map((lens, i) => (
-          <div key={i} className="flex items-center gap-3 py-2">
-            <span className="label-caps w-16 shrink-0 whitespace-nowrap">Lens {i + 1}</span>
-            <div className="flex flex-wrap gap-2">
+          <div key={i} className="flex items-center gap-2 py-2">
+            <span className="label-caps w-14 shrink-0 whitespace-nowrap">Lens {i + 1}</span>
+            <div className="flex gap-1.5">
               {LENS_COLORS.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  aria-pressed={lens === c.key}
-                  aria-label={`Lens ${i + 1}: ${c.label}`}
-                  title={c.label}
-                  onClick={() => onLenses(lenses.map((l, j) => (j === i ? c.key : l)))}
-                  className="lens-dot"
-                  style={{ backgroundColor: c.hex }}
-                />
+                // Named on hover / keyboard focus, for color-blind reps.
+                <span key={c.key} className="relative group">
+                  <button
+                    type="button"
+                    aria-pressed={lens === c.key}
+                    aria-label={`Lens ${i + 1}: ${c.label}`}
+                    onClick={() => onLenses(lenses.map((l, j) => (j === i ? c.key : l)))}
+                    className="lens-dot block"
+                    style={{ backgroundColor: c.hex }}
+                  />
+                  <span
+                    role="tooltip"
+                    className="pointer-events-none absolute left-1/2 -translate-x-1/2 -top-8 z-10 whitespace-nowrap rounded-md bg-black text-white text-xs font-semibold px-2 py-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
+                  >
+                    {c.label}
+                  </span>
+                </span>
               ))}
             </div>
+            {/* The chosen color, in words. */}
+            <span className="text-xs text-zinc-300 font-semibold w-12 shrink-0">{lensLabel(lens)}</span>
           </div>
         ))}
       </div>

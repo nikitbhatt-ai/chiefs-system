@@ -41,26 +41,6 @@ export function getViews(t: VehicleTemplate): TemplateView[] {
   return [{ key: "main", label: "Vehicle", imageUrl: t.imageUrl }];
 }
 
-// Build the standard 5-view (per-side) set for a folder-based template
-// at public/upfit-templates/<slug>/{driver,passenger,front,rear,top}.jpg.
-// `fileFor` optionally overrides the on-disk filename for a given view key
-// (used when a template's source photos were saved under swapped names).
-function sideViews(
-  slug: string,
-  fileFor?: Partial<Record<TemplateView["key"], string>>,
-): TemplateView[] {
-  const base = `/upfit-templates/${slug}`;
-  const url = (key: TemplateView["key"], fallback: string) =>
-    `${base}/${fileFor?.[key] ?? fallback}`;
-  return [
-    { key: "driver", label: "Driver Side", imageUrl: url("driver", "driver.jpg") },
-    { key: "passenger", label: "Passenger Side", imageUrl: url("passenger", "passenger.jpg") },
-    { key: "front", label: "Front", imageUrl: url("front", "front.jpg") },
-    { key: "rear", label: "Rear", imageUrl: url("rear", "rear.jpg") },
-    { key: "top", label: "Top", imageUrl: url("top", "top.jpg") },
-  ];
-}
-
 export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   // Current-logo, per-side (one page per side) templates.
   tahoe: {
@@ -68,30 +48,30 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     label: "Chevrolet Tahoe (2021–25)",
     model: "Tahoe",
     make: "Chevrolet 2021–2025",
-    imageUrl: "/upfit-templates/tahoe/driver.jpg",
-    // Passenger-side and rear source photos were saved under swapped
-    // filenames; map each view to the file that actually shows that side.
-    views: sideViews("tahoe", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    // Combined picture of all five sides (scripts/build-upfit-composites.py).
+    // Pins saved on the old per-side photos are moved onto it by
+    // normalizePins() in ./composites.
+    imageUrl: "/upfit-templates/tahoe.jpg",
   },
   tahoe_2026: {
     slug: "tahoe_2026",
     label: "Chevrolet Tahoe (2026+)",
     model: "Tahoe",
     make: "Chevrolet 2026+",
-    imageUrl: "/upfit-templates/tahoe_2026/driver.jpg",
-    // Passenger-side and rear source photos were saved under swapped
-    // filenames; map each view to the file that actually shows that side.
-    views: sideViews("tahoe_2026", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    // Combined picture of all five sides (scripts/build-upfit-composites.py).
+    // Pins saved on the old per-side photos are moved onto it by
+    // normalizePins() in ./composites.
+    imageUrl: "/upfit-templates/tahoe_2026.jpg",
   },
   tahoe_1520: {
     slug: "tahoe_1520",
     label: "Chevrolet Tahoe (2015–20)",
     model: "Tahoe",
     make: "Chevrolet 2015–2020",
-    imageUrl: "/upfit-templates/tahoe_1520/driver.jpg",
-    // Passenger-side and rear source photos were saved under swapped
-    // filenames; map each view to the file that actually shows that side.
-    views: sideViews("tahoe_1520", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    // Combined picture of all five sides (scripts/build-upfit-composites.py).
+    // Pins saved on the old per-side photos are moved onto it by
+    // normalizePins() in ./composites.
+    imageUrl: "/upfit-templates/tahoe_1520.jpg",
   },
   suburban: {
     slug: "suburban",
@@ -112,11 +92,10 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     label: "Chevrolet Silverado (2020–26)",
     model: "Silverado",
     make: "Chevrolet 2020–2026",
-    imageUrl: "/upfit-templates/silverado/driver.jpg",
-    // The Silverado's passenger-side and rear source photos were saved under
-    // swapped filenames (passenger.jpg holds the rear shot and vice versa), so
-    // map each view to the file that actually shows that side.
-    views: sideViews("silverado", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+    // Combined picture of all five sides (scripts/build-upfit-composites.py).
+    // Pins saved on the old per-side photos are moved onto it by
+    // normalizePins() in ./composites.
+    imageUrl: "/upfit-templates/silverado.jpg",
   },
   durango: {
     slug: "durango",
@@ -158,8 +137,10 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     label: "Ford Explorer (2025+)",
     model: "Explorer",
     make: "Ford 2025+",
-    imageUrl: "/upfit-templates/explorer/driver.jpg",
-    views: sideViews("explorer"),
+    // Combined picture of all five sides (scripts/build-upfit-composites.py).
+    // Pins saved on the old per-side photos are moved onto it by
+    // normalizePins() in ./composites.
+    imageUrl: "/upfit-templates/explorer.jpg",
   },
 };
 
@@ -522,6 +503,17 @@ export const LENS_COLORS: { key: LensColorKey; label: string; hex: string }[] = 
   { key: "white", label: "White", hex: WHITE },
   { key: "green", label: "Green", hex: GREEN },
 ];
+
+export function lensLabel(key: string): string {
+  return LENS_COLORS.find((c) => c.key === key)?.label ?? key;
+}
+
+// "Red / Blue × 3" — a light's colors in words (lists, tooltips).
+export function pinColorWords(pin: { lenses?: string[]; lensRepeat?: number; colorScheme?: string }): string {
+  const { lenses, repeat } = pinLensState(pin);
+  const words = lenses.map(lensLabel).join(" / ");
+  return repeat > 1 ? `${words} × ${repeat}` : words;
+}
 
 export function lensHex(key: string): string {
   return LENS_COLORS.find((c) => c.key === key)?.hex ?? key;

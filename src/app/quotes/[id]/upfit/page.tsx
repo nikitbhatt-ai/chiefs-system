@@ -6,6 +6,7 @@ import { quotes, upfitConfigs, type UpfitPin } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { UpfitBuilder } from "@/components/UpfitBuilder";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
+import { normalizePins } from "@/lib/upfit/composites";
 import { removeUpfitLink, upsertUpfitLink } from "@/lib/customerDocLinks";
 
 export const dynamic = "force-dynamic";
@@ -100,7 +101,7 @@ export default async function UpfitPage({
         quoteNumber={q.quoteNumber ?? "Estimate"}
         initialBodyStyle={config?.bodyStyle ?? null}
         initialVehicleLabel={defaultVehicleLabel}
-        initialPins={config?.pins ?? []}
+        initialPins={config ? normalizePins(config.bodyStyle, config.pins ?? []) : []}
         initialNotes={config?.notes ?? ""}
         action={saveUpfit}
         resetAction={resetUpfit}

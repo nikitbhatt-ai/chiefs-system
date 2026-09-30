@@ -59,6 +59,7 @@ function PrintKindSections({
   partNumbers,
   partCosts,
   internal,
+  hidePrices = false,
 }: {
   lines: Line[];
   showTitles: boolean;
@@ -67,7 +68,10 @@ function PrintKindSections({
   partCosts: PartCostMap;
   /** Adds the Avg cost and Margin columns. Internal copy only. */
   internal: boolean;
+  /** "Hide individual prices": parts + quantities only (never on internal). */
+  hidePrices?: boolean;
 }) {
+  const showPrices = !hidePrices || internal;
   const items = lines.filter((l): l is Extract<Line, { kind: "item" }> => l.kind === "item");
   const labor = lines.filter((l): l is Extract<Line, { kind: "labor" }> => l.kind === "labor");
   const fees = lines.filter((l): l is Extract<Line, { kind: "fee" }> => l.kind === "fee");
@@ -80,14 +84,14 @@ function PrintKindSections({
             <thead>
               <tr>
                 <th style={{ width: internal ? "3%" : "4%" }}>#</th>
-                <th style={{ width: internal ? "27%" : "39%" }}>Description</th>
+                <th style={{ width: internal ? "27%" : showPrices ? "39%" : "66%" }}>Description</th>
                 <th style={{ width: internal ? "13%" : "15%" }}>Part #</th>
                 <th className="right" style={{ width: "5%" }}>Qty</th>
                 {internal ? <th className="right" style={{ width: "11%" }}>Avg cost</th> : null}
-                <th className="right" style={{ width: internal ? "12%" : "12%" }}>Unit price</th>
-                <th className="right" style={{ width: internal ? "8%" : "10%" }}>Disc %</th>
+                {showPrices ? <th className="right" style={{ width: "12%" }}>Unit price</th> : null}
+                {showPrices ? <th className="right" style={{ width: internal ? "8%" : "10%" }}>Disc %</th> : null}
                 {internal ? <th className="right" style={{ width: "11%" }}>Margin</th> : null}
-                <th className="right" style={{ width: internal ? "10%" : "13%" }}>Line total</th>
+                {showPrices ? <th className="right" style={{ width: internal ? "10%" : "13%" }}>Line total</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -116,8 +120,8 @@ function PrintKindSections({
                         {unitCost == null ? "—" : fmt(unitCost)}
                       </td>
                     ) : null}
-                    <td className="right">{fmt(l.unitPrice)}</td>
-                    <td className="right">{pct > 0 ? `${pct.toFixed(2)}%` : "—"}</td>
+                    {showPrices ? <td className="right">{fmt(l.unitPrice)}</td> : null}
+                    {showPrices ? <td className="right">{pct > 0 ? `${pct.toFixed(2)}%` : "—"}</td> : null}
                     {internal ? (
                       <td className="right" style={{ fontSize: "10pt" }}>
                         {lineMargin == null
@@ -125,6 +129,7 @@ function PrintKindSections({
                           : `${fmt(lineMargin)}${marginPct == null ? "" : ` / ${marginPct.toFixed(0)}%`}`}
                       </td>
                     ) : null}
+                    {showPrices ? (
                     <td className="right">
                       {disc > 0 ? (
                         <>
@@ -137,6 +142,7 @@ function PrintKindSections({
                         fmt(lineNet(l))
                       )}
                     </td>
+                    ) : null}
                   </tr>
                 );
               })}
@@ -151,10 +157,10 @@ function PrintKindSections({
           <table>
             <thead>
               <tr>
-                <th style={{ width: "55%" }}>Description</th>
+                <th style={{ width: showPrices ? "55%" : "85%" }}>Description</th>
                 <th className="right" style={{ width: "15%" }}>Hours</th>
-                <th className="right" style={{ width: "15%" }}>Rate / hr</th>
-                <th className="right" style={{ width: "15%" }}>Total</th>
+                {showPrices ? <th className="right" style={{ width: "15%" }}>Rate / hr</th> : null}
+                {showPrices ? <th className="right" style={{ width: "15%" }}>Total</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -162,8 +168,8 @@ function PrintKindSections({
                 <tr key={`labor-${i}`}>
                   <td>{l.description || "Labor"}</td>
                   <td className="right">{l.hours || 0}</td>
-                  <td className="right">{fmt(l.rate || 0)}</td>
-                  <td className="right">{fmt((l.hours || 0) * (l.rate || 0))}</td>
+                  {showPrices ? <td className="right">{fmt(l.rate || 0)}</td> : null}
+                  {showPrices ? <td className="right">{fmt((l.hours || 0) * (l.rate || 0))}</td> : null}
                 </tr>
               ))}
             </tbody>
@@ -177,8 +183,8 @@ function PrintKindSections({
           <table>
             <thead>
               <tr>
-                <th style={{ width: "75%" }}>Description</th>
-                <th className="right" style={{ width: "25%" }}>Amount</th>
+                <th style={{ width: showPrices ? "75%" : "100%" }}>Description</th>
+                {showPrices ? <th className="right" style={{ width: "25%" }}>Amount</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -188,7 +194,7 @@ function PrintKindSections({
                     {l.description}{" "}
                     <em style={{ color: "#666" }}>({l.fixed ? "fixed fee" : "custom fee"})</em>
                   </td>
-                  <td className="right">{fmt(l.amount || 0)}</td>
+                  {showPrices ? <td className="right">{fmt(l.amount || 0)}</td> : null}
                 </tr>
               ))}
             </tbody>
@@ -212,6 +218,8 @@ export default async function PrintQuotePage({
   const internal = (await searchParams)?.internal === "1";
   const [q] = await db.select().from(quotes).where(eq(quotes.id, id));
   if (!q) notFound();
+  // The internal copy always shows every price.
+  const hidePrices = !internal && q.hideLinePrices === true;
 
   // Same resolver the PDF uses, so the sales rep, contact details and vehicle
   // on screen are the ones that get printed.
@@ -358,12 +366,19 @@ export default async function PrintQuotePage({
           <div className="meta">
             {isInvoice ? "Invoice date" : "Quote date"}: {new Date(q.createdAt).toLocaleDateString()}
           </div>
+          {q.customerPo ? <div className="meta">Customer PO #: {q.customerPo}</div> : null}
+          {!isInvoice && q.validUntil ? (
+            <div className="meta">
+              Valid until: {new Date(`${q.validUntil}T12:00:00`).toLocaleDateString("en-US")}
+            </div>
+          ) : null}
           {facts.salesPerson ? (
             <div style={{ fontSize: "10pt" }}>Sales rep: {facts.salesPerson}</div>
           ) : null}
         </div>
       </div>
 
+      {q.title ? <div style={{ fontSize: "13pt", fontWeight: "bold", marginBottom: "8pt" }}>{q.title}</div> : null}
       <div style={{ display: "flex", justifyContent: "space-between", gap: "24pt", marginBottom: "16pt" }}>
         <div style={{ width: "48%" }}>
           <div style={{ fontSize: "10pt", color: "#666", textTransform: "uppercase", letterSpacing: "0.5pt" }}>
@@ -426,11 +441,11 @@ export default async function PrintQuotePage({
                     >
                       {title}
                     </div>
-                    <PrintKindSections lines={gl} showTitles={false} partNumbers={facts.partNumbers} partCosts={facts.partCosts} internal={internal} />
+                    <PrintKindSections lines={gl} showTitles={false} partNumbers={facts.partNumbers} partCosts={facts.partCosts} internal={internal} hidePrices={hidePrices} />
                   </div>
                 );
               })}
-              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} partNumbers={facts.partNumbers} partCosts={facts.partCosts} internal={internal} /> : null}
+              {loose.length > 0 ? <PrintKindSections lines={loose} showTitles={true} partNumbers={facts.partNumbers} partCosts={facts.partCosts} internal={internal} hidePrices={hidePrices} /> : null}
             </>
           );
         })()
@@ -438,23 +453,25 @@ export default async function PrintQuotePage({
 
       <table className="totals" style={{ marginTop: "12pt" }}>
         <tbody>
+          {!hidePrices ? (
           <tr>
             <td style={{ width: "75%" }} className="right">Subtotal</td>
             <td className="right">{fmt(subtotal)}</td>
           </tr>
-          {discountTotal > 0 ? (
+          ) : null}
+          {!hidePrices && discountTotal > 0 ? (
             <tr>
               <td className="right">Discount</td>
               <td className="right">− {fmt(discountTotal)}</td>
             </tr>
           ) : null}
-          {laborTotal > 0 ? (
+          {!hidePrices && laborTotal > 0 ? (
             <tr>
               <td className="right">Labor</td>
               <td className="right">{fmt(laborTotal)}</td>
             </tr>
           ) : null}
-          {feeTotal > 0 ? (
+          {!hidePrices && feeTotal > 0 ? (
             <tr>
               <td className="right">Fees</td>
               <td className="right">{fmt(feeTotal)}</td>
@@ -464,6 +481,12 @@ export default async function PrintQuotePage({
             <tr>
               <td className="right">Tax</td>
               <td className="right">{fmt(tax)}</td>
+            </tr>
+          ) : null}
+          {q.taxExempt ? (
+            <tr>
+              <td style={{ width: "75%" }} className="right">Tax</td>
+              <td className="right">Exempt</td>
             </tr>
           ) : null}
           <tr className="grand">

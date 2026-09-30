@@ -246,6 +246,20 @@ export const quotes = pgTable("quotes", {
   // Customer/agency-assigned unit number for this vehicle. Free text
   // (formats vary by agency), unique to them, not validated.
   unitNumber: text("unit_number"),
+  // Estimate redesign (2026-09-30). Optional title ("2024 Tahoe PPV Upfit"),
+  // the customer's own purchase-order number (prints on the estimate and
+  // invoice), and the date the estimate's pricing is good through.
+  title: text("title"),
+  customerPo: text("customer_po"),
+  validUntil: date("valid_until", { mode: "string" }),
+  // Customer copy shows parts + quantities + one total, no per-line prices.
+  hideLinePrices: boolean("hide_line_prices").notNull().default(false),
+  // Per-estimate tax exemption (starts from the customer's setting). When on,
+  // tax is $0 regardless of tax_rate.
+  taxExempt: boolean("tax_exempt").notNull().default(false),
+  // Tax rate (percent) the estimate is priced at. Older rows are null; the
+  // editor then recovers it from the stored tax (impliedTaxRatePct).
+  taxRate: numeric("tax_rate", { precision: 6, scale: 3 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

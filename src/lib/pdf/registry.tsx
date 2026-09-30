@@ -22,6 +22,7 @@ import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
 import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
 import { resolvePartsFromLineItems, otherLineNotes } from "@/lib/workOrderParts";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
+import { normalizePins } from "@/lib/upfit/composites";
 import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
 export type RecordType =
@@ -61,6 +62,11 @@ async function resolveQuote(
     grandTotal: Number(q.grandTotal ?? 0),
     notes: q.notes ?? null,
     status: q.status,
+    title: q.title,
+    customerPo: q.customerPo,
+    validUntil: q.validUntil,
+    hideLinePrices: q.hideLinePrices,
+    taxExempt: q.taxExempt,
     variant,
   };
 }
@@ -111,7 +117,7 @@ async function resolveUpfit(quoteId: string): Promise<UpfitPdfData | null> {
     customerName: customer?.name ?? null,
     vehicleSummary: vehicleSummary || null,
     bodyStyle: config?.bodyStyle ?? "tahoe",
-    pins: config?.pins ?? [],
+    pins: config ? normalizePins(config.bodyStyle, config.pins ?? []) : [],
     notes: config?.notes ?? null,
     // Page 2 of the spec sheet is the actual quote for this build.
     quoteLineItems: (q.lineItems as unknown as QuoteLine[]) ?? [],
