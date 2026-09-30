@@ -222,10 +222,10 @@ export const quotes = pgTable("quotes", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   quoteNumber: text("quote_number").unique(),
-  // Shared 4-digit job number. Assigned when the quote (estimate) is
-  // created and reused unchanged by the work order and invoice that
-  // follow — one number per job, ShopMonkey style.
-  documentNumber: integer("document_number").unique(),
+  // The number this record carried in the system it was imported from, kept
+  // verbatim so a customer quoting their old paperwork can still be found.
+  // Null for records this app created. See docs/sql/doc_numbers.sql.
+  legacyNumber: text("legacy_number"),
   customerId: uuid("customer_id").references(() => customers.id),
   dealId: uuid("deal_id").references(() => deals.id),
   status: quoteStatus("status").notNull().default("draft"),
@@ -624,6 +624,8 @@ export const purchaseOrders = pgTable("purchase_orders", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   poNumber: text("po_number").unique(),
+  /** Number from the system this PO was imported from, kept verbatim. */
+  legacyNumber: text("legacy_number"),
   vendorId: uuid("vendor_id").references(() => vendors.id),
   status: purchaseOrderStatus("status").notNull().default("pending"),
   total: numeric("total", { precision: 12, scale: 2 }).default("0"),
@@ -689,13 +691,6 @@ export const workOrders = pgTable("work_orders", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   woNumber: text("wo_number").unique(),
-  // 4-digit numeric ID shared across the job: the quote (estimate), this
-  // work order (internal tech doc), and the invoice (customer + accounting
-  // doc). Inherited from the originating quote's document_number on WO
-  // creation. When an invoice is generated from this WO it reuses the same
-  // number — matches the ShopMonkey convention where the estimate #, shop
-  // RO #, and customer invoice # are one and the same.
-  documentNumber: integer("document_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),
   quoteId: uuid("quote_id").references(() => quotes.id),
@@ -719,15 +714,20 @@ export const workOrders = pgTable("work_orders", {
 });
 
 // Invoices are the customer + accounting-facing document that closes out
-// a work order. They share the job's 4-digit document_number (originating
-// on the quote, carried by the WO) so the estimate, the shop's build
-// sheet, and the customer's bill carry the same identifier. Line items are
+// a work order. They carry the same job number as the originating quote
+// and work order (see src/lib/docNumbers.ts) so the estimate, the shop's
+// build sheet, and the customer's bill all read as one job. Stored as the
+// digits of that shared number (e.g. "01938"), stamped at generation time
+// so it survives even if the source quote is later deleted. Line items are
 // snapshotted from the source quote at invoice-generation time — if the
 // quote is later edited, this invoice keeps the original line items so
 // what was billed can't drift.
 export const invoices = pgTable("invoices", {
   id: uuid("id").defaultRandom().primaryKey(),
-  documentNumber: integer("document_number").notNull().unique(),
+  // Shared job number as digits (e.g. "01938"); matches the quote (Q-01938)
+  // and work order (WO-01938). Not unique on its own — an invoice and its
+  // quote/WO intentionally read as the same job.
+  documentNumber: text("document_number"),
   workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
   quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "set null" }),
   customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),

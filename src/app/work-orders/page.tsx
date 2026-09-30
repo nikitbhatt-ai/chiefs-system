@@ -6,7 +6,6 @@ import { canDelete } from "@/lib/rbac";
 import { db } from "@/db";
 import { workOrders, customers, quotes, vehicles, parts, purchaseOrders, vendors, invoices, type POLineItem } from "@/db/schema";
 import { createInvoiceFromWorkOrder } from "@/lib/invoices";
-import { fmtDocumentNumber } from "@/lib/documentNumber";
 import { AppShell } from "@/components/AppShell";
 import { Pagination } from "@/components/Pagination";
 import { ListRowControls } from "@/components/ListRowControls";
@@ -448,9 +447,9 @@ export default async function WorkOrdersPage({
                             <a
                               href={`/invoices/${inv.id}`}
                               className="text-[11px] text-amber-400 hover:text-amber-300 mr-3"
-                              title={`Invoice ${fmtDocumentNumber(inv.documentNumber)} · ${inv.status}`}
+                              title={`Invoice ${inv.documentNumber ? `#${inv.documentNumber}` : ""} · ${inv.status}`}
                             >
-                              Invoice {fmtDocumentNumber(inv.documentNumber)}
+                              {inv.documentNumber ? `Invoice #${inv.documentNumber}` : "View invoice"}
                             </a>
                           );
                         }

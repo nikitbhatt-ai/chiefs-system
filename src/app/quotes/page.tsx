@@ -12,8 +12,8 @@ import { canDelete } from "@/lib/rbac";
 import { auth } from "@/auth";
 import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
 import { fmtDateTime } from "@/lib/datetime";
-import { nextDocumentNumber } from "@/lib/documentNumber";
 import { SubmitButton } from "@/components/SubmitButton";
+import { nextDocNumber } from "@/lib/docNumbers";
 
 const QUOTE_STATUSES = ["draft", "sent", "approved", "converted"];
 
@@ -27,15 +27,11 @@ const STATUS_COLORS: Record<string, string> = {
 async function createQuote(formData: FormData) {
   "use server";
   const customerId = String(formData.get("customerId") ?? "") || null;
-  // Shared 4-digit job number, assigned at estimate creation and reused
-  // by the work order + invoice downstream.
-  const documentNumber = await nextDocumentNumber();
-  const quoteNumber = `Q-${documentNumber}`;
+  const quoteNumber = await nextDocNumber("quote");
   const [row] = await db
     .insert(quotes)
     .values({
       quoteNumber,
-      documentNumber,
       customerId,
       status: "draft",
       lineItems: [],

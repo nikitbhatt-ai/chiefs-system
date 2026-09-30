@@ -7,7 +7,7 @@ import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
 import { checkReordersForWorkOrder } from "@/lib/backfill";
 import { qcComplete } from "@/lib/qc";
-import { documentNumberForQuote } from "@/lib/documentNumber";
+import { nextDocNumber, workOrderNumberForQuote } from "@/lib/docNumbers";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +52,7 @@ export async function POST(
     const [q] = await db
       .select({
         id: quotes.id,
+        quoteNumber: quotes.quoteNumber,
         customerId: quotes.customerId,
         dealId: quotes.dealId,
         status: quotes.status,
@@ -102,14 +103,13 @@ export async function POST(
     }
 
     if (!wo && stage !== "estimate") {
-      // Reuse the quote's shared job number (backfills legacy quotes).
-      const documentNumber = await documentNumberForQuote(id);
-      const woNumber = `WO-${documentNumber}`;
+      // Same number as the quote, so quote / invoice / work order all
+      // read as one job.
+      const woNumber = await workOrderNumberForQuote(q.quoteNumber);
       const inserted = await db
         .insert(workOrders)
         .values({
           woNumber,
-          documentNumber,
           customerId: q.customerId ?? null,
           quoteId: id,
           dealId: q.dealId ?? null,

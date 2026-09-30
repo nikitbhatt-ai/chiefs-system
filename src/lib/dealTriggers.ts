@@ -9,12 +9,12 @@
 import { and, desc, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity, users } from "@/db/schema";
-import { nextDocumentNumber, documentNumberForQuote } from "@/lib/documentNumber";
 import { bucketForStage } from "@/lib/pipelineBuckets";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline, stageLabel, type DealStage } from "@/lib/pipelines";
 import { notify } from "@/lib/notifications";
 import { loadStageMapping, mapCrmToWorkflow, mapWorkflowToCrm, WORKFLOW_STAGE_LABELS } from "@/lib/stageMapping";
+import { nextDocNumber, workOrderNumberForQuote } from "@/lib/docNumbers";
 
 // Linear ordering of the quote workflow stages — same constant used in
 // /quotes/[id]/page.tsx. Keep these in sync.
@@ -96,14 +96,18 @@ export async function maybePromoteWonDeal(
     let workOrderId: string | null = null;
     const [existingWo] = await tx.select().from(workOrders).where(eq(workOrders.quoteId, quoteId)).limit(1).for("update");
     if (!existingWo) {
-      // Reuse this quote's shared job number (backfills legacy quotes).
-      const documentNumber = await documentNumberForQuote(quoteId, tx);
-      const woNumber = `WO-${documentNumber}`;
+      // The work order carries its quote's number, so quote / invoice /
+      // work order all read as one job.
+      const [qForNumber] = await tx
+        .select({ quoteNumber: quotes.quoteNumber })
+        .from(quotes)
+        .where(eq(quotes.id, quoteId))
+        .limit(1);
+      const woNumber = await workOrderNumberForQuote(qForNumber?.quoteNumber, tx);
       const [wo] = await tx
         .insert(workOrders)
         .values({
           woNumber,
-          documentNumber,
           customerId: d?.customerId ?? null,
           quoteId,
           dealId,
@@ -266,23 +270,19 @@ export async function syncDealToWorkflow(
       });
       return { ok: false, reason: "no_target" };
     }
+    // Look the quote up first: the work order takes its number so the job
+    // reads the same across its documents.
     const [q] = await db
       .select()
       .from(quotes)
       .where(eq(quotes.dealId, dealId))
       .orderBy(desc(quotes.updatedAt))
       .limit(1);
-    // Inherit the deal's quote number when there is one; otherwise this
-    // work order has no originating estimate, so it gets its own number.
-    const documentNumber = q?.id
-      ? await documentNumberForQuote(q.id)
-      : await nextDocumentNumber();
-    const woNumber = `WO-${documentNumber}`;
+    const woNumber = await workOrderNumberForQuote(q?.quoteNumber);
     const [inserted] = await db
       .insert(workOrders)
       .values({
         woNumber,
-        documentNumber,
         customerId: d.customerId ?? null,
         quoteId: q?.id ?? null,
         dealId,

@@ -1,23 +1,30 @@
 // Invoice + payment helpers. An invoice is the customer + accounting
-// document that closes out a work order. It shares the job's 4-digit
-// `document_number` (originating on the quote, carried by the WO) so the
-// estimate, the shop's build sheet, and the customer's bill all carry one
-// shared identifier — ShopMonkey convention.
+// document that closes out a work order. It carries the same job number as
+// the originating quote and work order (see src/lib/docNumbers.ts) so the
+// estimate, the shop's build sheet, and the customer's bill all read as one
+// job — ShopMonkey convention.
 
 import { and, eq, sum } from "drizzle-orm";
 import { db } from "@/db";
 import { invoices, invoicePayments, workOrders, quotes } from "@/db/schema";
-import { documentNumberForQuote } from "@/lib/documentNumber";
+
+// The digits of a document number string, padding preserved.
+//   "Q-01938" → "01938"   "WO-01938" → "01938"   "1938" → "1938"
+// Used so an invoice reads as the same job number as its quote / WO.
+export function jobDigits(numberStr: string | null | undefined): string | null {
+  const m = numberStr?.match(/(\d+)\s*$/);
+  return m ? m[1] : null;
+}
 
 export type CreateInvoiceResult =
-  | { ok: true; invoiceId: string; documentNumber: number }
+  | { ok: true; invoiceId: string; documentNumber: string | null }
   | { ok: false; reason: "wo_not_found" | "no_quote" | "already_invoiced" };
 
 // Create an invoice from a work order. Idempotent per WO: if the WO
 // already has an invoice, returns { ok: false, already_invoiced }.
-// Snapshots the source quote's lineItems + totals into the invoice.
-// Reuses the WO's document_number (assigning one if the WO was created
-// before the number column existed).
+// Snapshots the source quote's lineItems + totals into the invoice, and
+// stamps the shared job number (from the quote / WO number) so the invoice
+// reads as the same job.
 export async function createInvoiceFromWorkOrder(
   workOrderId: string,
 ): Promise<CreateInvoiceResult> {
@@ -36,15 +43,10 @@ export async function createInvoiceFromWorkOrder(
     const [q] = await tx.select().from(quotes).where(eq(quotes.id, wo.quoteId));
     if (!q) return { ok: false, reason: "no_quote" };
 
-    // Reuse the WO's document number. For legacy WOs created before the
-    // column existed, pull the number from the originating quote (which
-    // backfills the quote too) so the estimate, WO, and invoice all end
-    // up carrying the same identifier.
-    let documentNumber = wo.documentNumber;
-    if (documentNumber == null) {
-      documentNumber = await documentNumberForQuote(q.id, tx);
-      await tx.update(workOrders).set({ documentNumber, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
-    }
+    // The shared job number: mirror the quote's number (the work order
+    // carries the same digits), stored as the raw digits so the invoice,
+    // its quote, and its work order all read as one job.
+    const documentNumber = jobDigits(q.quoteNumber) ?? jobDigits(wo.woNumber);
 
     const subtotal = Number(q.subtotal ?? 0) || 0;
     const taxTotal = Number(q.taxTotal ?? 0) || 0;

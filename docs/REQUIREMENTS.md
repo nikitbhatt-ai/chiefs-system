@@ -2595,69 +2595,50 @@ records** but share a single **4-digit job number** so the estimate, the
 shop floor, and the customer all see the same identifier — the ShopMonkey
 convention (one number for the life of the job).
 
-- [x] **`document_number_seq`** — Postgres sequence starting at 1000,
-  monotonically increasing. `nextDocumentNumber()` (`src/lib/documentNumber.ts`)
-  reserves the next value; `fmtDocumentNumber(n)` renders it zero-padded
-  to 4 digits.
-- [x] **The quote owns the number.** `quotes.document_number` is assigned
-  when the estimate is created (both the `/api/quotes` POST and the
-  `/quotes` page create action); the quote number is `Q-<n>`.
-  `documentNumberForQuote(quoteId)` returns it, backfilling any quote made
-  before the column existed.
-- [x] **Work orders** carry `document_number` (unique, nullable for
-  legacy rows) and **inherit it from the originating quote**. Every code
-  path that inserts a WO (quote workflow-stage transition, direct WO POST,
-  deal triggers on won-deal promotion + workflow sync) pulls the quote's
-  number via `documentNumberForQuote`; a standalone WO with no quote gets
-  its own number off the sequence. WO number is `WO-<n>`.
+**Numbering is owned by `src/lib/docNumbers.ts`** (shipped separately in
+"Document numbers: one job number, fixed widths"). Quotes and work orders
+share `job_number_seq`; the quote is `Q-<n>`, its work order is `WO-<n>`
+(same digits), both zero-padded to **4 digits** (`DOC_NUMBER_WIDTH`, a
+minimum not a cap). The invoice built here reuses that same number. Run
+`docs/sql/doc_numbers.sql` for the sequences/renumber; this feature adds
+only the invoice tables below.
+
 - [x] **`invoices` table** — separate entity that snapshots the source
-  quote's `lineItems` and totals at generation time. Fields: status
-  (draft | sent | partial | paid | overdue | void), subtotal /
-  discountTotal / taxTotal / grandTotal, amountPaid, balanceDue,
-  dueDate, sentAt, paidAt, lineItems (jsonb snapshot), notes. Linked to
-  the source work order + quote + customer + deal.
+  quote's `lineItems` and totals at generation time. `document_number` is
+  stored as **text** — the shared job number's digits (e.g. `0204`),
+  stamped at generation so it survives even if the source quote is later
+  deleted. Other fields: status (draft | sent | partial | paid | overdue |
+  void), subtotal / discountTotal / taxTotal / grandTotal, amountPaid,
+  balanceDue, dueDate, sentAt, paidAt, lineItems (jsonb snapshot), notes.
+  Linked to the source work order + quote + customer + deal.
 - [x] **`invoice_payments` table** — one row per payment (cash | check |
   card | ach | other). `recordInvoicePayment()` inserts the row, re-sums
   `amount_paid`, recomputes `balance_due`, and advances status to
   `partial` or `paid` inside a single transaction.
 - [x] **`createInvoiceFromWorkOrder(workOrderId)`** — idempotent per WO
-  (returns `already_invoiced` if one exists); reuses the WO's document
-  number (or, for legacy WOs, pulls it from the originating quote so all
-  three records share one number); snapshots quote lineItems; sets a
-  default 30-day due date.
+  (returns `already_invoiced` if one exists); stamps the shared job number
+  from the originating quote's `quote_number` (falling back to the WO's
+  `wo_number`) via `jobDigits()`; snapshots quote lineItems; sets a default
+  30-day due date.
 - [x] **UI**
   - `/invoices` — list with KPI cards (outstanding balance, total
-    received, total invoices) and status-colored table.
+    received, total invoices) and status-colored table; number shown as
+    `#<digits>`.
   - `/invoices/[id]` — detail with line-item snapshot, payment history,
     record-payment form, mark-sent action, and invoice PDF link.
   - `/work-orders` list — per-row **Generate invoice** button (POSTs to
     the action, redirects to the new invoice); flips to
-    **Invoice XXXXXX** link once an invoice exists for that WO.
+    **Invoice #<digits>** link once an invoice exists for that WO.
   - Nav: `/invoices` added to Operations menu; breadcrumbs know the
     section.
 
-SQL (idempotent — user runs in Neon SQL Editor):
+SQL (idempotent — user runs in Neon SQL Editor). The job-number sequences
+come from `docs/sql/doc_numbers.sql`; this feature adds only:
 
 ```sql
--- 4-digit shared job number.
-CREATE SEQUENCE IF NOT EXISTS document_number_seq
-  START WITH 1000 MINVALUE 1000 INCREMENT BY 1 NO CYCLE;
-
--- If you already created the sequence at the old 6-digit setting, bring it
--- down to 4 digits (safe to run either way):
-ALTER SEQUENCE document_number_seq MINVALUE 1000;
-ALTER SEQUENCE document_number_seq RESTART WITH 1000;
-
--- The quote owns the number; the WO + invoice inherit it.
-ALTER TABLE quotes
-  ADD COLUMN IF NOT EXISTS document_number integer UNIQUE;
-
-ALTER TABLE work_orders
-  ADD COLUMN IF NOT EXISTS document_number integer UNIQUE;
-
 CREATE TABLE IF NOT EXISTS invoices (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  document_number integer NOT NULL UNIQUE,
+  document_number text,
   work_order_id uuid REFERENCES work_orders(id) ON DELETE SET NULL,
   quote_id uuid REFERENCES quotes(id) ON DELETE SET NULL,
   customer_id uuid REFERENCES customers(id) ON DELETE SET NULL,
@@ -3456,9 +3437,11 @@ and the Pending → Ordered → Received → Fulfilled purchase-order workflow) 
 - `purchase_order_status` enum values `ordered` and `fulfilled`
 - `packages.package_price`, `.markup_pct`, `.pricing_mode`, `.source_promo_id`
 
-The code on `main` reads and writes all of these, so those screens error against
-the live database until the SQL runs. `docs/sql/promo_phase7.sql` covers it —
-additive and nullable only, no backfill, safe to re-run.
+The code on `main` reads and writes all of these, so those screens errored
+against the live database until the SQL ran. `docs/sql/promo_phase7.sql` covers
+it — additive and nullable only, no backfill, safe to re-run. **The user ran it
+successfully on 2026-09-23**, so the live database now has all four columns and
+both enum values.
 
 Verified by building a database from the schema as it stood at the last SQL the
 user ran (accounting_phase11), confirming `scripts/scratch-schema-drift.ts`
@@ -3831,6 +3814,95 @@ scrollable on a phone:
   same endpoint as a drop, and Pipeline (kanban) cards have a "Move to…"
   bucket menu that runs the same move (override/reason prompts included).
 - Nav dropdowns shift left to stay on screen.
+## Document numbers: one job number, fixed widths (user requirement, 2026-09-23)
+
+> "I need them to be 4 digit invoice and quote numbers for the entire system"
+> then, refined: "Move Purchase orders to 6 digit, and quotes and invoices to 5
+> digit" and "work orders and invoice numbers should match each other so its
+> easily tracked"
+
+### One job, one number
+
+A quote, the invoice it becomes and the work order that builds it are the same
+job, so they share a number and differ only by prefix — which is how the shop's
+previous system worked (Estimate #1938 and Work Order #1938 were one job):
+
+    Q-01938   quote          WO-01938  work order for that job
+    Q-01938   invoice (a converted quote IS the invoice — same row)
+
+Purchase orders are **not** part of a job's identity: one PO can supply several
+jobs and a job can need several POs. They run on their own series, six digits.
+
+| | Was | Now |
+| --- | --- | --- |
+| Quotes / invoices | `Q-6639059` | `Q-02042` (5) |
+| Work orders | `WO-1234567` | `WO-02042` (5, its quote's number) |
+| Purchase orders | `PO-1234567` | `PO-000001` (6, own series) |
+| Accounting INV/RCPT/BILL/PAY | `INV-0001` | unchanged — already 4-digit |
+
+Padding is a **minimum, not a cap**: past 99999 a job number becomes six digits
+rather than colliding or erroring. Running out is not a failure mode.
+
+### Why sequences, not the clock
+
+Numbers were `Q-${Date.now().toString().slice(-7)}` in **ten** places. Two
+records created in the same millisecond got the same number, and these are
+UNIQUE columns, so the second insert failed. A clock slice is also not a count:
+`Q-6639059` says nothing about whether it came before `Q-1234567`. Postgres
+sequences are atomic across concurrent serverless instances, and they count.
+`src/lib/docNumbers.ts` is the single owner; `nextval` is not rolled back, so an
+aborted insert burns a number — a gap is invisible to a customer, two documents
+sharing a number is not.
+
+### Importing from the previous system
+
+The requirement: an imported invoice keeps the number the customer already has.
+
+`legacy_number` on `quotes`, `work_orders` and `purchase_orders` holds what the
+old system called a record. The migration renumbers **only** rows it can prove
+the app created — `legacy_number IS NULL` **and** the number is prefix + exactly
+7 digits, which is precisely what the clock produced — so an import is never
+rewritten, and a re-run is a no-op.
+
+Imports are written into **both** `quote_number` and `legacy_number`
+(`'Q-01938'`, `'1938'`). The sequence is parked above everything already in the
+series *before* renumbering, so the series simply continues: with 2041 the
+highest imported number, the next new job is Q-02042. **Import first, then
+re-run the file** — importing after new jobs are numbered risks a collision the
+UNIQUE constraint will reject.
+
+Search matches on digits with padding stripped, so "1938", "Q-01938" and a
+record's superseded "6639059" all find it.
+
+### Two bugs caught by running it
+
+- **The first guard skipped everything.** `quote_number !~ '^Q-\d{5,}$'` treats
+  the old 7-digit `Q-6639059` as "already new format", so the first run
+  renumbered nothing and parked the sequences at the old clock values. The test
+  is "exactly 7 digits", not "5 or more".
+- **Off-by-one on an empty series.** `setval(seq, 1)` marks 1 as *used*, so the
+  first purchase order came out `PO-000002`. Fixed with the three-argument form,
+  `setval(seq, GREATEST(m,1), m > 0)`.
+
+### Verified
+
+Against a database seeded in the state the live one is actually in — clock-based
+numbers, work orders both with and without quotes, plus two rows standing in for
+an import:
+
+- imported `Q-01938` / `Q-02041` untouched, legacy preserved;
+- app-created quotes renumbered oldest-first and **continuing the imported
+  series** — Q-02042, Q-02043, Q-02044;
+- each work order carries its quote's number (`Q-02042` ↔ `WO-02042`) and burns
+  no sequence value; a standalone one draws its own;
+- POs renumbered to `PO-000001`, `PO-000002` on a separate series;
+- **ten quotes created concurrently** got ten distinct, contiguous numbers —
+  the exact case the clock scheme failed;
+- search found a record by new number, superseded number and bare digits;
+- three consecutive migration runs produced an identical hash of every number.
+
+Work orders were not in the user's stated scope but are included, because
+sharing the quote's number is the whole point of the matching requirement.
 
 ## Notes on building order
 

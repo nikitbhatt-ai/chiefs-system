@@ -6,9 +6,13 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { customers, workOrders, quotes } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
-import { fmtDocumentNumber } from "@/lib/documentNumber";
 import { fmtDateTime } from "@/lib/datetime";
 import { loadInvoiceWithPayments, recordInvoicePayment } from "@/lib/invoices";
+
+// Shared job number stored as digits ("01938"); shown with a leading #.
+function fmtInvoiceNumber(n: string | null | undefined): string {
+  return n ? `#${n}` : "—";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +106,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
   return (
     <AppShell
-      title={`Invoice ${fmtDocumentNumber(invoice.documentNumber)}`}
+      title={`Invoice ${fmtInvoiceNumber(invoice.documentNumber)}`}
       subtitle={`${customer?.name ?? "—"} · ${wo?.woNumber ? `WO ${wo.woNumber}` : "no work order"}`}
     >
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">

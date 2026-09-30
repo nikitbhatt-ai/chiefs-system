@@ -5,8 +5,13 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { invoices, customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
-import { fmtDocumentNumber } from "@/lib/documentNumber";
 import { fmtDateTime } from "@/lib/datetime";
+
+// The shared job number is stored on the invoice as digits ("01938");
+// show it with a leading # so it reads as the quote / WO it came from.
+function fmtInvoiceNumber(n: string | null | undefined): string {
+  return n ? `#${n}` : "—";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -88,7 +93,7 @@ export default async function InvoicesPage() {
                 <tr key={r.id} className="border-t border-white/5">
                   <td className="px-4 py-2.5 font-mono text-xs text-white">
                     <Link href={`/invoices/${r.id}`} className="hover:text-amber-300">
-                      {fmtDocumentNumber(r.documentNumber)}
+                      {fmtInvoiceNumber(r.documentNumber)}
                     </Link>
                   </td>
                   <td className="px-4 py-2.5 text-xs">{r.customerId ? customerName.get(r.customerId) ?? "—" : "—"}</td>

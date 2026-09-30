@@ -15,6 +15,7 @@ import {
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
 import { headers } from "next/headers";
 import { SubmitButton } from "@/components/SubmitButton";
+import { nextDocNumber } from "@/lib/docNumbers";
 
 export const dynamic = "force-dynamic";
 
@@ -186,7 +187,7 @@ export default async function CustomerEntityPage({
     "use server";
     const session = await auth();
     if (!session?.user) return;
-    const quoteNumber = `Q-${Date.now().toString().slice(-7)}`;
+    const quoteNumber = await nextDocNumber("quote");
     const [row] = await db
       .insert(quotes)
       .values({
