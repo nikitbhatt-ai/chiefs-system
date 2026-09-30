@@ -718,6 +718,69 @@ export const workOrders = pgTable("work_orders", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Invoices are the customer + accounting-facing document that closes out
+// a work order. They carry the same job number as the originating quote
+// and work order (see src/lib/docNumbers.ts) so the estimate, the shop's
+// build sheet, and the customer's bill all read as one job. Stored as the
+// digits of that shared number (e.g. "01938"), stamped at generation time
+// so it survives even if the source quote is later deleted. Line items are
+// snapshotted from the source quote at invoice-generation time — if the
+// quote is later edited, this invoice keeps the original line items so
+// what was billed can't drift.
+export const invoices = pgTable("invoices", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // Shared job number as digits (e.g. "01938"); matches the quote (Q-01938)
+  // and work order (WO-01938). Not unique on its own — an invoice and its
+  // quote/WO intentionally read as the same job.
+  documentNumber: text("document_number"),
+  workOrderId: uuid("work_order_id").references(() => workOrders.id, { onDelete: "set null" }),
+  quoteId: uuid("quote_id").references(() => quotes.id, { onDelete: "set null" }),
+  customerId: uuid("customer_id").references(() => customers.id, { onDelete: "set null" }),
+  dealId: uuid("deal_id").references(() => deals.id, { onDelete: "set null" }),
+  // draft | sent | partial | paid | overdue | void
+  status: text("status").notNull().default("draft"),
+  subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
+  discountTotal: numeric("discount_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  grandTotal: numeric("grand_total", { precision: 12, scale: 2 }).notNull().default("0"),
+  amountPaid: numeric("amount_paid", { precision: 12, scale: 2 }).notNull().default("0"),
+  balanceDue: numeric("balance_due", { precision: 12, scale: 2 }).notNull().default("0"),
+  dueDate: timestamp("due_date"),
+  sentAt: timestamp("sent_at"),
+  paidAt: timestamp("paid_at"),
+  // Snapshot of the quote's lineItems at invoice-generation time. The
+  // invoice PDF renders from this, not from the live quote — protects
+  // billed history from later edits to the quote.
+  lineItems: jsonb("line_items").notNull().default([]),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+}, (t) => [
+  index("invoices_customer_idx").on(t.customerId),
+  index("invoices_deal_idx").on(t.dealId),
+  index("invoices_work_order_idx").on(t.workOrderId),
+  index("invoices_status_idx").on(t.status),
+]);
+
+// One row per payment received against an invoice. Sum of payments =
+// invoices.amount_paid; invoices.balance_due = grand_total − amount_paid.
+// invoices.status auto-advances (draft → sent → partial → paid) as
+// payments land.
+export const invoicePayments = pgTable("invoice_payments", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  invoiceId: uuid("invoice_id").notNull().references(() => invoices.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  // cash | check | card | ach | other
+  method: text("method").notNull(),
+  reference: text("reference"),
+  receivedAt: timestamp("received_at").notNull().defaultNow(),
+  receivedBy: uuid("received_by").references(() => users.id),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [
+  index("invoice_payments_invoice_idx").on(t.invoiceId),
+]);
+
 export const qcChecklists = pgTable("qc_checklists", {
   id: uuid("id").defaultRandom().primaryKey(),
   workOrderId: uuid("work_order_id").notNull().references(() => workOrders.id, { onDelete: "cascade" }),
