@@ -10,6 +10,7 @@ import { FlushLink } from "@/components/FlushLink";
 import { UpfitDiagramPreview } from "@/components/upfit/UpfitDiagramPreview";
 import { getTemplate } from "@/lib/upfit/templates";
 import { normalizePins } from "@/lib/upfit/composites";
+import { isUuid } from "@/lib/uuid";
 import { BRANDING } from "@/lib/pdf/branding";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
@@ -181,18 +182,29 @@ export default async function QuotePage({
     .map(({ archived: _archived, ...c }) => c);
   const customer = allCustomers.find((c) => c.id === q.customerId) ?? null;
 
-  const initial = (q.lineItems as unknown as QuoteLine[]) ?? [];
+  // Drop malformed entries (null / non-object) an old import may have left.
+  const initial = ((q.lineItems as unknown as QuoteLine[]) ?? []).filter(
+    (l): l is QuoteLine => !!l && typeof l === "object",
+  );
   const [config] = await db.select().from(upfitConfigs).where(eq(upfitConfigs.quoteId, q.id));
   const [wo] = await db
     .select({ id: workOrders.id, number: workOrders.woNumber, status: workOrders.status })
     .from(workOrders)
     .where(eq(workOrders.quoteId, q.id));
-  const [inv] = await db
-    .select({ id: invoices.id, number: invoices.documentNumber })
-    .from(invoices)
-    .where(eq(invoices.quoteId, q.id))
-    .orderBy(desc(invoices.createdAt))
-    .limit(1);
+  // Best-effort: the invoice only decides which step the strip highlights,
+  // so a failed lookup (e.g. the invoices table not migrated yet) must not
+  // take the whole estimate down with it.
+  let inv: { id: string; number: string | null } | undefined;
+  try {
+    [inv] = await db
+      .select({ id: invoices.id, number: invoices.documentNumber })
+      .from(invoices)
+      .where(eq(invoices.quoteId, q.id))
+      .orderBy(desc(invoices.createdAt))
+      .limit(1);
+  } catch (err) {
+    console.error(`quote ${q.id}: invoice lookup failed`, err);
+  }
   const step: EstimateStep =
     inv || q.status === "converted"
       ? "invoice"
@@ -208,7 +220,7 @@ export default async function QuotePage({
   const { partCosts } = await quoteDocumentFacts(q);
   // Manufacturer of each saved part line, so the editor can group lines by brand.
   const linePartIds = [
-    ...new Set(initial.flatMap((l) => (l.kind === "item" && l.partId ? [l.partId] : []))),
+    ...new Set(initial.flatMap((l) => (l?.kind === "item" && isUuid(l.partId) ? [l.partId] : []))),
   ];
   const mfrRows = linePartIds.length
     ? await db
