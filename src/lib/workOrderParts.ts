@@ -7,6 +7,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { workOrders, quotes, parts, vendors } from "@/db/schema";
+import { isUuid } from "@/lib/uuid";
 
 export type WorkOrderPartLine = {
   name: string;
@@ -50,7 +51,7 @@ export async function resolvePartsFromLineItems(lineItems: unknown): Promise<Wor
   const itemLines = ((lineItems as QuoteLineItem[] | null) ?? []).filter((l) => l?.kind === "item");
   if (itemLines.length === 0) return [];
 
-  const partIds = Array.from(new Set(itemLines.map((l) => l.partId).filter((x): x is string => !!x)));
+  const partIds = Array.from(new Set(itemLines.map((l) => l.partId).filter(isUuid)));
   const partRows = partIds.length
     ? await db
         .select({

@@ -12,6 +12,7 @@ import { eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { customers, deals, parts, users, vehicles, type quotes } from "@/db/schema";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
+import { isUuid } from "@/lib/uuid";
 
 type QuoteRow = typeof quotes.$inferSelect;
 
@@ -43,7 +44,7 @@ function linePartIds(quote: QuoteRow): string[] {
     ...new Set(
       ((quote.lineItems as unknown as { partId?: string }[]) ?? [])
         .map((l) => l?.partId)
-        .filter((id): id is string => typeof id === "string" && id.length > 0),
+        .filter(isUuid),
     ),
   ];
 }
