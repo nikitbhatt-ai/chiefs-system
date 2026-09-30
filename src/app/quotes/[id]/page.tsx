@@ -131,13 +131,18 @@ export default async function QuotePage({
       <QuoteTabs quoteId={q.id} active="quote" />
 
       <div className="flex flex-wrap justify-end gap-2">
+        {/* Two documents come off a quote and they must never be confused, so
+            each button names its audience rather than saying "Download PDF":
+            this one is the priced customer quote, the blue one below is the
+            de-priced shop build sheet. */}
         <a
           href={`/api/pdf/quotes/${q.id}`}
           target="_blank"
           rel="noopener"
+          title="The priced quote you send the customer: unit price, discounts, labor, fees and total."
           className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold"
         >
-          Download PDF
+          Download customer PDF
         </a>
         {q.status === "converted" && (
           <a
@@ -149,17 +154,17 @@ export default async function QuotePage({
             Download invoice PDF
           </a>
         )}
-        {/* The shop's build sheet: same line items with every price stripped
-            out. Keyed on the estimate so it's here rather than only on the
-            work-order page, and so it works before a work order exists. */}
+        {/* The shop's build sheet: the same line items with every price
+            stripped out. Keyed on the estimate so it's here rather than only on
+            the work-order page, and so it works before a work order exists. */}
         <a
           href={`/api/pdf/work-orders/by-quote/${q.id}`}
           target="_blank"
           rel="noopener"
-          title="Build sheet for the shop: part, brand, part # and qty, plus any line notes. No pricing."
-          className="text-[11px] font-body bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 rounded-md px-3 py-1.5"
+          title="Build sheet for the shop: part, brand, part # and qty, plus any line notes. No pricing of any kind."
+          className="text-[11px] font-body bg-blue-500/20 hover:bg-blue-500/30 text-blue-200 border border-blue-500/40 rounded-md px-3 py-1.5 font-semibold"
         >
-          Download work order
+          Download work order PDF
         </a>
         <a
           href={`/quotes/${q.id}/print`}
