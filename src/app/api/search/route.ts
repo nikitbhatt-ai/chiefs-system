@@ -3,6 +3,7 @@ import { desc, ilike, or, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { customers, leads, quotes, workOrders } from "@/db/schema";
+import { docNumberDigits } from "@/lib/docNumbers";
 
 const LIMIT = 5;
 
@@ -23,6 +24,9 @@ export async function GET(req: Request) {
   }
 
   const like = `%${q}%`;
+  // A document number reduced to its significant digits, so one search box
+  // finds "1938", "Q-01938" and an imported "INV-1938" as the same record.
+  const digits = docNumberDigits(q);
 
   const [customerRows, leadRows, quoteRows, workOrderRows] = await Promise.all([
     db
@@ -72,6 +76,17 @@ export async function GET(req: Request) {
       .where(
         or(
           ilike(quotes.quoteNumber, like),
+          // The number the record carried in the previous system, so a customer
+          // quoting their old paperwork is still found.
+          ilike(quotes.legacyNumber, like),
+          // Digits only, both sides: someone types "1938" for a record stored
+          // as "Q-01938", or types "Q-01938" for one imported as "1938".
+          ...(digits
+            ? [
+                sql`regexp_replace(${quotes.quoteNumber}, '\D', '', 'g') ~ ${`0*${digits}$`}`,
+                sql`regexp_replace(COALESCE(${quotes.legacyNumber}, ''), '\D', '', 'g') ~ ${`0*${digits}$`}`,
+              ]
+            : []),
           ilike(quotes.notes, like),
           ilike(customers.name, like),
         ),
