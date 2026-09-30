@@ -11,6 +11,7 @@ import { lineUnitCost, lineExtCost, costRollup, type PartCostMap } from "@/lib/l
 import { useAutosave, autosaveLabel } from "@/lib/useAutosave";
 import { registerQuoteFlusher } from "@/lib/quoteFlush";
 import { CustomerPicker, type PickerCustomer } from "@/components/CustomerPicker";
+import { AddLineItemModal } from "@/components/AddLineItemModal";
 
 // Optional package grouping. Lines added from a saved package share a
 // groupId + the package's title; they render together under that title
@@ -30,6 +31,9 @@ export type QuoteLine =
       description: string;
       quantity: number;
       unitPrice: number;
+      // Manufacturer snapshot from the part (groups the line under its brand).
+      manufacturerId?: string | null;
+      manufacturer?: string | null;
       discount: number;
       discountKind: "pct" | "amt";
       partId?: string;
@@ -89,6 +93,7 @@ export function QuoteEditor({
   initialHideLinePrices = false,
   initialTaxExempt = false,
   vehicleSlot,
+  partManufacturers = {},
   partCosts = {},
   action,
 }: {
@@ -117,6 +122,8 @@ export function QuoteEditor({
   initialTaxExempt?: boolean;
   /** Server-rendered "Vehicle & Lights" card, shown at the top of the main column. */
   vehicleSlot?: React.ReactNode;
+  /** partId → manufacturer, for grouping saved lines under their brand. */
+  partManufacturers?: Record<string, { id: string | null; name: string | null }>;
   /**
    * partId → internal weighted-average cost, for the margin readouts. Resolved
    * server-side because a saved line stores only `partId`; a line added from a
@@ -141,6 +148,8 @@ export function QuoteEditor({
   const [hideLinePrices, setHideLinePrices] = useState(initialHideLinePrices);
   const [taxExempt, setTaxExempt] = useState(initialTaxExempt);
   const [changingCustomer, setChangingCustomer] = useState(false);
+  // Add Line Item window: open + which manufacturer it starts on (null = all).
+  const [adder, setAdder] = useState<{ open: boolean; mfr: string | null }>({ open: false, mfr: null });
   const customerTouched = useRef(false);
   const statusTouched = useRef(false);
   useEffect(() => {
@@ -264,6 +273,8 @@ export function QuoteEditor({
           discount: 0,
           discountKind: "pct",
           partId: part.id,
+          manufacturerId: part.manufacturerId ?? null,
+          manufacturer: part.manufacturerName ?? null,
         },
       ];
     });
@@ -377,9 +388,13 @@ export function QuoteEditor({
   function renderAddControls(withSave: boolean) {
     return (
       <div className="flex gap-2 items-center flex-wrap justify-end">
-        <div className="w-full sm:w-[240px]">
-          <PartSearchCombobox mode="adder" placeholder="+ Search inventory to add…" onPick={addPart} />
-        </div>
+        <button
+          type="button"
+          onClick={() => setAdder({ open: true, mfr: null })}
+          className="btn-cta btn-sm"
+        >
+          + Add line item
+        </button>
         <div className="w-full sm:w-[220px]">
           <PackageSearchCombobox placeholder="+ Add package…" onPick={addPackage} />
         </div>
@@ -759,6 +774,28 @@ export function QuoteEditor({
   // indices. `withReorder` enables drag + arrows (loose lines only —
   // package bundles keep their order). `banners` shows the big colored
   // section headers (loose lines); package groups use their own title.
+  // Manufacturer of an item line: its own snapshot, else the saved part's.
+  // Lines typed by hand (no part) group as "Custom items".
+  const groupByManufacturer = (itemIdx: number[]) => {
+    const order: string[] = [];
+    const groups = new Map<string, { key: string; label: string; idx: number[] }>();
+    for (const i of itemIdx) {
+      const l = lines[i];
+      if (l.kind !== "item") continue;
+      const saved = l.partId ? partManufacturers[l.partId] : undefined;
+      const id = l.manufacturerId ?? saved?.id ?? null;
+      const name = l.manufacturer ?? saved?.name ?? null;
+      const key = !l.partId ? "custom" : id ?? "none";
+      const label = !l.partId ? "Custom items" : name ?? "No manufacturer";
+      if (!groups.has(key)) {
+        groups.set(key, { key, label, idx: [] });
+        order.push(key);
+      }
+      groups.get(key)!.idx.push(i);
+    }
+    return order.map((k) => groups.get(k)!);
+  };
+
   const renderKindSections = (
     indices: number[],
     opts: { withReorder: boolean; banners: boolean },
@@ -770,16 +807,43 @@ export function QuoteEditor({
       opts.withReorder ? targets(list, i) : null;
     return (
       <>
-        {itemIdx.length > 0 && (
+        {itemIdx.length > 0 && opts.banners && (
           <>
-            {opts.banners && (
-              <div className="px-4 py-2 bg-zinc-800/50 border-y border-white/10 text-[11px] uppercase tracking-wider text-zinc-300 font-body font-semibold flex justify-between">
-                <span>Parts &amp; Items</span>
-                <span className="text-zinc-500 normal-case tracking-normal">
-                  {itemIdx.length} {itemIdx.length === 1 ? "row" : "rows"}
-                </span>
+            <div className="px-4 py-2 bg-zinc-800/50 border-y border-white/10 text-[11px] uppercase tracking-wider text-zinc-300 font-body font-semibold flex justify-between">
+              <span>Parts &amp; Items</span>
+              <span className="text-zinc-500 normal-case tracking-normal">
+                {itemIdx.length} {itemIdx.length === 1 ? "row" : "rows"}
+              </span>
+            </div>
+            {/* Grouped by manufacturer, each with its own + Add. Reorder
+                moves a line within its brand. */}
+            {groupByManufacturer(itemIdx).map((g) => (
+              <div key={g.key} className="border-b border-white/10">
+                <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-black/20">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="label-caps !text-zinc-100 truncate">{g.label}</span>
+                    <span className="text-xs text-zinc-500">
+                      {g.idx.length} {g.idx.length === 1 ? "line" : "lines"}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => (g.key === "custom" ? addItem() : setAdder({ open: true, mfr: g.key }))}
+                    className="btn-outline btn-sm !py-1"
+                  >
+                    + Add
+                  </button>
+                </div>
+                {itemHeader}
+                <div className="divide-y divide-white/5">
+                  {g.idx.map((i) => renderItemRow(i, reorderOf(g.idx, i)))}
+                </div>
               </div>
-            )}
+            ))}
+          </>
+        )}
+        {itemIdx.length > 0 && !opts.banners && (
+          <>
             {itemHeader}
             <div className="divide-y divide-white/5">
               {itemIdx.map((i) => renderItemRow(i, reorderOf(itemIdx, i)))}
@@ -1263,6 +1327,14 @@ export function QuoteEditor({
         </div>
       </div>
       </div>
+
+      <AddLineItemModal
+        open={adder.open}
+        initialManufacturer={adder.mfr}
+        onClose={() => setAdder((a) => ({ ...a, open: false }))}
+        onPick={addPart}
+        onCustomItem={addItem}
+      />
 
       {/* Sidebar: customer card, tax, status. */}
       <aside className="space-y-4 lg:sticky lg:top-4">

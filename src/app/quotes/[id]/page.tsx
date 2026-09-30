@@ -2,8 +2,8 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { desc } from "drizzle-orm";
-import { quotes, customers, upfitConfigs, workOrders, invoices } from "@/db/schema";
+import { desc, inArray } from "drizzle-orm";
+import { quotes, customers, upfitConfigs, workOrders, invoices, parts, vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { EstimateSteps, type EstimateStep } from "@/components/EstimateSteps";
 import { FlushLink } from "@/components/FlushLink";
@@ -205,6 +205,20 @@ export default async function QuotePage({
   // Internal average cost per part, so the editor can show cost and margin per
   // line. Same resolver the documents use, so the numbers agree.
   const { partCosts } = await quoteDocumentFacts(q);
+  // Manufacturer of each saved part line, so the editor can group lines by brand.
+  const linePartIds = [
+    ...new Set(initial.flatMap((l) => (l.kind === "item" && l.partId ? [l.partId] : []))),
+  ];
+  const mfrRows = linePartIds.length
+    ? await db
+        .select({ partId: parts.id, id: vendors.id, name: vendors.name })
+        .from(parts)
+        .leftJoin(vendors, eq(vendors.id, parts.manufacturerId))
+        .where(inArray(parts.id, linePartIds))
+    : [];
+  const partManufacturers = Object.fromEntries(
+    mfrRows.map((r) => [r.partId, { id: r.id ?? null, name: r.name ?? null }]),
+  );
   const fmtDate = (d: Date) =>
     d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Chicago" });
   const statusLabel: Record<string, string> = {
@@ -375,6 +389,7 @@ export default async function QuotePage({
         initialHideLinePrices={q.hideLinePrices}
         initialTaxExempt={q.taxExempt}
         vehicleSlot={vehicleCard}
+        partManufacturers={partManufacturers}
         partCosts={partCosts}
         action={saveQuote}
       />

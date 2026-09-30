@@ -14,6 +14,13 @@ export type PartHit = {
   avgCost?: string | null;
   restricted: boolean;
   restrictionCategory: string | null;
+  // Returned by /api/parts/search (stock counts only with ?stock=1).
+  description?: string | null;
+  manufacturerId?: string | null;
+  manufacturerName?: string | null;
+  quantityOnHand?: number;
+  committed?: number;
+  available?: number;
 };
 
 // Server-backed part picker shared by the quote / PO / estimate editors.

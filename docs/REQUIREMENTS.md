@@ -1826,13 +1826,34 @@ ALTER TABLE quotes ADD COLUMN IF NOT EXISTS tax_rate numeric(6,3);
 -- tax-exempt customers as tax-exempt (see the .sql file)
 ```
 
-### Estimate page redesign — Part 2 (next)
+### Estimate page redesign — Part 2 (2026-09-30)
 
-- [ ] Inside Parts & Items, group part lines under their **manufacturer**
-      (Whelen, Havis, Setina, SoundOff, Troy, Pro-Gard…), each group with its
-      own **+ Add** that searches that brand. Labor and Fees stay as their
-      own sections; packages stay as their own titled groups.
-- [ ] Restyle the line-item table and totals to match the new look.
+- [x] **Add Line Item window** (`AddLineItemModal`, replaces the inline
+      "+ Search inventory" box): left column lists **All products** and every
+      manufacturer with its active-part count (most parts first, plus "No
+      manufacturer"), from `GET /api/parts/manufacturers`. Right side: one
+      search box — **scan a barcode** or type a part # / name (Enter adds the
+      top result, so a scanner works). Each result shows name, description,
+      manufacturer badge, part #, **price**, and **inventory**:
+      "N avail · N cmtd" (green in stock, amber at 0, red oversold) plus
+      "N on hand". Clicking adds the part and keeps the window open ("✓
+      Added ×2"); adding the same part again bumps its qty. "+ Custom item"
+      for anything not in inventory.
+  - **Committed** = units on accepted (approved/converted, not archived)
+    estimates whose work order hasn't consumed parts yet
+    (`src/lib/partAvailability.ts`). Reservations aren't used because the
+    current policy takes no stock before In Progress. **Available** = on
+    hand − committed.
+  - `GET /api/parts/search` gained `?manufacturerId=<id>|none`, `?stock=1`
+    (adds `committed` / `available`), barcode matching, and returns the
+    manufacturer name, description and on-hand count. Existing callers are
+    unaffected.
+- [x] **Parts grouped by manufacturer** inside Parts & Items (Whelen, Setina,
+      …, then "Custom items" for hand-typed lines), each group with its own
+      **+ Add** that opens the window already filtered to that brand. Lines
+      snapshot `manufacturerId` / `manufacturer` when added; older saved lines
+      resolve it from the part. Reorder moves a line within its brand.
+      Labor, fees and package groups stay as their own sections.
 
 ### Schema additions (Upfit Builder)
 
