@@ -16,7 +16,6 @@ import {
   LIGHT_TYPE_GROUP_LABELS,
   PIN_SIZES,
   PUSHBAR_DEFAULT_FRAC,
-  getLightType,
   getTemplate,
   getViews,
   isPushbarShape,
@@ -24,6 +23,7 @@ import {
   pinColorWords,
   pinLensState,
   type LensColorKey,
+  type LightType,
   type LightTypeGroup,
   type PinSizeKey,
 } from "@/lib/upfit/templates";
@@ -50,6 +50,8 @@ export type UpfitBuilderProps = {
   saveSnapPointsAction?: (formData: FormData) => Promise<void>;
   saveStarterAction?: (formData: FormData) => Promise<{ id: string } | null>;
   deleteStarterAction?: (formData: FormData) => Promise<void>;
+  /** The "Choose a light type" list (Settings → Light types). Defaults to the built-in list. */
+  lightTypes?: LightType[];
 };
 
 type Starter = { id: string; bodyStyle: string; name: string; pins: UpfitPin[] };
@@ -112,7 +114,9 @@ export function UpfitBuilder({
   saveSnapPointsAction,
   saveStarterAction,
   deleteStarterAction,
+  lightTypes = LIGHT_TYPES,
 }: UpfitBuilderProps) {
+  const getLightType = (key: string | null | undefined) => lightTypes.find((t) => t.key === key) ?? null;
   const router = useRouter();
   const backHref = `/quotes/${quoteId}`;
 
@@ -520,7 +524,7 @@ export function UpfitBuilder({
   const groups = (Object.keys(LIGHT_TYPE_GROUP_LABELS) as LightTypeGroup[]).map((g) => ({
     group: g,
     label: LIGHT_TYPE_GROUP_LABELS[g],
-    types: LIGHT_TYPES.filter((t) => t.group === g),
+    types: lightTypes.filter((t) => t.group === g),
   }));
 
   return (

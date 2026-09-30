@@ -52,6 +52,7 @@ const NAV: NavGroup[] = [
       { href: "/users", label: "Users" },
       { href: "/settings/lookups", label: "Settings (lookups)" },
       { href: "/settings/sla", label: "Settings (stage SLAs)" },
+      { href: "/settings/light-types", label: "Settings (light types)" },
       { href: "/settings/stage-mapping", label: "Settings (stage mapping)" },
       { href: "/settings/lead-capture-test", label: "Settings (lead-capture test)" },
     ],

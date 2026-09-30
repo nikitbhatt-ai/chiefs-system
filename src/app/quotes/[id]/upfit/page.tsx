@@ -7,6 +7,7 @@ import { AppShell } from "@/components/AppShell";
 import { UpfitBuilder } from "@/components/UpfitBuilder";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
 import { normalizePins } from "@/lib/upfit/composites";
+import { loadLightTypes } from "@/lib/upfit/lightTypes";
 import { removeUpfitLink, upsertUpfitLink } from "@/lib/customerDocLinks";
 
 export const dynamic = "force-dynamic";
@@ -158,7 +159,7 @@ export default async function UpfitPage({
     .from(upfitConfigs)
     .where(eq(upfitConfigs.quoteId, id));
 
-  const extras = await loadSnapAndStarters();
+  const [extras, lightTypes] = await Promise.all([loadSnapAndStarters(), loadLightTypes()]);
 
   // Stored override wins; otherwise prefill from the linked deal/vehicle.
   const defaultVehicleLabel =
@@ -181,6 +182,7 @@ export default async function UpfitPage({
         saveSnapPointsAction={saveSnapPoints}
         saveStarterAction={saveStarter}
         deleteStarterAction={deleteStarter}
+        lightTypes={lightTypes}
       />
     </AppShell>
   );
