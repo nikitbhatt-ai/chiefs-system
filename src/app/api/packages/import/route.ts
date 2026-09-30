@@ -12,6 +12,7 @@ type Result = {
   action: Action;
   componentCount: number;
   errors: string[];
+  warnings: string[];
 };
 
 export async function POST(req: Request) {
@@ -55,28 +56,36 @@ export async function POST(req: Request) {
 
   for (const pkg of parsed) {
     const errors: string[] = [];
-    if (!pkg.name) errors.push("missing package_name");
+    const warnings: string[] = [];
+    if (!pkg.name) errors.push("no package name — can't group these rows");
 
     const components: PackageComponent[] = [];
     for (const r of pkg.rows) {
-      // Row-level parse errors bubble up to the package (a partial bundle is
-      // never imported — fix the row and re-run).
-      for (const e of r.errors) errors.push(`row ${r.rowNumber}: ${e}`);
-      if (r.errors.length > 0) continue;
+      // A row-level hard error drops just that row (reported), never the whole
+      // package — a partial bundle is better than a rejected upload.
+      if (r.errors.length > 0) {
+        warnings.push(`row ${r.rowNumber} dropped: ${r.errors.join("; ")}`);
+        continue;
+      }
+      for (const w of r.warnings) warnings.push(`row ${r.rowNumber}: ${w}`);
 
       if (r.componentType === "item") {
-        const part = partBySku.get(r.sku);
-        if (!part) {
-          errors.push(`row ${r.rowNumber}: unknown SKU "${r.sku}" (load inventory first)`);
-          continue;
+        // Link to a catalog part when the SKU resolves; otherwise keep the
+        // component but link by SKU snapshot only (partId null). A package can
+        // reference a part not yet loaded into inventory — the snapshot means
+        // it still carries a description and price and links up by SKU later.
+        const part = r.sku ? partBySku.get(r.sku) : undefined;
+        if (r.sku && !part) {
+          warnings.push(`row ${r.rowNumber}: SKU "${r.sku}" not in inventory yet — linked by SKU only`);
         }
+        const description = r.label || (part ? `${part.sku} — ${part.name}` : r.sku);
         components.push({
           kind: "item",
-          description: r.label || `${part.sku} — ${part.name}`,
+          description,
           quantity: r.quantity != null ? Math.max(0, Math.trunc(r.quantity)) : 1,
-          unitPrice: r.unitPrice != null ? r.unitPrice : part.price != null ? Number(part.price) : 0,
-          partId: part.id,
-          sku: part.sku,
+          unitPrice: r.unitPrice != null ? r.unitPrice : part?.price != null ? Number(part.price) : 0,
+          partId: part?.id ?? null,
+          sku: r.sku || null,
         });
       } else if (r.componentType === "labor") {
         components.push({
@@ -95,21 +104,26 @@ export async function POST(req: Request) {
       }
     }
 
-    const nameKey = pkg.name.trim().toLowerCase();
-    const existingIds = idsByName.get(nameKey) ?? [];
+    const nameKey = (pkg.name || "").trim().toLowerCase();
+    const existingIds = pkg.name ? idsByName.get(nameKey) ?? [] : [];
     if (existingIds.length > 1) {
       errors.push(`ambiguous — ${existingIds.length} existing packages named "${pkg.name}"`);
     }
+    // A package with no usable components is nothing to import — skip it, but
+    // as its own reported row, not a file failure.
+    if (errors.length === 0 && components.length === 0) {
+      errors.push("no usable components in this package");
+    }
 
     if (errors.length > 0) {
-      results.push({ name: pkg.name || "(unnamed)", action: "skip", componentCount: components.length, errors });
+      results.push({ name: pkg.name || "(unnamed)", action: "skip", componentCount: components.length, errors, warnings });
       skipped++;
       continue;
     }
 
     const isUpdate = existingIds.length === 1;
     if (!commit) {
-      results.push({ name: pkg.name, action: isUpdate ? "update" : "create", componentCount: components.length, errors: [] });
+      results.push({ name: pkg.name, action: isUpdate ? "update" : "create", componentCount: components.length, errors: [], warnings });
       if (isUpdate) updated++;
       else created++;
       continue;
@@ -123,21 +137,28 @@ export async function POST(req: Request) {
             category: pkg.category,
             description: pkg.description,
             components,
+            packagePrice: pkg.packagePrice != null ? pkg.packagePrice.toFixed(2) : null,
             updatedAt: new Date(),
           })
           .where(eq(packages.id, existingIds[0]));
         updated++;
-        results.push({ name: pkg.name, action: "update", componentCount: components.length, errors: [] });
+        results.push({ name: pkg.name, action: "update", componentCount: components.length, errors: [], warnings });
       } else {
         const [row] = await db
           .insert(packages)
-          .values({ name: pkg.name, category: pkg.category, description: pkg.description, components })
+          .values({
+            name: pkg.name,
+            category: pkg.category,
+            description: pkg.description,
+            components,
+            packagePrice: pkg.packagePrice != null ? pkg.packagePrice.toFixed(2) : null,
+          })
           .returning({ id: packages.id });
         // Track the new name so a duplicate later in the same file updates it
         // instead of creating a second row.
         idsByName.set(nameKey, [row.id]);
         created++;
-        results.push({ name: pkg.name, action: "create", componentCount: components.length, errors: [] });
+        results.push({ name: pkg.name, action: "create", componentCount: components.length, errors: [], warnings });
       }
     } catch (e) {
       skipped++;
@@ -146,6 +167,7 @@ export async function POST(req: Request) {
         action: "skip",
         componentCount: components.length,
         errors: [e instanceof Error ? e.message : "insert/update error"],
+        warnings,
       });
     }
   }

@@ -3,6 +3,7 @@ import { eq, desc, asc, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { parts, partReceipts, vendors, purchaseOrders } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { reservedForPart } from "@/lib/reservations";
 
 function fmt(v: number | string | null | undefined) {
   if (v == null) return "—";
@@ -19,6 +20,10 @@ export default async function PartDetailPage({
   const { id } = await params;
   const [p] = await db.select().from(parts).where(eq(parts.id, id));
   if (!p) notFound();
+
+  // Available-to-pull = on-hand − active reservations (Phase 5).
+  const reserved = await reservedForPart(id);
+  const available = p.quantityOnHand - reserved;
 
   // Active FIFO layers: any receipt with quantityRemaining > 0, oldest first.
   const allReceipts = await db
@@ -90,15 +95,34 @@ export default async function PartDetailPage({
   const samples = [1, 5, 10, 25].filter((q) => q <= totalQty);
 
   return (
-    <AppShell title={`${p.sku}`} subtitle={p.name}>
+    <AppShell title={`${p.sku}`} subtitle={p.barcode ? `${p.name} · Barcode ${p.barcode}` : p.name}>
+      <div className="flex justify-end">
+        <a
+          href={`/inventory/labels?items=${p.id}:1`}
+          className="text-[11px] font-body bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold"
+        >
+          Print barcode label
+        </a>
+      </div>
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <Stat label="On hand" value={p.quantityOnHand.toString()} />
-        <Stat label="On order" value={p.quantityOnOrder.toString()} />
         <Stat
-          label="Stored cost"
-          value={p.cost ? fmt(p.cost) : "—"}
-          hint="From part record"
+          label="Reserved"
+          value={reserved.toString()}
+          hint="Claimed by committed builds"
         />
+        <Stat
+          label="Available"
+          value={available.toString()}
+          hint="On hand − reserved (what pulls draw from)"
+          highlight
+        />
+        <Stat label="On order" value={p.quantityOnOrder.toString()} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <Stat label="Average cost" value={p.avgCost ? fmt(p.avgCost) : p.cost ? fmt(p.cost) : "—"} hint="Weighted average" />
+        <Stat label="Stored cost" value={p.cost ? fmt(p.cost) : "—"} hint="parts.cost (= avg, 2dp)" />
         <Stat label="Price" value={p.price ? fmt(p.price) : "—"} />
       </div>
 
@@ -126,7 +150,7 @@ export default async function PartDetailPage({
       </div>
 
       {samples.length > 0 ? (
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+        <div className="bg-surface border border-white/5 rounded-lg p-4">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
             FIFO cost preview
           </h3>
@@ -148,7 +172,7 @@ export default async function PartDetailPage({
         </div>
       ) : null}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <div className="px-4 py-2.5 border-b border-white/5">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             FIFO layers (oldest first)
@@ -234,7 +258,7 @@ function Stat({
 }) {
   return (
     <div
-      className={`bg-[#161624] border rounded-lg p-3 ${
+      className={`bg-surface border rounded-lg p-3 ${
         highlight ? "border-amber-500/30" : "border-white/5"
       }`}
     >

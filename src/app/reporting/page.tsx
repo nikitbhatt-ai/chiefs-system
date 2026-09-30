@@ -23,7 +23,7 @@ export default async function ReportingIndex() {
           <Link
             key={r.href}
             href={r.href}
-            className="bg-[#161624] border border-white/5 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
+            className="bg-surface border border-white/5 rounded-lg p-4 hover:border-amber-500/30 transition-colors"
           >
             <h3 className="text-sm font-body font-semibold text-white">{r.title}</h3>
             <p className="text-[11px] text-zinc-400 font-body mt-1">{r.description}</p>

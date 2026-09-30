@@ -96,7 +96,7 @@ export default async function DashboardPage({
       {view === "operations" && <OperationsDashboard />}
       {view === "admin" && <AdminDashboard />}
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">My open tasks</h3>
           <span className="text-[10px] font-body text-zinc-500">{tasks.length} {tasks.length === 1 ? "task" : "tasks"}</span>

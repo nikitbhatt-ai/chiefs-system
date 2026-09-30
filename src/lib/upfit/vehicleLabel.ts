@@ -5,10 +5,16 @@ import { deals, vehicles, type quotes } from "@/db/schema";
 type QuoteRow = typeof quotes.$inferSelect;
 
 // Resolve a human-readable "year make model" label for the vehicle a
-// quote's upfit targets. Prefers the deal's denormalized vehicle fields,
-// then the linked vehicle row. Returns null when nothing is linked yet so
-// callers can fall back to the body-style label.
+// quote targets. Prefers the quote's OWN vehicle (from its VIN decoder),
+// then the deal's denormalized fields, then the deal's linked vehicle
+// row. Returns null when nothing is set so callers can fall back to the
+// body-style label.
 export async function resolveVehicleLabel(quote: QuoteRow): Promise<string | null> {
+  const ownParts = [quote.vehicleYear, quote.vehicleMake, quote.vehicleModel, quote.vehicleTrim].filter(
+    Boolean,
+  );
+  if (ownParts.length) return ownParts.join(" ");
+
   if (!quote.dealId) return null;
   const [deal] = await db.select().from(deals).where(eq(deals.id, quote.dealId));
   if (!deal) return null;

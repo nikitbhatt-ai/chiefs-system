@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { lookups } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,7 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
   if (session?.user?.role !== "admin") {
     return (
       <AppShell title="Settings" subtitle="Admin only">
-        <div className="bg-[#161624] border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
+        <div className="bg-surface border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
           You need the <strong>admin</strong> role to manage settings.
         </div>
       </AppShell>
@@ -76,7 +77,7 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
           <a key={c.slug} href={`/settings/lookups?category=${c.slug}`} className={`text-[11px] font-body px-3 py-1.5 rounded-md border ${category === c.slug ? "bg-amber-500/10 border-amber-500/40 text-amber-300" : "border-white/10 text-zinc-400 hover:text-white"}`}>{c.label}</a>
         ))}
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add option</h3>
         <form action={createLookup} className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <input type="hidden" name="category" value={category} />
@@ -88,10 +89,10 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
             </select>
           ) : (<input type="hidden" name="parentId" value="" />)}
           <input name="sortOrder" type="number" placeholder="Sort order" defaultValue="0" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500" />
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2">Add</SubmitButton>
         </form>
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -115,13 +116,13 @@ export default async function LookupsPage({ searchParams }: { searchParams: Prom
                     <form action={toggleLookup} className="inline">
                       <input type="hidden" name="id" value={r.id} />
                       <input type="hidden" name="active" value={r.active ? "0" : "1"} />
-                      <button type="submit" className={`text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${r.active ? "bg-green-500/10 text-green-300 border-green-500/30" : "bg-zinc-500/10 text-zinc-500 border-zinc-500/30"}`}>{r.active ? "Active" : "Inactive"}</button>
+                      <SubmitButton className={`text-[10px] uppercase tracking-wider rounded border px-2 py-0.5 ${r.active ? "bg-green-500/10 text-green-300 border-green-500/30" : "bg-zinc-500/10 text-zinc-500 border-zinc-500/30"}`}>{r.active ? "Active" : "Inactive"}</SubmitButton>
                     </form>
                   </td>
                   <td className="px-3 py-2 text-right">
                     <form action={deleteLookup} className="inline">
                       <input type="hidden" name="id" value={r.id} />
-                      <button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400">Delete</button>
+                      <SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                     </form>
                   </td>
                 </tr>

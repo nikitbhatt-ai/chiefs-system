@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { signIn } from "@/auth";
 import { microsoftEnabled, emailMagicLinkEnabled } from "@/auth.config";
 import { AuthError } from "next-auth";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export default async function SignInPage({
   searchParams,
@@ -44,7 +45,7 @@ export default async function SignInPage({
 
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
-      <div className="w-full max-w-sm bg-[#161624] border border-white/5 rounded-xl p-8 space-y-6">
+      <div className="w-full max-w-sm bg-surface border border-white/5 rounded-xl p-8 space-y-6">
         <div>
           <h1 className="text-2xl font-display font-bold text-white">
             Chiefs Pursuit Surplus
@@ -92,12 +93,11 @@ export default async function SignInPage({
               className="w-full bg-white/5 border border-white/10 rounded-lg text-sm text-white font-body py-2 px-3 focus:outline-none focus:border-amber-500/50"
             />
           </div>
-          <button
-            type="submit"
+          <SubmitButton
             className="w-full bg-amber-500 text-black hover:bg-amber-400 font-body text-sm font-semibold h-10 rounded-lg transition-colors"
           >
             Sign in
-          </button>
+          </SubmitButton>
         </form>
 
         {microsoftEnabled || emailMagicLinkEnabled ? (
@@ -112,12 +112,11 @@ export default async function SignInPage({
 
         {microsoftEnabled ? (
           <form action={microsoftSignIn}>
-            <button
-              type="submit"
+            <SubmitButton
               className="w-full bg-white/5 border border-white/10 text-white hover:bg-white/10 font-body text-sm font-semibold h-10 rounded-lg transition-colors"
             >
               Sign in with Microsoft
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
 
@@ -135,12 +134,11 @@ export default async function SignInPage({
                 className="w-full bg-white/5 border border-white/10 rounded-lg text-sm text-white font-body py-2 px-3 placeholder:text-zinc-600 focus:outline-none focus:border-amber-500/50"
               />
             </div>
-            <button
-              type="submit"
+            <SubmitButton
               className="w-full bg-white/5 border border-white/10 text-white hover:bg-white/10 font-body text-sm font-semibold h-10 rounded-lg transition-colors"
             >
               Send magic link
-            </button>
+            </SubmitButton>
           </form>
         ) : null}
 

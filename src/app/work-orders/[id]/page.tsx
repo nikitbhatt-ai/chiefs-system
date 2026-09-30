@@ -1,15 +1,19 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { workOrders, customers, vehicles, quotes, users, qcChecklists, type QCItem } from "@/db/schema";
+import { workOrders, customers, vehicles, quotes, users, qcChecklists, parts, type QCItem } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
 import { getOrCreateChecklist, setChecklistItems, qcComplete } from "@/lib/qc";
 import { resolveWorkOrderParts } from "@/lib/workOrderParts";
 import { laborByWorkOrder } from "@/lib/timeclock";
-import { DEFAULT_LABOR_RATE_USD_PER_HOUR } from "@/config/labor";
+import { blendedRateCents } from "@/lib/laborRates";
+import { fmtCents } from "@/lib/accounting";
+import { SubmitButton } from "@/components/SubmitButton";
+import { ScanPullPanel, type ExpectedPart } from "@/components/ScanPullPanel";
+import { issuedByPartForWorkOrder } from "@/lib/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -84,8 +88,48 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
     ? await db.select().from(vehicles).where(eq(vehicles.id, wo.vehicleId))
     : [undefined];
   const [quote] = wo.quoteId
-    ? await db.select({ id: quotes.id, quoteNumber: quotes.quoteNumber }).from(quotes).where(eq(quotes.id, wo.quoteId))
+    ? await db
+        .select({ id: quotes.id, quoteNumber: quotes.quoteNumber, lineItems: quotes.lineItems })
+        .from(quotes)
+        .where(eq(quotes.id, wo.quoteId))
     : [undefined];
+
+  // Pick list for the scan-out panel: what the estimate needs per part vs what
+  // has already been issued to this job (scan-pulls or In Progress), plus any
+  // extras already pulled so they can be returned.
+  const neededByPart = new Map<string, number>();
+  for (const l of (quote?.lineItems as { kind?: string; partId?: string; quantity?: number }[] | null) ?? []) {
+    if (l?.kind !== "item" || !l.partId) continue;
+    const q = Number(l.quantity || 0);
+    if (q > 0) neededByPart.set(l.partId, (neededByPart.get(l.partId) ?? 0) + q);
+  }
+  const issuedByPart = await issuedByPartForWorkOrder(id);
+  const pickPartIds = [...new Set([...neededByPart.keys(), ...issuedByPart.keys()])];
+  const pickRows = pickPartIds.length
+    ? await db
+        .select({
+          id: parts.id,
+          sku: parts.sku,
+          name: parts.name,
+          quantityOnHand: parts.quantityOnHand,
+          barcode: parts.barcode,
+          mfgPartNumber: parts.mfgPartNumber,
+        })
+        .from(parts)
+        .where(inArray(parts.id, pickPartIds))
+    : [];
+  const pickList: ExpectedPart[] = pickRows
+    .map((p) => ({
+      partId: p.id,
+      sku: p.sku,
+      name: p.name,
+      needed: neededByPart.get(p.id) ?? 0,
+      issued: issuedByPart.get(p.id) ?? 0,
+      onHand: p.quantityOnHand,
+      barcode: p.barcode,
+      mfgPartNumber: p.mfgPartNumber,
+    }))
+    .sort((a, b) => Number(b.needed > 0) - Number(a.needed > 0) || a.sku.localeCompare(b.sku));
 
   const userRows = await db
     .select({ id: users.id, name: users.name, email: users.email })
@@ -97,8 +141,10 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
   const items = (checklist.items as QCItem[] | null) ?? [];
   const passed = await qcComplete(id);
 
-  const allLabor = await laborByWorkOrder();
-  const labor = allLabor.find((l) => l.workOrderId === id) ?? { hours: 0, laborCost: 0 };
+  // Actual clocked hours booked against THIS build, costed per technician at
+  // their rate from Accounting → Labor rates.
+  const labor =
+    (await laborByWorkOrder(id))[0] ?? { hours: 0, costCents: 0, missingRate: false };
 
   const vehicleLabel = vehicle
     ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") || vehicle.vin || "—"
@@ -122,7 +168,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Details + editable fields */}
-        <form action={saveWorkOrder} className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+        <form action={saveWorkOrder} className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
           <input type="hidden" name="id" value={wo.id} />
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Details</h3>
 
@@ -175,15 +221,25 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
 
           <div className="flex items-center justify-between">
             <div className="text-xs text-zinc-400">
-              Labor: <span className="text-zinc-200">{labor.hours.toFixed(2)} h</span> · <span className="text-amber-300">{money(labor.laborCost)}</span>
-              <span className="text-zinc-600"> @ {money(DEFAULT_LABOR_RATE_USD_PER_HOUR)}/h</span>
+              Labor: <span className="text-zinc-200">{labor.hours.toFixed(2)} h</span> ·{" "}
+              <span className="text-amber-300">{fmtCents(labor.costCents)}</span>
+              {labor.missingRate ? (
+                <a href="/accounting/labor-rates" className="ml-1 text-amber-500 hover:text-amber-400 underline">
+                  no cost rate set
+                </a>
+              ) : labor.hours > 0 ? (
+                <span className="text-zinc-600">
+                  {" "}
+                  @ {fmtCents(blendedRateCents(labor.costCents, labor.hours))}/h
+                </span>
+              ) : null}
             </div>
-            <button type="submit" className="text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold">Save</button>
+            <SubmitButton className="text-[11px] bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold">Save</SubmitButton>
           </div>
         </form>
 
         {/* Parts (de-priced) */}
-        <div className="bg-[#161624] border border-white/5 rounded-lg overflow-hidden h-fit">
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden h-fit">
           <div className="px-4 py-2.5 text-[10px] uppercase tracking-wider text-zinc-500 font-body border-b border-white/5">
             Parts (build sheet — no pricing)
           </div>
@@ -214,8 +270,12 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
         </div>
       </div>
 
+      <div className="mt-6">
+        <ScanPullPanel workOrderId={wo.id} expected={pickList} />
+      </div>
+
       {/* QC checklist */}
-      <form action={saveQc} className="bg-[#161624] border border-white/5 rounded-lg p-4 mt-6 max-w-3xl">
+      <form action={saveQc} className="bg-surface border border-white/5 rounded-lg p-4 mt-6 max-w-3xl">
         <input type="hidden" name="id" value={wo.id} />
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">QC checklist</h3>
@@ -243,7 +303,7 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
           ))}
         </div>
         <div className="flex justify-end mt-3">
-          <button type="submit" className="text-[11px] bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold">Save QC</button>
+          <SubmitButton className="text-[11px] bg-amber-500 hover:bg-amber-400 text-black rounded-md px-3 py-1.5 font-semibold">Save QC</SubmitButton>
         </div>
       </form>
     </AppShell>

@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { db } from "@/db";
 import { notifications, users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -65,12 +66,12 @@ export default async function NotificationsPage() {
 
   return (
     <AppShell title="Notifications" subtitle={`${unreadCount} unread`}>
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-body">{rows.length} most recent</span>
           {unreadCount > 0 && (
             <form action={markAllRead}>
-              <button type="submit" className="text-[11px] text-amber-400 hover:text-amber-300 font-body">Mark all as read</button>
+              <SubmitButton className="text-[11px] text-amber-400 hover:text-amber-300 font-body">Mark all as read</SubmitButton>
             </form>
           )}
         </div>
@@ -103,12 +104,12 @@ export default async function NotificationsPage() {
                       {unread && (
                         <form action={markRead}>
                           <input type="hidden" name="id" value={n.id} />
-                          <button type="submit" className="text-[10px] text-amber-400 hover:text-amber-300">Mark read</button>
+                          <SubmitButton className="text-[10px] text-amber-400 hover:text-amber-300">Mark read</SubmitButton>
                         </form>
                       )}
                       <form action={deleteNotification}>
                         <input type="hidden" name="id" value={n.id} />
-                        <button type="submit" className="text-[10px] text-zinc-500 hover:text-red-400">Delete</button>
+                        <SubmitButton className="text-[10px] text-zinc-500 hover:text-red-400">Delete</SubmitButton>
                       </form>
                     </div>
                   </div>

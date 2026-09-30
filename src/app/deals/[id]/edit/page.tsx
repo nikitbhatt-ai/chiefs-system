@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { deals, customers, users } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { syncDealToWorkflow } from "@/lib/dealTriggers";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const STAGES = ["prospect", "quote_sent", "po_received", "in_production", "delivered", "lost"] as const;
 type Stage = (typeof STAGES)[number];
@@ -51,7 +52,7 @@ export default async function EditDealPage({ params }: { params: Promise<{ id: s
 
   return (
     <AppShell title="Edit deal" subtitle={d.id.slice(0, 8)}>
-      <form action={update} className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl">
+      <form action={update} className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3 max-w-5xl">
         <select name="customerId" defaultValue={d.customerId ?? ""} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
           <option value="">— Customer —</option>
           {customerRows.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
@@ -73,7 +74,7 @@ export default async function EditDealPage({ params }: { params: Promise<{ id: s
         <textarea name="notes" defaultValue={d.notes ?? ""} rows={4} placeholder="Internal notes" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-3" />
         <div className="md:col-span-3 flex justify-end gap-2">
           <a href="/deals" className="text-xs font-body text-zinc-400 hover:text-white border border-white/10 rounded-md px-4 py-2 transition-colors">Cancel</a>
-          <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save changes</button>
+          <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save changes</SubmitButton>
         </div>
       </form>
     </AppShell>

@@ -1,4 +1,4 @@
-import { desc, inArray, ne } from "drizzle-orm";
+import { desc, inArray, notInArray } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/db";
@@ -84,7 +84,7 @@ export default async function PartsToOrderPage() {
     db
       .select({ status: purchaseOrders.status, lineItems: purchaseOrders.lineItems })
       .from(purchaseOrders)
-      .where(ne(purchaseOrders.status, "received")),
+      .where(notInArray(purchaseOrders.status, ["received", "fulfilled"])),
   ]);
 
   const partVendorIds = Array.from(new Set(partRows.map((p) => p.vendorId).filter(Boolean) as string[]));
@@ -164,7 +164,7 @@ export default async function PartsToOrderPage() {
 
   return (
     <AppShell title="Parts to order now" subtitle={`${flat.length} parts across ${new Set(flat.map((f) => f.woId)).size} work orders · ${overdueCount} overdue`}>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         {flat.length === 0 ? (
           <div className="p-8 text-center text-xs text-zinc-500 font-body">
             Nothing is at risk right now. Either every required part is ordered or no active work order has a target build start date set yet.

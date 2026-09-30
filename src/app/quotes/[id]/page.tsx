@@ -8,6 +8,8 @@ import { QuoteTabs } from "@/components/QuoteTabs";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
+import { quoteTotals } from "@/lib/quoteTotals";
+import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
 export const dynamic = "force-dynamic";
 
@@ -38,29 +40,21 @@ async function saveQuote(formData: FormData) {
   // longer enforced anywhere — they were blocking saves silently and
   // surfacing as a "status revert to draft" on the quote editor.
 
-  let subtotal = 0;
-  let discountTotal = 0;
-  let feeTotal = 0;
-  let laborTotal = 0;
-  for (const l of lines) {
-    if (l.kind === "item") {
-      const gross = (l.quantity || 0) * (l.unitPrice || 0);
-      const disc =
-        l.discountKind === "pct"
-          ? gross * ((l.discount || 0) / 100)
-          : l.discount || 0;
-      subtotal += gross;
-      discountTotal += disc;
-    } else if (l.kind === "labor") {
-      laborTotal += (l.hours || 0) * (l.rate || 0);
-    } else if (l.kind === "fee") {
-      feeTotal += l.amount || 0;
-    }
-  }
   const taxRate = Number(formData.get("taxRate") ?? "0") || 0;
-  const taxableBase = subtotal - discountTotal + feeTotal + laborTotal;
-  const taxTotal = taxableBase * (taxRate / 100);
-  const grandTotal = taxableBase + taxTotal;
+  // Round each line before summing (shared helper) so the stored totals foot to
+  // the per-line totals shown on the quote/PDF.
+  const { subtotal, tax: taxTotal, grand: grandTotal } = quoteTotals(lines, taxRate);
+
+  // Vehicle (from the in-editor VIN decoder). Blank fields clear.
+  const vin = String(formData.get("vin") ?? "").trim().toUpperCase() || null;
+  const vehicleYearRaw = String(formData.get("vehicleYear") ?? "").trim();
+  const vehicleYear = vehicleYearRaw && !Number.isNaN(Number(vehicleYearRaw))
+    ? Number(vehicleYearRaw)
+    : null;
+  const vehicleMake = String(formData.get("vehicleMake") ?? "").trim() || null;
+  const vehicleModel = String(formData.get("vehicleModel") ?? "").trim() || null;
+  const vehicleTrim = String(formData.get("vehicleTrim") ?? "").trim() || null;
+  const unitNumber = String(formData.get("unitNumber") ?? "").trim() || null;
 
   await db
     .update(quotes)
@@ -72,6 +66,12 @@ async function saveQuote(formData: FormData) {
       subtotal: subtotal.toFixed(2),
       taxTotal: taxTotal.toFixed(2),
       grandTotal: grandTotal.toFixed(2),
+      vin,
+      vehicleYear,
+      vehicleMake,
+      vehicleModel,
+      vehicleTrim,
+      unitNumber,
       updatedAt: new Date(),
     })
     .where(eq(quotes.id, id));
@@ -119,6 +119,9 @@ export default async function QuotePage({
     .orderBy(customers.name);
 
   const initial = (q.lineItems as unknown as QuoteLine[]) ?? [];
+  // Internal average cost per part, so the editor can show cost and margin per
+  // line. Same resolver the documents use, so the numbers agree.
+  const { partCosts } = await quoteDocumentFacts(q);
 
   return (
     <AppShell
@@ -127,7 +130,7 @@ export default async function QuotePage({
     >
       <QuoteTabs quoteId={q.id} active="quote" />
 
-      <div className="flex justify-end gap-2">
+      <div className="flex flex-wrap justify-end gap-2">
         <a
           href={`/api/pdf/quotes/${q.id}`}
           target="_blank"
@@ -154,6 +157,18 @@ export default async function QuotePage({
         >
           Open print view
         </a>
+        {/* The internal copy carries our cost and margin on every line. Styled
+            amber and labelled so it is never confused with the two customer
+            documents sitting next to it. */}
+        <a
+          href={`/api/pdf/quotes/${q.id}?internal=1${q.status === "converted" ? "&variant=invoice" : ""}`}
+          target="_blank"
+          rel="noopener"
+          title="Sales copy: shows our average cost and margin per line. Do not send to the customer."
+          className="text-[11px] font-body bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 rounded-md px-3 py-1.5"
+        >
+          Internal copy (cost + margin)
+        </a>
       </div>
 
       <QuoteWorkflowStrip
@@ -169,6 +184,13 @@ export default async function QuotePage({
         notes={q.notes ?? ""}
         initialLines={initial}
         customers={customerRows}
+        initialVin={q.vin ?? ""}
+        initialVehicleYear={q.vehicleYear != null ? String(q.vehicleYear) : ""}
+        initialVehicleMake={q.vehicleMake ?? ""}
+        initialVehicleModel={q.vehicleModel ?? ""}
+        initialVehicleTrim={q.vehicleTrim ?? ""}
+        initialUnitNumber={q.unitNumber ?? ""}
+        partCosts={partCosts}
         action={saveQuote}
       />
     </AppShell>

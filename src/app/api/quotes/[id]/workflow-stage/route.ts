@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
+import { checkReordersForWorkOrder } from "@/lib/backfill";
 import { qcComplete } from "@/lib/qc";
 import { documentNumberForQuote } from "@/lib/documentNumber";
 
@@ -131,14 +132,25 @@ export async function POST(
       await db.update(workOrders).set({ status: stage, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
     }
 
-    // Transactional, idempotent FIFO consumption (see src/lib/inventory.ts).
-    // Advancing to or past in_progress consumes the quote's parts exactly once;
-    // walking the build back before in_progress restores the drained layers.
+    // Inventory policy (owner decision): a build has NO inventory effect until
+    // it reaches the In Progress column. Crossing into in_progress+ consumes the
+    // quote's parts exactly once (on-hand drops via FIFO layers); dragging the
+    // build back out before in_progress restores exactly what was drained.
+    // Earlier columns (confirmed / awaiting_parts / next_in_line) are purely for
+    // scheduling and never touch stock — no reservations are taken. Both calls
+    // are idempotent and transactional (see src/lib/inventory.ts).
     if (wo) {
       if (targetIndex >= BUILD_START_INDEX) {
         await consumeWorkOrderParts(wo.id);
       } else {
         await restoreWorkOrderParts(wo.id);
+      }
+      // Consuming dropped on-hand — raise reorder-point backfills for any part
+      // that hit its threshold. Best-effort: bookkeeping must never block a move.
+      try {
+        await checkReordersForWorkOrder(wo.id);
+      } catch (err) {
+        console.error("checkReordersForWorkOrder failed:", err);
       }
     }
 

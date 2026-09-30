@@ -5,6 +5,7 @@ import { db } from "@/db";
 import { users } from "@/db/schema";
 import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const ROLES = ["admin", "manager", "sales", "warehouse", "tech", "accountant"] as const;
 type Role = (typeof ROLES)[number];
@@ -59,7 +60,7 @@ export default async function UsersPage() {
   if (session?.user?.role !== "admin") {
     return (
       <AppShell title="Users" subtitle="Admin only">
-        <div className="bg-[#161624] border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
+        <div className="bg-surface border border-red-500/30 rounded-lg p-4 text-xs font-body text-red-300">
           You need the <strong>admin</strong> role to manage users. Contact an
           administrator.
         </div>
@@ -71,7 +72,7 @@ export default async function UsersPage() {
 
   return (
     <AppShell title="Users" subtitle="Team accounts and roles">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           Add user
         </h3>
@@ -111,17 +112,16 @@ export default async function UsersPage() {
             User can change their password after signing in. Minimum 8 characters.
           </p>
           <div className="md:col-span-2 flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
             >
               Create user
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -168,12 +168,11 @@ export default async function UsersPage() {
                     <form action={toggleActive} className="inline">
                       <input type="hidden" name="id" value={u.id} />
                       <input type="hidden" name="active" value={u.active ? "0" : "1"} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-white font-body"
                       >
                         {u.active ? "Disable" : "Enable"}
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

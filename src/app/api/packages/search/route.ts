@@ -33,6 +33,7 @@ export async function GET(req: Request) {
       category: packages.category,
       description: packages.description,
       components: packages.components,
+      packagePrice: packages.packagePrice,
     })
     .from(packages)
     .where(and(...filters))

@@ -53,7 +53,7 @@ export function TimeClockPanel({ open, workOrders }: { open: OpenEntry; workOrde
   }
 
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-5 max-w-md">
+    <div className="bg-surface border border-white/5 rounded-lg p-5 max-w-md">
       {open ? (
         <div className="space-y-3">
           <div>

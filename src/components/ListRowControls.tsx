@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useBusy } from "@/lib/useBusy";
 
 // Inline per-row tags + archive control shared by every list page. Tag chips
 // link to ?tag=<tag> on the current list (relative href). The 🏷 toggle opens a
@@ -23,21 +24,25 @@ export function ListRowControls({
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(tags.join(", "));
-  const [busy, setBusy] = useState(false);
+  // These buttons are on every list page in the app, and the round trip is fast
+  // enough that the old `busy` flag was on screen for ~30ms — invisible. useBusy
+  // holds it long enough to see and marks the button `data-pending`, which is
+  // what the global CSS turns into a spinner.
+  const { run, props: busyProps } = useBusy();
 
-  async function patch(payload: Record<string, unknown>) {
-    setBusy(true);
-    try {
-      await fetch("/api/list-meta", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ entity, id, ...payload }),
-      });
-      router.refresh();
-    } finally {
-      setBusy(false);
-      setEditing(false);
-    }
+  function patch(payload: Record<string, unknown>) {
+    return run(async () => {
+      try {
+        await fetch("/api/list-meta", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ entity, id, ...payload }),
+        });
+        router.refresh();
+      } finally {
+        setEditing(false);
+      }
+    });
   }
 
   return (
@@ -62,7 +67,7 @@ export function ListRowControls({
           />
           <button
             type="button"
-            disabled={busy}
+            {...busyProps}
             onClick={() => patch({ tags: val.split(",").map((s) => s.trim()).filter(Boolean) })}
             className="text-[10px] text-green-400 hover:text-green-300"
           >
@@ -85,7 +90,7 @@ export function ListRowControls({
       {showArchive && (
         <button
           type="button"
-          disabled={busy}
+          {...busyProps}
           onClick={() => patch({ archived: !archived })}
           className="text-[10px] text-zinc-500 hover:text-amber-300"
         >

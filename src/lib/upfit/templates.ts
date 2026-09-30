@@ -10,22 +10,78 @@
 // matches the truck. Adding a new vehicle: drop the JPG at
 // `public/upfit-templates/<slug>.jpg` and append an entry below.
 
-export type VehicleTemplate = {
-  slug: string;
+// A single view of a vehicle (one side/angle = one editor tab + one PDF
+// page). Pins are tagged with the view `key` they were placed on.
+export type TemplateView = {
+  key: string;
   label: string;
-  // Composite blueprint image. Lives at
-  // `public/upfit-templates/<slug>.{jpg|png}`. The editor renders it as
-  // an <img>; the PDF reads the file as a Buffer and embeds it. A
-  // missing file degrades gracefully to a labeled empty box — nothing
-  // crashes.
   imageUrl: string;
 };
 
+export type VehicleTemplate = {
+  slug: string;
+  label: string;
+  // Primary image — the first view's URL. Kept for any single-image
+  // consumer and as the fallback when `views` is absent.
+  imageUrl: string;
+  // Optional multi-view set (one page per side). When present the editor
+  // shows a view switcher and the PDF renders one page per view. When
+  // absent the template is treated as a single view ("Vehicle").
+  views?: TemplateView[];
+};
+
+// Normalized view list for a template: its `views` if multi-view, else a
+// single synthetic view wrapping `imageUrl`.
+export function getViews(t: VehicleTemplate): TemplateView[] {
+  if (t.views && t.views.length > 0) return t.views;
+  return [{ key: "main", label: "Vehicle", imageUrl: t.imageUrl }];
+}
+
+// Build the standard 5-view (per-side) set for a folder-based template
+// at public/upfit-templates/<slug>/{driver,passenger,front,rear,top}.jpg.
+// `fileFor` optionally overrides the on-disk filename for a given view key
+// (used when a template's source photos were saved under swapped names).
+function sideViews(
+  slug: string,
+  fileFor?: Partial<Record<TemplateView["key"], string>>,
+): TemplateView[] {
+  const base = `/upfit-templates/${slug}`;
+  const url = (key: TemplateView["key"], fallback: string) =>
+    `${base}/${fileFor?.[key] ?? fallback}`;
+  return [
+    { key: "driver", label: "Driver Side", imageUrl: url("driver", "driver.jpg") },
+    { key: "passenger", label: "Passenger Side", imageUrl: url("passenger", "passenger.jpg") },
+    { key: "front", label: "Front", imageUrl: url("front", "front.jpg") },
+    { key: "rear", label: "Rear", imageUrl: url("rear", "rear.jpg") },
+    { key: "top", label: "Top", imageUrl: url("top", "top.jpg") },
+  ];
+}
+
 export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
+  // Current-logo, per-side (one page per side) templates.
   tahoe: {
     slug: "tahoe",
-    label: "Chevrolet Tahoe",
-    imageUrl: "/upfit-templates/tahoe.jpg",
+    label: "Chevrolet Tahoe (2021–25)",
+    imageUrl: "/upfit-templates/tahoe/driver.jpg",
+    // Passenger-side and rear source photos were saved under swapped
+    // filenames; map each view to the file that actually shows that side.
+    views: sideViews("tahoe", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+  },
+  tahoe_2026: {
+    slug: "tahoe_2026",
+    label: "Chevrolet Tahoe (2026+)",
+    imageUrl: "/upfit-templates/tahoe_2026/driver.jpg",
+    // Passenger-side and rear source photos were saved under swapped
+    // filenames; map each view to the file that actually shows that side.
+    views: sideViews("tahoe_2026", { passenger: "rear.jpg", rear: "passenger.jpg" }),
+  },
+  tahoe_1520: {
+    slug: "tahoe_1520",
+    label: "Chevrolet Tahoe (2015–20)",
+    imageUrl: "/upfit-templates/tahoe_1520/driver.jpg",
+    // Passenger-side and rear source photos were saved under swapped
+    // filenames; map each view to the file that actually shows that side.
+    views: sideViews("tahoe_1520", { passenger: "rear.jpg", rear: "passenger.jpg" }),
   },
   suburban: {
     slug: "suburban",
@@ -39,8 +95,12 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   },
   silverado: {
     slug: "silverado",
-    label: "Chevrolet Silverado",
-    imageUrl: "/upfit-templates/silverado.jpg",
+    label: "Chevrolet Silverado (2020–26)",
+    imageUrl: "/upfit-templates/silverado/driver.jpg",
+    // The Silverado's passenger-side and rear source photos were saved under
+    // swapped filenames (passenger.jpg holds the rear shot and vice versa), so
+    // map each view to the file that actually shows that side.
+    views: sideViews("silverado", { passenger: "rear.jpg", rear: "passenger.jpg" }),
   },
   durango: {
     slug: "durango",
@@ -61,6 +121,17 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
     slug: "f350",
     label: "Ford F-350",
     imageUrl: "/upfit-templates/f350.jpg",
+  },
+  transit_custom: {
+    slug: "transit_custom",
+    label: "Ford Transit Custom L2H1",
+    imageUrl: "/upfit-templates/transit_custom.jpg",
+  },
+  explorer: {
+    slug: "explorer",
+    label: "Ford Explorer (2025+)",
+    imageUrl: "/upfit-templates/explorer/driver.jpg",
+    views: sideViews("explorer"),
   },
 };
 
@@ -102,6 +173,66 @@ export const PIN_PALETTE = [
 
 export function nextPinColor(existing: number): string {
   return PIN_PALETTE[existing % PIN_PALETTE.length];
+}
+
+// --- Push bumper glyphs ---------------------------------------------------
+//
+// Push bumpers render on a shared viewBox with preserveAspectRatio="none"
+// so the shape stretches to whatever size the pin is resized to. Two
+// primitive kinds: filled `rects` (the grille guard) and stroked `paths`
+// (the full-wrap tubes — curves that rects can't express). Both the
+// editor (<svg>) and the PDF (React-PDF <Svg>) render from this geometry.
+export type PushbarRect = { x: number; y: number; w: number; h: number; r: number };
+export type PushbarStyle = {
+  viewBox: { w: number; h: number };
+  rects?: PushbarRect[];
+  paths?: string[]; // stroked outline paths (fill none)
+  strokeWidth?: number;
+};
+
+export const PUSHBAR_STYLES: Record<string, PushbarStyle> = {
+  // Pro-gard-style grille guard: two rounded uprights + three cross bars.
+  pushbar: {
+    viewBox: { w: 120, h: 104 },
+    rects: [
+      { x: 6, y: 4, w: 18, h: 96, r: 9 }, // left upright
+      { x: 96, y: 4, w: 18, h: 96, r: 9 }, // right upright
+      { x: 16, y: 6, w: 88, h: 15, r: 7 }, // top rail
+      { x: 12, y: 46, w: 96, h: 14, r: 7 }, // middle rail
+      { x: 14, y: 82, w: 92, h: 14, r: 7 }, // bottom rail
+    ],
+  },
+  // Full brush guard (Pro-gard style) — a straight, symmetric FRONT view:
+  // an outer tubular frame with two main uprights and cross rails. The
+  // CENTER window is left open (no vertical bars; top & bottom rails only
+  // span the side sections), with a single crossbar through the middle.
+  pushbar_wrap: {
+    viewBox: { w: 200, h: 140 },
+    strokeWidth: 7,
+    paths: [
+      // Outer frame (rounded-rect perimeter).
+      "M 12 44 Q 12 22 34 22 L 166 22 Q 188 22 188 44 L 188 110 Q 188 132 166 132 L 34 132 Q 12 132 12 110 Z",
+      // Top rail — side sections only (open across the center).
+      "M 12 48 L 68 48",
+      "M 132 48 L 188 48",
+      // Middle rail — full width (single crossbar through the center).
+      "M 12 82 L 188 82",
+      // Bottom rail — side sections only (open across the center).
+      "M 12 116 L 68 116",
+      "M 132 116 L 188 116",
+      // Main uprights.
+      "M 68 22 L 68 132",
+      "M 132 22 L 132 132",
+    ],
+  },
+};
+
+export function isPushbarShape(shape: string | undefined | null): boolean {
+  return shape === "pushbar" || shape === "pushbar_wrap";
+}
+
+export function getPushbarStyle(shape: string | undefined | null): PushbarStyle {
+  return PUSHBAR_STYLES[shape ?? "pushbar"] ?? PUSHBAR_STYLES.pushbar;
 }
 
 // --- Pin shapes -----------------------------------------------------------
@@ -235,22 +366,27 @@ export const COLOR_SCHEMES: Record<string, ColorScheme> = {
   red_white: { key: "red_white", label: "Red / White", group: "split", segments: [RED, WHITE] },
   blue_white: { key: "blue_white", label: "Blue / White", group: "split", segments: [BLUE, WHITE] },
   amber_white: { key: "amber_white", label: "Amber / White", group: "split", segments: [AMBER, WHITE] },
-  red_blue: { key: "red_blue", label: "Red / Blue", group: "split", segments: [RED, BLUE] },
+  // Blue-driver / red-passenger convention: blue leads (left), red
+  // trails (right). Key stays `red_blue` so pins saved before the flip
+  // keep resolving; only the render order + label change.
+  red_blue: { key: "red_blue", label: "Blue / Red", group: "split", segments: [BLUE, RED] },
   green_white: { key: "green_white", label: "Green / White", group: "split", segments: [GREEN, WHITE] },
   red_amber: { key: "red_amber", label: "Red / Amber", group: "split", segments: [RED, AMBER] },
   blue_amber: { key: "blue_amber", label: "Blue / Amber", group: "split", segments: [BLUE, AMBER] },
   // --- Trios (3-color combos) ---
-  rwb: { key: "rwb", label: "Red / White / Blue", group: "trio", segments: [RED, WHITE, BLUE] },
+  // rwb key retained; now renders blue → white → red per the lightbar
+  // convention above.
+  rwb: { key: "rwb", label: "Blue / White / Red", group: "trio", segments: [BLUE, WHITE, RED] },
   rwa: { key: "rwa", label: "Red / White / Amber", group: "trio", segments: [RED, WHITE, AMBER] },
   bwa: { key: "bwa", label: "Blue / White / Amber", group: "trio", segments: [BLUE, WHITE, AMBER] },
   rab: { key: "rab", label: "Red / Amber / Blue", group: "trio", segments: [RED, AMBER, BLUE] },
   // --- Multi-segment counts ---
   ...makeCountSchemes("rwrw", "Red / White", [RED, WHITE], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("bwbw", "Blue / White", [BLUE, WHITE], TWO_COLOR_COUNTS, "count"),
-  ...makeCountSchemes("rbrb", "Red / Blue", [RED, BLUE], TWO_COLOR_COUNTS, "count"),
+  ...makeCountSchemes("rbrb", "Blue / Red", [BLUE, RED], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("rara", "Red / Amber", [RED, AMBER], TWO_COLOR_COUNTS, "count"),
   ...makeCountSchemes("baba", "Blue / Amber", [BLUE, AMBER], TWO_COLOR_COUNTS, "count"),
-  ...makeCountSchemes("rwb", "Red / White / Blue", [RED, WHITE, BLUE], TRIO_COUNTS, "count"),
+  ...makeCountSchemes("rwb", "Blue / White / Red", [BLUE, WHITE, RED], TRIO_COUNTS, "count"),
   ...makeCountSchemes("rab", "Red / Amber / Blue", [RED, AMBER, BLUE], TRIO_COUNTS, "count"),
 };
 

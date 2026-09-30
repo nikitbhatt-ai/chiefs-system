@@ -6,10 +6,13 @@ import {
   COLOR_SCHEMES,
   PIN_SIZES,
   PIN_SIZE_ORDER,
+  getPushbarStyle,
+  isPushbarShape,
   colorSchemesByGroup,
   getColorScheme,
   getPinSize,
   getTemplate,
+  getViews,
 } from "@/lib/upfit/templates";
 import type { UpfitPin } from "@/db/schema";
 
@@ -21,6 +24,8 @@ export type UpfitBuilderProps = {
   initialNotes: string;
   parts: { id: string; sku: string; name: string }[];
   action: (formData: FormData) => Promise<void>;
+  // Builds/refreshes the linked quote's parts from the placed equipment.
+  generateQuoteAction: (formData: FormData) => Promise<void>;
 };
 
 type Selection = { partId: string | null; label: string; partSku: string | null };
@@ -42,6 +47,7 @@ export function UpfitBuilder({
   initialNotes,
   parts,
   action,
+  generateQuoteAction,
 }: UpfitBuilderProps) {
   const [bodyStyle, setBodyStyle] = useState(initialBodyStyle);
   const [vehicleLabel, setVehicleLabel] = useState(initialVehicleLabel);
@@ -59,7 +65,19 @@ export function UpfitBuilder({
   const [isPending, startTransition] = useTransition();
 
   const template = useMemo(() => getTemplate(bodyStyle), [bodyStyle]);
+  const views = useMemo(() => getViews(template), [template]);
   const colorGroups = useMemo(() => colorSchemesByGroup(), []);
+
+  // Active view (one side of the vehicle). Reset to the first view
+  // whenever the template changes so we never point at a stale key.
+  const [activeView, setActiveView] = useState<string>(views[0]?.key ?? "main");
+  const activeViewKey = views.some((v) => v.key === activeView) ? activeView : views[0]?.key ?? "main";
+  const activeViewDef = views.find((v) => v.key === activeViewKey) ?? views[0];
+  const firstViewKey = views[0]?.key ?? "main";
+  // A pin belongs to a view via its `view` field; legacy pins with no
+  // view fall onto the first view so nothing is orphaned.
+  const pinViewKey = (p: UpfitPin) => p.view ?? firstViewKey;
+  const visiblePins = pins.filter((p) => pinViewKey(p) === activeViewKey);
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const dragRef = useRef<{ pinId: string; startX: number; startY: number; moved: boolean } | null>(
@@ -110,6 +128,7 @@ export function UpfitBuilder({
       {
         id,
         number: cur.length + 1,
+        view: activeViewKey,
         x: f.x,
         y: f.y,
         label: pendingSelection.label,
@@ -198,20 +217,40 @@ export function UpfitBuilder({
     );
   };
 
-  const handleSave = () => {
-    setSaveMsg(null);
+  const buildFormData = () => {
     const fd = new FormData();
     fd.set("quoteId", quoteId);
     fd.set("bodyStyle", bodyStyle);
     fd.set("vehicleLabel", vehicleLabel);
     fd.set("pins", JSON.stringify(pins));
     fd.set("notes", notes);
+    return fd;
+  };
+
+  const handleSave = () => {
+    setSaveMsg(null);
+    const fd = buildFormData();
     startTransition(async () => {
       try {
         await action(fd);
         setSaveMsg("Saved.");
       } catch {
         setSaveMsg("Save failed — try again.");
+      }
+    });
+  };
+
+  // Save the current diagram AND (re)build the linked quote's parts from
+  // the placed equipment. The server action redirects to the quote, so
+  // there's no success message to show here.
+  const handleGenerateQuote = () => {
+    setSaveMsg(null);
+    const fd = buildFormData();
+    startTransition(async () => {
+      try {
+        await generateQuoteAction(fd);
+      } catch {
+        setSaveMsg("Couldn't generate the quote — try again.");
       }
     });
   };
@@ -232,7 +271,7 @@ export function UpfitBuilder({
   return (
     <div className="space-y-4">
       {/* Vehicle identity */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 items-end">
+      <div className="bg-surface border border-white/5 rounded-lg p-3 grid grid-cols-1 md:grid-cols-[280px_1fr] gap-3 items-end">
         <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
           Vehicle template
           <select
@@ -260,7 +299,7 @@ export function UpfitBuilder({
       </div>
 
       {/* Equipment toolbar */}
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-3 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-3 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-[1fr_1fr_auto] gap-3 items-end">
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
             Pick a part from inventory
@@ -294,14 +333,25 @@ export function UpfitBuilder({
             />
           </label>
 
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={isPending}
-            className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-1.5 font-semibold disabled:opacity-60"
-          >
-            {isPending ? "Saving…" : "Save upfit"}
-          </button>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={isPending}
+              className="text-[11px] font-body bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-1.5 font-semibold disabled:opacity-60"
+            >
+              {isPending ? "Saving…" : "Save upfit"}
+            </button>
+            <button
+              type="button"
+              onClick={handleGenerateQuote}
+              disabled={isPending}
+              title="Save the diagram and rebuild the quote's parts from the placed equipment"
+              className="text-[11px] font-body bg-white/5 hover:bg-white/10 text-zinc-200 border border-white/15 rounded-md px-4 py-1.5 disabled:opacity-60"
+            >
+              Generate quote from equipment
+            </button>
+          </div>
         </div>
 
         {/* Shape controls — what the next placed pin will look like. */}
@@ -315,6 +365,8 @@ export function UpfitBuilder({
             >
               <option value="rect">Rectangle</option>
               <option value="circle">Circle</option>
+              <option value="pushbar">Push bumper (grille guard)</option>
+              <option value="pushbar_wrap">Push bumper (full wrap)</option>
             </select>
           </label>
           <label className="text-[10px] font-body text-zinc-400 uppercase tracking-wider">
@@ -411,7 +463,7 @@ export function UpfitBuilder({
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
         {/* Diagram */}
-        <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+        <div className="bg-surface border border-white/5 rounded-lg p-3">
           <div className="mb-2">
             <div className="text-xs font-body font-semibold text-white">
               {vehicleLabel.trim() || "Vehicle (unset)"}
@@ -420,20 +472,52 @@ export function UpfitBuilder({
               {template.label}
             </div>
           </div>
+
+          {/* View switcher — one tab per side of the vehicle. Hidden for
+              single-view templates. Each tab shows how many pins it holds. */}
+          {views.length > 1 ? (
+            <div className="flex flex-wrap gap-1 mb-2">
+              {views.map((v) => {
+                const count = pins.filter((p) => pinViewKey(p) === v.key).length;
+                const active = v.key === activeViewKey;
+                return (
+                  <button
+                    key={v.key}
+                    type="button"
+                    onClick={() => setActiveView(v.key)}
+                    className={`text-[11px] font-body px-2.5 py-1 rounded border transition-colors ${
+                      active
+                        ? "bg-amber-500 text-black border-amber-400 font-semibold"
+                        : "bg-black/30 text-zinc-300 border-white/10 hover:border-amber-500/50"
+                    }`}
+                  >
+                    {v.label}
+                    {count > 0 ? (
+                      <span className={`ml-1 ${active ? "text-black/70" : "text-amber-400"}`}>
+                        ({count})
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
           <div
             ref={boxRef}
             onClick={handleBoxClick}
-            className="relative w-full bg-white rounded border border-white/10 overflow-hidden select-none"
+            className="upfit-canvas relative w-full rounded border border-white/10 overflow-hidden select-none"
             style={{ cursor: pendingSelection ? "crosshair" : "default", touchAction: "none" }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={template.imageUrl}
-              alt={template.label}
+              key={activeViewKey}
+              src={activeViewDef?.imageUrl ?? template.imageUrl}
+              alt={`${template.label} — ${activeViewDef?.label ?? ""}`}
               className="w-full h-auto block pointer-events-none"
               draggable={false}
             />
-            {pins.map((pin) => (
+            {visiblePins.map((pin) => (
               <PlacedPin
                 key={pin.id}
                 pin={pin}
@@ -449,7 +533,7 @@ export function UpfitBuilder({
 
         {/* Pin list / sidebar */}
         <div className="space-y-3">
-          <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+          <div className="bg-surface border border-white/5 rounded-lg p-3">
             <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
               Placed pins ({pins.length})
             </div>
@@ -487,6 +571,24 @@ export function UpfitBuilder({
                       </button>
                     </div>
 
+                    {views.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveView(pinViewKey(pin));
+                          setActivePinId(pin.id);
+                        }}
+                        className={`mt-1 text-[10px] font-body ${
+                          pinViewKey(pin) === activeViewKey
+                            ? "text-amber-400"
+                            : "text-zinc-500 hover:text-amber-300 underline"
+                        }`}
+                      >
+                        {views.find((v) => v.key === pinViewKey(pin))?.label ?? "View"}
+                        {pinViewKey(pin) !== activeViewKey ? " → show" : ""}
+                      </button>
+                    ) : null}
+
                     <div className="mt-2 grid grid-cols-2 gap-1.5">
                       <select
                         value={pin.shape ?? "rect"}
@@ -497,6 +599,7 @@ export function UpfitBuilder({
                       >
                         <option value="rect">Rectangle</option>
                         <option value="circle">Circle</option>
+                        <option value="pushbar">Push bumper</option>
                       </select>
                       <select
                         value={pin.colorScheme ?? "red_white"}
@@ -539,6 +642,39 @@ export function UpfitBuilder({
                         <option value="horizontal">Horizontal</option>
                         <option value="vertical">Vertical</option>
                       </select>
+                    </div>
+
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <span className="text-[10px] uppercase tracking-wider text-zinc-500 font-body shrink-0">
+                        Rotate
+                      </span>
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        step={1}
+                        value={pin.rotation ?? 0}
+                        onChange={(e) => updatePin(pin.id, { rotation: Number(e.target.value) })}
+                        className="flex-1 accent-amber-500"
+                      />
+                      <input
+                        type="number"
+                        min={-180}
+                        max={180}
+                        value={pin.rotation ?? 0}
+                        onChange={(e) => updatePin(pin.id, { rotation: Number(e.target.value) || 0 })}
+                        className="w-14 bg-black/40 border border-white/10 rounded px-1.5 py-1 text-[10px] text-white text-right font-body"
+                      />
+                      <span className="text-[10px] text-zinc-500 font-body">°</span>
+                      {pin.rotation ? (
+                        <button
+                          type="button"
+                          onClick={() => updatePin(pin.id, { rotation: 0 })}
+                          className="text-[10px] text-zinc-400 hover:text-amber-300 font-body"
+                        >
+                          reset
+                        </button>
+                      ) : null}
                     </div>
 
                     {(pin.widthFracOverride !== undefined ||
@@ -585,7 +721,7 @@ export function UpfitBuilder({
               onChange={(e) => setNotes(e.target.value)}
               rows={5}
               placeholder="Wiring notes, mounting preferences, customer requests…"
-              className="mt-1 w-full bg-[#161624] border border-white/10 rounded p-2 text-xs text-white font-body"
+              className="mt-1 w-full bg-surface border border-white/10 rounded p-2 text-xs text-white font-body"
             />
           </label>
         </div>
@@ -621,6 +757,13 @@ function PinPreview({
     strip: { long: 56, short: 10 },
   };
   const { long, short } = sidebarDims[sz.key] ?? sidebarDims.medium;
+  if (isPushbarShape(shape)) {
+    return (
+      <span className="inline-block shrink-0" style={{ width: 26, height: 14 }}>
+        <PushbarGlyph shape={shape} />
+      </span>
+    );
+  }
   // Circles ignore orientation and use the long dimension as diameter.
   const w = shape === "circle" ? long : orientation === "horizontal" ? long : short;
   const h = shape === "circle" ? long : orientation === "horizontal" ? short : long;
@@ -675,16 +818,23 @@ function PlacedPin({
   const scheme = getColorScheme(pin.colorScheme);
   const sz = getPinSize(pin.size);
   const isCircle = pin.shape === "circle";
-  // Effective width/height: per-pin override wins; falls back to the
-  // preset. Circles use the same value for both axes.
-  const effW = pin.widthFracOverride ?? sz.widthFrac;
-  const effH = pin.heightFracOverride ?? sz.heightFrac;
+  const isPushbar = isPushbarShape(pin.shape);
+  // A drag-resize override is stored as LITERAL width/height fractions of
+  // the diagram box (screen-x → width, screen-y → height). Used directly
+  // so vertical pins resize the same way horizontal ones do. Without an
+  // override we fall back to the preset, swapping long/short for vertical.
+  const hasOverride =
+    pin.widthFracOverride != null && pin.heightFracOverride != null;
   const widthPct = isCircle
-    ? effW * 100
-    : (pin.orientation === "vertical" ? effH : effW) * 100;
+    ? (pin.widthFracOverride ?? sz.widthFrac) * 100
+    : hasOverride
+      ? (pin.widthFracOverride as number) * 100
+      : (pin.orientation === "vertical" ? sz.heightFrac : sz.widthFrac) * 100;
   const heightPct = isCircle
-    ? effW * 100
-    : (pin.orientation === "vertical" ? effW : effH) * 100;
+    ? (pin.widthFracOverride ?? sz.widthFrac) * 100
+    : hasOverride
+      ? (pin.heightFracOverride as number) * 100
+      : (pin.orientation === "vertical" ? sz.widthFrac : sz.heightFrac) * 100;
 
   const resizingRef = useRef(false);
 
@@ -725,25 +875,30 @@ function PlacedPin({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onClick={(e) => e.stopPropagation()}
-        className="absolute inset-0 border border-black overflow-hidden"
+        className={`absolute inset-0 overflow-hidden ${isPushbar ? "" : "border border-black"}`}
         style={{
           cursor: "grab",
           touchAction: "none",
-          borderRadius: isCircle ? "50%" : `${Math.min(widthPct, heightPct) * 0.25}%`,
+          borderRadius: isCircle ? "50%" : isPushbar ? undefined : `${Math.min(widthPct, heightPct) * 0.25}%`,
           boxShadow: isActive ? "0 0 0 2px #f59e0b" : undefined,
+          transform: pin.rotation ? `rotate(${pin.rotation}deg)` : undefined,
         }}
       >
-        <div
-          className="flex w-full h-full"
-          style={{
-            flexDirection:
-              isCircle || pin.orientation !== "vertical" ? "row" : "column",
-          }}
-        >
-          {scheme.segments.map((c, i) => (
-            <div key={i} style={{ flex: 1, backgroundColor: c }} />
-          ))}
-        </div>
+        {isPushbar ? (
+          <PushbarGlyph shape={pin.shape} />
+        ) : (
+          <div
+            className="flex w-full h-full"
+            style={{
+              flexDirection:
+                isCircle || pin.orientation !== "vertical" ? "row" : "column",
+            }}
+          >
+            {scheme.segments.map((c, i) => (
+              <div key={i} style={{ flex: 1, backgroundColor: c }} />
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Resize handle — only visible when this pin is selected. Sits
@@ -783,5 +938,39 @@ function PlacedPin({
         </div>
       ) : null}
     </div>
+  );
+}
+
+// Push-bumper / grille-guard glyph. Neutral steel look (push bumpers are
+// black powder-coated), rendered as an outer frame with vertical slats so
+// it reads as a front-mount bumper regardless of size. Fills its parent.
+// Push-bumper (grille guard) outline modeled on the Pro-gard style: two
+// rounded uprights with three horizontal cross bars. Drawn as filled
+// rounded rects on a shared viewBox with preserveAspectRatio="none" so
+// it stretches to whatever size the pin is resized to. Geometry is
+// shared with the PDF renderer via templates.ts.
+function PushbarGlyph({ shape }: { shape?: string }) {
+  const style = getPushbarStyle(shape);
+  return (
+    <svg
+      viewBox={`0 0 ${style.viewBox.w} ${style.viewBox.h}`}
+      preserveAspectRatio="none"
+      className="w-full h-full"
+    >
+      {(style.rects ?? []).map((r, i) => (
+        <rect key={`r${i}`} x={r.x} y={r.y} width={r.w} height={r.h} rx={r.r} ry={r.r} fill="#18181b" />
+      ))}
+      {(style.paths ?? []).map((d, i) => (
+        <path
+          key={`p${i}`}
+          d={d}
+          fill="none"
+          stroke="#18181b"
+          strokeWidth={style.strokeWidth ?? 8}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+    </svg>
   );
 }

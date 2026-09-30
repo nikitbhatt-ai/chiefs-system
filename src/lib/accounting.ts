@@ -1,6 +1,47 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { journalEntries, journalLines } from "@/db/schema";
+import { glAccounts, journalEntries, journalLines } from "@/db/schema";
+
+/** The transaction handle drizzle hands to db.transaction((tx) => …). */
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Look up a GL account id by its chart-of-accounts code, inside a transaction.
+ * Returns null when the account doesn't exist (e.g. the Phase 1 seed hasn't been
+ * run yet) so callers that post *opportunistically* — like the inventory hooks —
+ * can skip posting instead of blowing up a core operation.
+ *
+ * The accounting schema is OPTIONAL: a deployment may never have run
+ * docs/sql/accounting_phase1.sql, in which case `gl_accounts` doesn't exist at
+ * all. A plain SELECT against a missing table doesn't just return nothing — it
+ * RAISES `relation "gl_accounts" does not exist`, and because this helper runs
+ * inside a caller-supplied transaction shared with core inventory writes
+ * (receivePurchaseOrder, consumeWorkOrderParts, restoreWorkOrderParts), that
+ * error aborts the whole transaction and fails the inventory operation itself
+ * (this is what broke "Receive" on a PO). Probe with `to_regclass` first — it
+ * returns NULL instead of raising when the relation is absent — so a not-yet-
+ * installed accounting module cleanly skips posting and inventory keeps working.
+ */
+export async function resolveAccountId(tx: Tx, code: string): Promise<string | null> {
+  if (!(await accountingTablesExist(tx))) return null;
+  const [row] = await tx.select({ id: glAccounts.id }).from(glAccounts).where(eq(glAccounts.code, code)).limit(1);
+  return row?.id ?? null;
+}
+
+/**
+ * True when the core ledger table exists in the current search_path. Uses
+ * `to_regclass`, which yields NULL (never an error) for a missing relation, so
+ * it is safe to call inside a transaction without poisoning it. `gl_accounts`,
+ * `journal_entries`, and `journal_lines` are all created together by the Phase 1
+ * SQL, so probing `gl_accounts` is a sufficient proxy for the whole schema.
+ */
+async function accountingTablesExist(tx: Tx): Promise<boolean> {
+  const res = await tx.execute(sql`select to_regclass('gl_accounts') as reg`);
+  const rows = (Array.isArray(res) ? res : (res as { rows?: unknown[] }).rows ?? []) as Array<{
+    reg: string | null;
+  }>;
+  return rows[0]?.reg != null;
+}
 
 // ── Money: always integer cents internally, dollars only at the edges ─────────
 
@@ -90,44 +131,52 @@ function validateLines(lines: JournalLineInput[]): { totalDebit: number; totalCr
  * `asDraft` is set.
  */
 export async function postJournalEntry(input: PostJournalEntryInput) {
+  return db.transaction((tx) => postJournalEntryTx(tx, input));
+}
+
+/**
+ * Same as postJournalEntry but runs inside a caller-supplied transaction, so a
+ * higher-level operation (issuing an invoice, recording a receipt) can post the
+ * ledger entry and write its own subledger row atomically — either both land or
+ * neither does. Callers must already be inside db.transaction((tx) => …).
+ */
+export async function postJournalEntryTx(tx: Tx, input: PostJournalEntryInput) {
   const { totalDebit } = validateLines(input.lines);
 
-  return db.transaction(async (tx) => {
-    // Always insert as draft first so the lines exist before the balance
-    // trigger runs on the draft → posted transition.
-    const [entry] = await tx
-      .insert(journalEntries)
-      .values({
-        entryDate: input.entryDate ?? new Date(),
-        memo: input.memo ?? null,
-        source: input.source ?? "manual",
-        status: "draft",
-        createdBy: input.createdBy ?? null,
-      })
+  // Always insert as draft first so the lines exist before the balance
+  // trigger runs on the draft → posted transition.
+  const [entry] = await tx
+    .insert(journalEntries)
+    .values({
+      entryDate: input.entryDate ?? new Date(),
+      memo: input.memo ?? null,
+      source: input.source ?? "manual",
+      status: "draft",
+      createdBy: input.createdBy ?? null,
+    })
+    .returning();
+
+  await tx.insert(journalLines).values(
+    input.lines.map((l) => ({
+      journalEntryId: entry.id,
+      accountId: l.accountId,
+      debitCents: Math.max(0, Math.round(l.debitCents ?? 0)),
+      creditCents: Math.max(0, Math.round(l.creditCents ?? 0)),
+      departmentId: l.departmentId ?? null,
+      workOrderId: l.workOrderId ?? null,
+      memo: l.memo ?? null,
+    })),
+  );
+
+  if (!input.asDraft) {
+    const [posted] = await tx
+      .update(journalEntries)
+      .set({ status: "posted" })
+      .where(eq(journalEntries.id, entry.id))
       .returning();
-
-    await tx.insert(journalLines).values(
-      input.lines.map((l) => ({
-        journalEntryId: entry.id,
-        accountId: l.accountId,
-        debitCents: Math.max(0, Math.round(l.debitCents ?? 0)),
-        creditCents: Math.max(0, Math.round(l.creditCents ?? 0)),
-        departmentId: l.departmentId ?? null,
-        workOrderId: l.workOrderId ?? null,
-        memo: l.memo ?? null,
-      })),
-    );
-
-    if (!input.asDraft) {
-      const [posted] = await tx
-        .update(journalEntries)
-        .set({ status: "posted" })
-        .where(eq(journalEntries.id, entry.id))
-        .returning();
-      return { ...posted, totalCents: totalDebit };
-    }
-    return { ...entry, totalCents: totalDebit };
-  });
+    return { ...posted, totalCents: totalDebit };
+  }
+  return { ...entry, totalCents: totalDebit };
 }
 
 /** Post an existing draft entry (draft → posted). The DB trigger enforces balance. */

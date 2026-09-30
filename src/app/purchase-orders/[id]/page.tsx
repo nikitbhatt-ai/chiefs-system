@@ -1,11 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
+import { auth } from "@/auth";
 import { db } from "@/db";
-import { purchaseOrders, vendors, type POLineItem } from "@/db/schema";
+import { parts, purchaseOrders, vendors, type POLineItem, type POFee } from "@/db/schema";
+import { FIXED_FREIGHT_LABEL, feeTotals, pruneFees } from "@/lib/poFees";
 import { AppShell } from "@/components/AppShell";
 import { POEditor } from "./POEditor";
+import { POScanReceive, type PartCodes, type ScanLine } from "./POScanReceive";
 import { receivePurchaseOrder } from "@/lib/inventory";
+import { listPromos } from "@/lib/promos";
+import { poStatusLabel } from "@/lib/poStatus";
+import { formatLabelItems } from "@/lib/labels";
 
 async function saveDraft(formData: FormData) {
   "use server";
@@ -15,17 +22,50 @@ async function saveDraft(formData: FormData) {
   const notes = String(formData.get("notes") ?? "").trim() || null;
   const expectedAt = String(formData.get("expectedAt") ?? "").trim();
   const linesJson = String(formData.get("lines") ?? "[]");
-  const lines = JSON.parse(linesJson) as POLineItem[];
-  const total = lines.reduce(
+  const lines = (JSON.parse(linesJson) as POLineItem[]).map((l) => ({
+    ...l,
+    // Every persisted line carries a stable id so receiving keys on identity,
+    // not array position, and can build an idempotent receipt key.
+    id: l.id ?? randomUUID(),
+  }));
+  // Fees: normalise, then drop the rows carrying nothing (a zero fixed row is
+  // re-synthesized by the editor, so it isn't worth storing). The fixed
+  // Freight/shipping row is always kind 'freight' whatever the client sent.
+  const fees = pruneFees(
+    (JSON.parse(String(formData.get("fees") ?? "[]")) as POFee[]).map((f) => ({
+      id: f.id ?? randomUUID(),
+      description: f.fixed ? FIXED_FREIGHT_LABEL : String(f.description ?? "").trim(),
+      amount: Number(f.amount) || 0,
+      kind: f.fixed || f.kind === "freight" ? ("freight" as const) : ("other" as const),
+      ...(f.fixed ? { fixed: true as const } : {}),
+    })),
+  );
+  const linesTotal = lines.reduce(
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,
   );
+  // The PO total is what the vendor will bill: parts plus every fee.
+  const total = linesTotal + feeTotals(fees).totalCents / 100;
+  // Manual status (Pending/Ordered) — but never override an auto received/
+  // fulfilled state from a plain save; those are driven by receiving.
+  const [cur] = await db
+    .select({ status: purchaseOrders.status })
+    .from(purchaseOrders)
+    .where(eq(purchaseOrders.id, id));
+  const submitted = String(formData.get("status") ?? "");
+  const receivedStates = ["partially_received", "received", "fulfilled"];
+  const status =
+    (submitted === "pending" || submitted === "ordered") && !receivedStates.includes(cur?.status ?? "")
+      ? submitted
+      : cur?.status;
   await db
     .update(purchaseOrders)
     .set({
       vendorId,
       notes,
+      status: status as typeof purchaseOrders.$inferSelect.status,
       lineItems: lines as never,
+      fees: fees as never,
       total: total.toFixed(2),
       expectedAt: expectedAt ? new Date(expectedAt) : null,
       updatedAt: new Date(),
@@ -56,7 +96,25 @@ async function receivePO(formData: FormData) {
     if (n > 0) receiveByIndex.set(i, n);
   }
 
-  await receivePurchaseOrder(id, receiveByIndex);
+  const result = await receivePurchaseOrder(id, receiveByIndex);
+
+  // Scan-receive sends a PO-vs-arrived summary (short / over / not on PO);
+  // append it to the PO notes, stamped with who and when, as the audit trail.
+  const receiveNote = String(formData.get("receiveNote") ?? "").trim().slice(0, 2000);
+  if (result.ok && receiveNote) {
+    const session = await auth();
+    const who = session?.user?.name ?? session?.user?.email ?? "unknown";
+    const stamp = `${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`;
+    const [cur] = await db
+      .select({ notes: purchaseOrders.notes })
+      .from(purchaseOrders)
+      .where(eq(purchaseOrders.id, id));
+    const entry = `[Scan receive · ${stamp} · ${who}] ${receiveNote}`;
+    await db
+      .update(purchaseOrders)
+      .set({ notes: cur?.notes ? `${cur.notes}\n\n${entry}` : entry, updatedAt: new Date() })
+      .where(eq(purchaseOrders.id, id));
+  }
 
   revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
@@ -72,16 +130,55 @@ export default async function POPage({
   const [po] = await db.select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
   if (!po) notFound();
 
-  const vendorRows = await db
-    .select({ id: vendors.id, name: vendors.name })
-    .from(vendors)
-    .orderBy(vendors.name);
+  const [vendorRows, allPromos] = await Promise.all([
+    db.select({ id: vendors.id, name: vendors.name }).from(vendors).orderBy(vendors.name),
+    listPromos(),
+  ]);
+  const activePromos = allPromos
+    .filter((p) => p.status === "active")
+    .map((p) => ({ id: p.id, name: p.name, vendorId: p.vendorId }));
 
   const initial = (po.lineItems as POLineItem[]) ?? [];
 
+  // Scan-receive matches scans against each line's part barcode / SKU / mfg #.
+  const partIds = [...new Set(initial.map((l) => l.partId).filter((x): x is string => !!x))];
+  const partCodeRows = partIds.length
+    ? await db
+        .select({ id: parts.id, sku: parts.sku, barcode: parts.barcode, mfgPartNumber: parts.mfgPartNumber })
+        .from(parts)
+        .where(inArray(parts.id, partIds))
+    : [];
+  const partCodes: PartCodes = Object.fromEntries(
+    partCodeRows.map((r) => [r.id, { sku: r.sku, barcode: r.barcode, mfgPartNumber: r.mfgPartNumber }]),
+  );
+  const scanLines: ScanLine[] = initial.map((l, i) => ({
+    index: i,
+    lineKey: l.id ?? `idx${i}`,
+    partId: l.partId ?? null,
+    sku: l.sku || (l.partId ? partCodes[l.partId]?.sku : null) || null,
+    description: l.description || `Line ${i + 1}`,
+    ordered: Number(l.quantity) || 0,
+    alreadyReceived: Number(l.quantityReceived) || 0,
+  }));
+  const labelQty = new Map<string, number>();
+  for (const l of initial) {
+    if (l.partId) labelQty.set(l.partId, (labelQty.get(l.partId) ?? 0) + (Number(l.quantity) || 1));
+  }
+  const labelItems = formatLabelItems([...labelQty].map(([partId, copies]) => ({ partId, copies })));
+  const canReceive = !["fulfilled", "received"].includes(po.status) && scanLines.length > 0;
+
   return (
-    <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${po.status.replace(/_/g, " ")}`}>
-      <div className="flex justify-end">
+    <AppShell title={po.poNumber ?? "Purchase Order"} subtitle={`Status: ${poStatusLabel(po.status)}`}>
+      <div className="flex flex-wrap justify-end gap-2">
+        {labelItems ? (
+          // One label per unit ordered, for stock that arrives without a barcode.
+          <a
+            href={`/inventory/labels?items=${labelItems}`}
+            className="text-[11px] font-body bg-white/10 hover:bg-white/20 text-white rounded-md px-3 py-1.5 font-semibold"
+          >
+            Print labels for this PO
+          </a>
+        ) : null}
         <a
           href={`/api/pdf/purchase-orders/${po.id}`}
           target="_blank"
@@ -91,13 +188,22 @@ export default async function POPage({
           Download PDF
         </a>
       </div>
+      {canReceive ? (
+        <POScanReceive poId={po.id} lines={scanLines} initialPartCodes={partCodes} receivePO={receivePO} />
+      ) : null}
       <POEditor
+        // Remount on every save/receive so the editor's fields (notes above
+        // all) reflect the saved PO instead of keeping stale local values that
+        // a later "Save" would write back over the scan-receive log.
+        key={po.updatedAt.toISOString()}
         id={po.id}
         vendorId={po.vendorId ?? ""}
         notes={po.notes ?? ""}
         expectedAt={po.expectedAt ? new Date(po.expectedAt).toISOString().slice(0, 10) : ""}
         initialLines={initial}
+        initialFees={(po.fees as POFee[]) ?? []}
         vendors={vendorRows}
+        promos={activePromos}
         status={po.status}
         saveDraft={saveDraft}
         receivePO={receivePO}

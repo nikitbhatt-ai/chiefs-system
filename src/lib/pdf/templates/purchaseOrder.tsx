@@ -5,10 +5,17 @@ import { BRANDING } from "../branding";
 
 export type POLine = {
   partId?: string;
+  sku?: string | null;
   description: string;
   quantity: number;
   quantityReceived: number;
   unitCost: number;
+};
+
+export type POFeeLine = {
+  description: string;
+  amount: number;
+  kind: "freight" | "other";
 };
 
 export type PurchaseOrderData = {
@@ -25,6 +32,7 @@ export type PurchaseOrderData = {
   createdAt: Date;
   notes: string | null;
   lineItems: POLine[];
+  fees: POFeeLine[];
 };
 
 function money(n: number): string {
@@ -35,11 +43,21 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
   const styles = sharedStyles;
   const generated = new Date();
   const docNumber = data.poNumber ?? `PO-${data.id.slice(0, 8)}`;
+  // Fees are itemised under the line-item table so the vendor sees the same
+  // breakdown we do. Blank/zero rows never made it past the editor, but guard
+  // anyway so an old record can't print an empty "$0.00" row.
+  const fees = (data.fees ?? []).filter((f) => Number(f.amount) !== 0);
+  const partsSubtotal = (data.lineItems ?? []).reduce(
+    (s, l) => s + (l.quantity || 0) * (l.unitCost || 0),
+    0,
+  );
 
   return (
     <Document title={`PURCHASE ORDER ${docNumber}`} author={BRANDING.companyName} creator={BRANDING.companyName}>
       <Page size="LETTER" style={styles.page}>
-        {data.status === "received" && <Text style={styles.watermark}>RECEIVED</Text>}
+        {(data.status === "fulfilled" || data.status === "received") && (
+          <Text style={styles.watermark}>RECEIVED</Text>
+        )}
 
         <View style={styles.header}>
           <View style={styles.brandBlock}>
@@ -81,9 +99,10 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
 
         <View style={styles.table}>
           <View style={[styles.tableRow, styles.tableHeader]}>
-            <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Qty</Text>
-            <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>Recv</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>Part #</Text>
+            <Text style={[styles.tableCell, styles.cellLeft, { width: "41%" }]}>Description</Text>
+            <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>Qty</Text>
+            <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>Recv</Text>
             <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>Unit cost</Text>
             <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>Total</Text>
           </View>
@@ -99,9 +118,10 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
               const lineTotal = (l.quantity || 0) * (l.unitCost || 0);
               return (
                 <View key={idx} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantity}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "10%" }]}>{l.quantityReceived}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "16%" }]}>{l.sku || "—"}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: "41%" }]}>{l.description}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>{l.quantity}</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "9%" }]}>{l.quantityReceived}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "12%" }]}>{money(l.unitCost || 0)}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "13%" }]}>{money(lineTotal)}</Text>
                 </View>
@@ -111,6 +131,20 @@ export function PurchaseOrderDocument({ data }: { data: PurchaseOrderData }) {
         </View>
 
         <View style={styles.totals}>
+          {fees.length > 0 ? (
+            <>
+              <View style={styles.totalRow}>
+                <Text>Parts subtotal</Text>
+                <Text>{money(partsSubtotal)}</Text>
+              </View>
+              {fees.map((f, idx) => (
+                <View key={idx} style={styles.totalRow}>
+                  <Text>{f.description?.trim() || (f.kind === "freight" ? "Shipping" : "Fee")}</Text>
+                  <Text>{money(f.amount || 0)}</Text>
+                </View>
+              ))}
+            </>
+          ) : null}
           <View style={styles.grandTotalRow}>
             <Text>Total</Text>
             <Text>{money(data.total)}</Text>

@@ -51,7 +51,7 @@ export function QuoteWorkflowStrip({
   }
 
   return (
-    <div className="bg-[#161624] border border-white/5 rounded-lg p-3">
+    <div className="bg-surface border border-white/5 rounded-lg p-3">
       <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-body mb-2">
         Workflow stage
       </div>

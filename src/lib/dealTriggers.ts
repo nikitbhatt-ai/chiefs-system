@@ -120,6 +120,11 @@ export async function maybePromoteWonDeal(
       workOrderId = existingWo.id;
     }
 
+    // Inventory policy (owner decision): a build takes no stock until it reaches
+    // In Progress, so promotion to `confirmed` does NOT reserve parts. Physical
+    // deduction happens later, on the in_progress crossing, via the
+    // workflow-stage path (consumeWorkOrderParts).
+
     return { ok: true, promotedQuoteId: quoteId, createdWorkOrderId, workOrderId };
   });
 }

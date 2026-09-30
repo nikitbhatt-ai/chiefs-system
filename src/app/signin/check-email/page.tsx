@@ -1,7 +1,7 @@
 export default function CheckEmailPage() {
   return (
     <main className="min-h-screen flex items-center justify-center px-6">
-      <div className="w-full max-w-sm bg-[#161624] border border-white/5 rounded-xl p-8 space-y-3 text-center">
+      <div className="w-full max-w-sm bg-surface border border-white/5 rounded-xl p-8 space-y-3 text-center">
         <h1 className="text-xl font-display font-bold text-white">
           Check your email
         </h1>

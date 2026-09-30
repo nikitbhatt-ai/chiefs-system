@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { AppShell } from "@/components/AppShell";
 import { VehiclePhotos } from "@/components/VehiclePhotos";
 import { publishVehicleAction } from "@/lib/publishVehicle";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const LOTS = ["on-site", "dealership", "upfitting", "sames-dropoff"];
 const LOT_LABELS: Record<string, string> = {
@@ -115,7 +116,7 @@ export default async function EditVehiclePage({
       <VehiclePhotos vehicleId={v.id} photos={v.photos ?? []} />
       <form
         action={update}
-        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
+        className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-3 gap-3"
       >
         <input
           name="vin"
@@ -240,16 +241,15 @@ export default async function EditVehiclePage({
           >
             Cancel
           </a>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save changes
-          </button>
+          </SubmitButton>
         </div>
       </form>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4 space-y-3">
+      <div className="bg-surface border border-white/5 rounded-lg p-4 space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">
             Publish to Shopify
@@ -313,12 +313,11 @@ export default async function EditVehiclePage({
                 <option value="active">Active (live on storefront)</option>
               </select>
             </label>
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-md px-4 py-2 transition-colors"
             >
               Publish to Shopify
-            </button>
+            </SubmitButton>
             <span className="text-[11px] text-zinc-500">
               Save form changes above first if you've edited anything.
             </span>

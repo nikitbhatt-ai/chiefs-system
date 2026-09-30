@@ -4,6 +4,13 @@ import { db } from "@/db";
 import { vendors } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
+
+// This page reads the live DB and has no dynamic input (no searchParams /
+// params / auth() at render), so Next would otherwise try to statically
+// prerender it at build time — which fails because there's no database during
+// the build. Render per-request instead, matching the other data pages.
+export const dynamic = "force-dynamic";
 
 async function createVendor(formData: FormData) {
   "use server";
@@ -36,7 +43,7 @@ export default async function VendorsPage() {
 
   return (
     <AppShell title="Vendors" subtitle="Suppliers & service providers">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           Add vendor
         </h3>
@@ -84,17 +91,16 @@ export default async function VendorsPage() {
             className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 md:col-span-2"
           />
           <div className="md:col-span-2 flex justify-end">
-            <button
-              type="submit"
+            <SubmitButton
               className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
             >
               Save vendor
-            </button>
+            </SubmitButton>
           </div>
         </form>
       </div>
 
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -134,12 +140,11 @@ export default async function VendorsPage() {
                     </a>
                     <form action={deleteVendor} className="inline">
                       <input type="hidden" name="id" value={v.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                       >
                         Delete
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

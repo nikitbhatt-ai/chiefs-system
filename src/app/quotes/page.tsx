@@ -13,6 +13,7 @@ import { auth } from "@/auth";
 import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
 import { fmtDateTime } from "@/lib/datetime";
 import { nextDocumentNumber } from "@/lib/documentNumber";
+import { SubmitButton } from "@/components/SubmitButton";
 
 const QUOTE_STATUSES = ["draft", "sent", "approved", "converted"];
 
@@ -131,15 +132,15 @@ export default async function QuotesPage({
 
   return (
     <AppShell title="Quotes" subtitle="Estimates and quotes for customers">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
           New quote
         </h3>
-        <form action={createQuote} className="flex gap-3 items-end">
+        <form action={createQuote} className="flex flex-wrap gap-3 items-end">
           <select
             name="customerId"
             defaultValue=""
-            className="flex-1 bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
+            className="flex-1 min-w-[12rem] bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
           >
             <option value="">— Customer (optional) —</option>
             {customerRows.map((c) => (
@@ -148,12 +149,11 @@ export default async function QuotesPage({
               </option>
             ))}
           </select>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Create draft
-          </button>
+          </SubmitButton>
         </form>
       </div>
 
@@ -161,7 +161,7 @@ export default async function QuotesPage({
         <form method="get" className="flex flex-wrap items-center gap-2">
           {view === "archived" && <input type="hidden" name="view" value="archived" />}
           {tag && <input type="hidden" name="tag" value={tag} />}
-          <input name="q" defaultValue={q} placeholder="Search quote # or customer…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[220px]" />
+          <input name="q" defaultValue={q} placeholder="Search quote # or customer…" className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white placeholder:text-zinc-500 flex-1 min-w-[min(220px,100%)]" />
           <select name="status" defaultValue={status} className="bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white">
             <option value="">All statuses</option>
             {QUOTE_STATUSES.map((s) => (<option key={s} value={s}>{s}</option>))}
@@ -171,7 +171,7 @@ export default async function QuotesPage({
         </form>
         <ListFilters basePath="/quotes" view={view} tag={tag} carry={{ q, status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -222,12 +222,11 @@ export default async function QuotesPage({
                     </a>
                     <form action={deleteQuote} className="inline">
                       <input type="hidden" name="id" value={q.id} />
-                      <button
-                        type="submit"
+                      <SubmitButton
                         className="text-[11px] text-zinc-500 hover:text-red-400 font-body"
                       >
                         Delete
-                      </button>
+                      </SubmitButton>
                     </form>
                   </td>
                 </tr>

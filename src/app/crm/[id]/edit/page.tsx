@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { db } from "@/db";
 import { customers } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export default async function EditCustomerPage({
   params,
@@ -41,7 +42,7 @@ export default async function EditCustomerPage({
     <AppShell title="Edit customer" subtitle={c.name}>
       <form
         action={update}
-        className="bg-[#161624] border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl"
+        className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl"
       >
         <input
           name="name"
@@ -89,12 +90,11 @@ export default async function EditCustomerPage({
           >
             Cancel
           </a>
-          <button
-            type="submit"
+          <SubmitButton
             className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
           >
             Save changes
-          </button>
+          </SubmitButton>
         </div>
       </form>
     </AppShell>

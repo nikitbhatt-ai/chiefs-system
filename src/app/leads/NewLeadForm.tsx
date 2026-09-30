@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { createLeadAction } from "./actions";
+import { SubmitButton } from "@/components/SubmitButton";
 
 type Lookup = { id: string; value: string; parentId: string | null };
 type PartnerContact = { id: string; name: string; location: string | null };
@@ -72,7 +73,7 @@ export function NewLeadForm({
       )}
       <textarea name="notes" placeholder="General notes" rows={2} className={`${inputCls} md:col-span-2`} />
       <div className="md:col-span-2 flex justify-end">
-        <button type="submit" className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save lead</button>
+        <SubmitButton className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors">Save lead</SubmitButton>
       </div>
     </form>
   );

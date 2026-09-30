@@ -9,6 +9,7 @@ import { parsePagination } from "@/lib/pagination";
 import { NewLeadForm } from "./NewLeadForm";
 import { convertLeadAction, deleteLeadAction } from "./actions";
 import { fmtDateTime } from "@/lib/datetime";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,7 @@ export default async function LeadsPage({
 
   return (
     <AppShell title="Leads" subtitle="Pipeline of prospects before they become customers">
-      <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
+      <div className="bg-surface border border-white/5 rounded-lg p-4">
         <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">Add lead</h3>
         {sources.length === 0 ? (
           <div className="text-[11px] text-amber-300 font-body bg-amber-500/10 border border-amber-500/30 rounded p-3">
@@ -89,7 +90,7 @@ export default async function LeadsPage({
         </form>
         <ListFilters basePath="/leads" view={view} tag={tag} carry={{ q, status }} />
       </div>
-      <div className="bg-[#161624] border border-white/5 rounded-lg overflow-x-auto">
+      <div className="bg-surface border border-white/5 rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-white/5">
             <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-500 font-body">
@@ -116,9 +117,9 @@ export default async function LeadsPage({
                   <td className="px-4 py-2.5 text-xs text-zinc-400 whitespace-nowrap">{fmtDateTime(l.createdAt)}</td>
                   <td className="px-4 py-2.5 text-right whitespace-nowrap">
                     <div className="flex items-center justify-end gap-2 mb-1"><ListRowControls entity="leads" id={l.id} tags={l.tags ?? []} archived={l.archived} /></div>
-                    {l.status !== "converted" ? (<form action={convertLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><button type="submit" className="text-[11px] text-green-400 hover:text-green-300 font-body mr-3">Convert</button></form>) : null}
+                    {l.status !== "converted" ? (<form action={convertLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><SubmitButton className="text-[11px] text-green-400 hover:text-green-300 font-body mr-3">Convert</SubmitButton></form>) : null}
                     <a href={`/leads/${l.id}/edit`} className="text-[11px] text-amber-400 hover:text-amber-300 font-body mr-3">Edit</a>
-                    <form action={deleteLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><button type="submit" className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</button></form>
+                    <form action={deleteLeadAction} className="inline"><input type="hidden" name="id" value={l.id} /><SubmitButton className="text-[11px] text-zinc-500 hover:text-red-400 font-body">Delete</SubmitButton></form>
                   </td>
                 </tr>
               ))
