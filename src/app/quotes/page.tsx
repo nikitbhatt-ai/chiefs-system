@@ -13,6 +13,7 @@ import { auth } from "@/auth";
 import { unlinkQuote, upsertQuoteLink } from "@/lib/customerDocLinks";
 import { fmtDateTime } from "@/lib/datetime";
 import { SubmitButton } from "@/components/SubmitButton";
+import { NewEstimateButton } from "@/components/NewEstimateButton";
 import { nextDocNumber } from "@/lib/docNumbers";
 
 const QUOTE_STATUSES = ["draft", "sent", "approved", "converted"];
@@ -27,12 +28,25 @@ const STATUS_COLORS: Record<string, string> = {
 async function createQuote(formData: FormData) {
   "use server";
   const customerId = String(formData.get("customerId") ?? "") || null;
+  const customerPo = String(formData.get("customerPo") ?? "").trim().slice(0, 100) || null;
+  const title = String(formData.get("title") ?? "").trim().slice(0, 200) || null;
+  // A tax-exempt customer's estimates start tax-exempt (switchable per estimate).
+  const [cust] = customerId
+    ? await db.select({ taxExempt: customers.taxExempt }).from(customers).where(eq(customers.id, customerId))
+    : [];
+  // Pricing is good for 30 days by default; editable on the estimate.
+  const valid = new Date();
+  valid.setDate(valid.getDate() + 30);
   const quoteNumber = await nextDocNumber("quote");
   const [row] = await db
     .insert(quotes)
     .values({
       quoteNumber,
       customerId,
+      customerPo,
+      title,
+      taxExempt: cust?.taxExempt ?? false,
+      validUntil: valid.toISOString().slice(0, 10),
       status: "draft",
       lineItems: [],
       subtotal: "0",
@@ -82,8 +96,9 @@ export default async function QuotesPage({
   const { page, perPage, offset } = parsePagination(sp.page);
 
   const customerRows = await db
-    .select({ id: customers.id, name: customers.name })
+    .select({ id: customers.id, name: customers.name, address: customers.address, email: customers.email })
     .from(customers)
+    .where(eq(customers.archived, false))
     .orderBy(customers.name);
 
   const filters = [eq(quotes.archived, view === "archived")];
@@ -128,29 +143,8 @@ export default async function QuotesPage({
 
   return (
     <AppShell title="Quotes" subtitle="Estimates and quotes for customers">
-      <div className="bg-surface border border-white/5 rounded-lg p-4">
-        <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider mb-3">
-          New quote
-        </h3>
-        <form action={createQuote} className="flex flex-wrap gap-3 items-end">
-          <select
-            name="customerId"
-            defaultValue=""
-            className="flex-1 min-w-[12rem] bg-black/40 border border-white/10 rounded-md px-3 py-2 text-sm text-white"
-          >
-            <option value="">— Customer (optional) —</option>
-            {customerRows.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          <SubmitButton
-            className="text-xs font-body font-semibold bg-amber-500 hover:bg-amber-400 text-black rounded-md px-4 py-2 transition-colors"
-          >
-            Create draft
-          </SubmitButton>
-        </form>
+      <div className="flex justify-end">
+        <NewEstimateButton customers={customerRows} action={createQuote} />
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">

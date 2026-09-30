@@ -61,6 +61,11 @@ async function resolveQuote(
     grandTotal: Number(q.grandTotal ?? 0),
     notes: q.notes ?? null,
     status: q.status,
+    title: q.title,
+    customerPo: q.customerPo,
+    validUntil: q.validUntil,
+    hideLinePrices: q.hideLinePrices,
+    taxExempt: q.taxExempt,
     variant,
   };
 }

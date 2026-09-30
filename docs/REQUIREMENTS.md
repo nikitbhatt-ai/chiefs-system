@@ -1752,21 +1752,65 @@ never lose work — everything auto-saves.
   time never overwrite each other. The same estimate open in two tabs is
   still last-save-wins.
 
-### Estimate page redesign (next, from the same upfithq screenshots)
+### Estimate page redesign — Part 1 (2026-09-30, from the upfithq screenshots)
 
-- [ ] "New Estimate" pop-up: customer search (name / town / email),
-      customer PO # (optional), which shop is doing the work, title
-      (optional) → Create Estimate.
-- [ ] Header: title + DRAFT / TAX EXEMPT badges, View PDF, Packing slip.
-- [ ] 4-step strip: Estimate → Sales Order → Work Order → Invoice, plus a
-      "what's next" banner (Email to Customer / Mark Accepted).
-- [ ] Bill-to block with estimate #, date, PO #, valid-until date.
-- [ ] "Hide individual prices from the customer" toggle (one total on PDF).
-- [ ] Line items grouped by manufacturer (Whelen, Havis, Setina, SoundOff,
-      Troy, Pro-Gard…) each with its own + Add.
-- [ ] Right sidebar: Customer card (View Full Profile) + Tax-exempt toggle.
-- ~~"Today" home dashboard~~ — **skipped** (2026-09-30): the Sales and Ops
-  home pages already cover it; the user doesn't want a second home page.
+Decisions (user, 2026-09-30): **one shop** (no "which shop" choice — Hempstead
+only); **tax exempt lives on the estimate** (starts from the customer's
+setting); steps = **Estimate** (draft/sent) → **Sales Order** (accepted =
+`approved`) → **Work Order** (a work order exists) → **Invoice** (invoiced);
+line grouping = **keep Parts / Labor / Fees and group parts by manufacturer
+inside Parts** (Part 2, below).
+
+- [x] **New Estimate pop-up** (`NewEstimateButton` on `/quotes`): customer
+      type-ahead (name / town / email, `CustomerPicker`), customer PO #
+      (optional), title (optional) → Create Estimate → opens it. New
+      estimates get valid-until = today + 30 days and start tax-exempt when
+      the customer is.
+- [x] **Header**: title (or "Estimate — add a title"), status + TAX EXEMPT
+      badges, "EST-# · customer · Created date"; **View PDF** (customer copy),
+      **Packing slip** (the de-priced work-order build sheet), **More ▾**
+      (print view, internal cost/margin copy).
+- [x] **4-step strip + "what's next" banner** (`EstimateSteps`): draft →
+      Email to Customer / **Mark Accepted**; sent → same; sales order →
+      **Create Work Order** (POST workflow-stage `confirmed`, no stock
+      effect) / Undo accept; work order → Open Work Order, and **Create
+      Invoice** once the build is completed/delivered (POST /api/invoices);
+      invoiced → Open Invoice. Every button saves editor changes first. The
+      8-stage workflow strip now shows only once a work order exists, as
+      "Shop progress".
+- [x] **Bill To block**: customer name / address / email · phone with a
+      **Change** button (type-ahead), plus Estimate #, date, **PO #**,
+      **Valid until**, **Title** — all auto-saved.
+- [x] **Hide individual prices** switch: the customer PDF and print view
+      show description, part # and qty (labor: hours) with only tax + total;
+      the internal copy always shows everything.
+- [x] **Sidebar**: Customer card (email, phone, location, View Full Profile),
+      **Tax** card (Tax Exempt switch; tax-rate box when not exempt), Status.
+      Picking a tax-exempt customer turns the switch on.
+- [x] **Tax rate is stored** on the estimate now (`tax_rate`); older
+      estimates still recover it from the stored tax.
+- [x] PDF + print view print the title, customer PO #, valid-until date and
+      "Tax: Exempt".
+
+Schema (run `docs/sql/estimate_redesign.sql` in Neon **before deploying**):
+```sql
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS title text;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS customer_po text;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS valid_until date;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS hide_line_prices boolean NOT NULL DEFAULT false;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS tax_exempt boolean NOT NULL DEFAULT false;
+ALTER TABLE quotes ADD COLUMN IF NOT EXISTS tax_rate numeric(6,3);
+-- plus a one-time backfill marking existing $0-tax estimates for
+-- tax-exempt customers as tax-exempt (see the .sql file)
+```
+
+### Estimate page redesign — Part 2 (next)
+
+- [ ] Inside Parts & Items, group part lines under their **manufacturer**
+      (Whelen, Havis, Setina, SoundOff, Troy, Pro-Gard…), each group with its
+      own **+ Add** that searches that brand. Labor and Fees stay as their
+      own sections; packages stay as their own titled groups.
+- [ ] Restyle the line-item table and totals to match the new look.
 
 ### Schema additions (Upfit Builder)
 

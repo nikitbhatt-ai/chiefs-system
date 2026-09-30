@@ -55,6 +55,13 @@ export type QuoteData = {
   grandTotal: number;
   notes: string | null;
   status: string;
+  /** Estimate title, customer's PO #, and the pricing's good-through date. */
+  title?: string | null;
+  customerPo?: string | null;
+  validUntil?: string | null;
+  /** Customer copy shows parts + quantities + one total, no per-line prices. */
+  hideLinePrices?: boolean;
+  taxExempt?: boolean;
   // Variant: "quote" = customer-facing estimate, "invoice" = post-conversion
   // invoice (same data, different title + footer wording).
   variant: "quote" | "invoice";
@@ -124,6 +131,7 @@ function KindTables({
   partNumbers,
   partCosts,
   internal = false,
+  hidePrices = false,
 }: {
   lines: QuoteLine[];
   showTitles: boolean;
@@ -133,6 +141,8 @@ function KindTables({
   partCosts?: PartCostMap;
   /** Adds the Cost and Margin columns. Internal copy only. */
   internal?: boolean;
+  /** Drop every per-line price column (the "hide individual prices" copy). */
+  hidePrices?: boolean;
 }) {
   const styles = sharedStyles;
   const items = lines.filter((l) => l.kind === "item");
@@ -142,7 +152,10 @@ function KindTables({
   // Each set sums to 100%.
   const W = internal
     ? { num: "3%", desc: "24%", part: "16%", qty: "5%", cost: "11%", unit: "12%", disc: "8%", margin: "11%", total: "10%" }
-    : { num: "4%", desc: "40%", part: "16%", qty: "7%", cost: "0%", unit: "13%", disc: "8%", margin: "0%", total: "12%" };
+    : hidePrices
+      ? { num: "5%", desc: "63%", part: "20%", qty: "12%", cost: "0%", unit: "0%", disc: "0%", margin: "0%", total: "0%" }
+      : { num: "4%", desc: "40%", part: "16%", qty: "7%", cost: "0%", unit: "13%", disc: "8%", margin: "0%", total: "12%" };
+  const showPrices = !hidePrices || internal;
   return (
     <View>
       {items.length > 0 && (
@@ -161,12 +174,18 @@ function KindTables({
               {internal ? (
                 <Text style={[styles.tableCell, styles.cellRight, { width: W.cost }]}>Avg cost</Text>
               ) : null}
-              <Text style={[styles.tableCell, styles.cellRight, { width: W.unit }]}>Unit price</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: W.disc }]}>Disc %</Text>
+              {showPrices ? (
+                <>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: W.unit }]}>Unit price</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: W.disc }]}>Disc %</Text>
+                </>
+              ) : null}
               {internal ? (
                 <Text style={[styles.tableCell, styles.cellRight, { width: W.margin }]}>Margin</Text>
               ) : null}
-              <Text style={[styles.tableCell, styles.cellRight, { width: W.total }]}>Total</Text>
+              {showPrices ? (
+                <Text style={[styles.tableCell, styles.cellRight, { width: W.total }]}>Total</Text>
+              ) : null}
             </View>
             {items.map((l, idx) => {
               if (l.kind !== "item") return null;
@@ -203,12 +222,16 @@ function KindTables({
                       {unitCost == null ? "—" : money(unitCost)}
                     </Text>
                   ) : null}
-                  <Text style={[styles.tableCell, styles.cellRight, { width: W.unit }]}>{money(l.unitPrice || 0)}</Text>
-                  {/* The percentage off list, which is what gets checked against
-                      a contract. The dollars come off in the Total column. */}
-                  <Text style={[styles.tableCell, styles.cellRight, { width: W.disc }]}>
-                    {pct > 0 ? `${pct.toFixed(2)}%` : "—"}
-                  </Text>
+                  {showPrices ? (
+                    <>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: W.unit }]}>{money(l.unitPrice || 0)}</Text>
+                      {/* The percentage off list, which is what gets checked against
+                          a contract. The dollars come off in the Total column. */}
+                      <Text style={[styles.tableCell, styles.cellRight, { width: W.disc }]}>
+                        {pct > 0 ? `${pct.toFixed(2)}%` : "—"}
+                      </Text>
+                    </>
+                  ) : null}
                   {internal ? (
                     <Text style={[styles.tableCell, styles.cellRight, { width: W.margin, fontSize: 9 }]}>
                       {lineMargin == null
@@ -216,7 +239,7 @@ function KindTables({
                         : `${money(lineMargin)}${marginPct == null ? "" : ` / ${marginPct.toFixed(0)}%`}`}
                     </Text>
                   ) : null}
-                  {disc > 0 ? (
+                  {!showPrices ? null : disc > 0 ? (
                     // Show the pre-discount price struck through above the
                     // discounted price so the customer sees the saving per line.
                     <View style={{ width: W.total, paddingVertical: 6, paddingHorizontal: 8 }}>
@@ -243,10 +266,14 @@ function KindTables({
           )}
           <View style={styles.table}>
             <View style={[styles.tableRow, styles.tableHeader]} minPresenceAhead={40}>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>Description</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: showPrices ? "55%" : "85%" }]}>Description</Text>
               <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Hours</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Rate / hr</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Total</Text>
+              {showPrices ? (
+                <>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Rate / hr</Text>
+                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>Total</Text>
+                </>
+              ) : null}
             </View>
             {labor.map((l, idx) => {
               if (l.kind !== "labor") return null;
@@ -254,10 +281,14 @@ function KindTables({
               const total = (l.hours || 0) * (l.rate || 0);
               return (
                 <View key={`labor-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "55%" }]}>{l.description}</Text>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: showPrices ? "55%" : "85%" }]}>{l.description}</Text>
                   <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{l.hours || 0}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.rate || 0)}</Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(total)}</Text>
+                  {showPrices ? (
+                    <>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(l.rate || 0)}</Text>
+                      <Text style={[styles.tableCell, styles.cellRight, { width: "15%" }]}>{money(total)}</Text>
+                    </>
+                  ) : null}
                 </View>
               );
             })}
@@ -273,18 +304,22 @@ function KindTables({
           )}
           <View style={styles.table}>
             <View style={[styles.tableRow, styles.tableHeader]} minPresenceAhead={40}>
-              <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>Description</Text>
-              <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>Amount</Text>
+              <Text style={[styles.tableCell, styles.cellLeft, { width: showPrices ? "75%" : "100%" }]}>Description</Text>
+              {showPrices ? (
+                <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>Amount</Text>
+              ) : null}
             </View>
             {fees.map((l, idx) => {
               if (l.kind !== "fee") return null;
               const last = idx === fees.length - 1;
               return (
                 <View key={`fee-${idx}`} style={last ? styles.tableRowLast : styles.tableRow}>
-                  <Text style={[styles.tableCell, styles.cellLeft, { width: "75%" }]}>
+                  <Text style={[styles.tableCell, styles.cellLeft, { width: showPrices ? "75%" : "100%" }]}>
                     {l.description} {l.fixed ? "(fixed fee)" : "(custom fee)"}
                   </Text>
-                  <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>{money(l.amount || 0)}</Text>
+                  {showPrices ? (
+                    <Text style={[styles.tableCell, styles.cellRight, { width: "25%" }]}>{money(l.amount || 0)}</Text>
+                  ) : null}
                 </View>
               );
             })}
@@ -314,6 +349,11 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
   const generated = new Date();
   const logo = brandLogo();
   const isInternal = data.internal === true;
+  // The internal copy always shows every price.
+  const hidePrices = data.hideLinePrices === true && !isInternal;
+  const fmtValid = data.validUntil
+    ? new Date(`${data.validUntil}T12:00:00`).toLocaleDateString("en-US")
+    : null;
 
   return (
     <Document
@@ -347,6 +387,8 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             <Text style={styles.docMeta}>
               {dateLabel}: {data.createdAt.toLocaleDateString("en-US")}
             </Text>
+            {data.customerPo ? <Text style={styles.docMeta}>Customer PO #: {data.customerPo}</Text> : null}
+            {!isInvoice && fmtValid ? <Text style={styles.docMeta}>Valid until: {fmtValid}</Text> : null}
             {data.salesPerson ? (
               <Text style={styles.docRep}>Sales rep: {data.salesPerson}</Text>
             ) : null}
@@ -359,6 +401,9 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
           </View>
         ) : null}
 
+        {data.title ? (
+          <Text style={[styles.blockValue, { fontSize: 13, marginBottom: 8 }]}>{data.title}</Text>
+        ) : null}
         <View style={styles.twoCol}>
           <View style={{ width: "48%" }}>
             <Text style={[styles.sectionTitle, { marginTop: 0 }]}>
@@ -441,11 +486,11 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
                     >
                       <Text style={{ fontSize: 11, fontWeight: 700 }}>{title}</Text>
                     </View>
-                    <KindTables lines={gl} showTitles={false} partNumbers={data.partNumbers} partCosts={data.partCosts} internal={isInternal} />
+                    <KindTables lines={gl} showTitles={false} partNumbers={data.partNumbers} partCosts={data.partCosts} internal={isInternal} hidePrices={hidePrices} />
                   </View>
                 );
               })}
-              {loose.length > 0 && <KindTables lines={loose} showTitles={true} partNumbers={data.partNumbers} partCosts={data.partCosts} internal={isInternal} />}
+              {loose.length > 0 && <KindTables lines={loose} showTitles={true} partNumbers={data.partNumbers} partCosts={data.partCosts} internal={isInternal} hidePrices={hidePrices} />}
             </View>
           );
         })()}
@@ -454,23 +499,25 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             landed between "Subtotal" and "Amount due", which is the last thing
             you want split on an invoice. */}
         <View style={styles.totals} wrap={false}>
+          {!hidePrices && (
           <View style={styles.totalRow}>
             <Text>Subtotal</Text>
             <Text>{money(subtotal)}</Text>
           </View>
-          {discountTotal > 0 && (
+          )}
+          {!hidePrices && discountTotal > 0 && (
             <View style={styles.totalRow}>
               <Text>Discount</Text>
               <Text>-{money(discountTotal)}</Text>
             </View>
           )}
-          {laborTotal > 0 && (
+          {!hidePrices && laborTotal > 0 && (
             <View style={styles.totalRow}>
               <Text>Labor</Text>
               <Text>{money(laborTotal)}</Text>
             </View>
           )}
-          {feeTotal > 0 && (
+          {!hidePrices && feeTotal > 0 && (
             <View style={styles.totalRow}>
               <Text>Fees</Text>
               <Text>{money(feeTotal)}</Text>
@@ -480,6 +527,12 @@ export function QuoteDocument({ data }: { data: QuoteData }) {
             <View style={styles.totalRow}>
               <Text>Tax</Text>
               <Text>{money(data.taxTotal)}</Text>
+            </View>
+          )}
+          {data.taxExempt && (
+            <View style={styles.totalRow}>
+              <Text>Tax</Text>
+              <Text>Exempt</Text>
             </View>
           )}
           <View style={styles.grandTotalRow}>
