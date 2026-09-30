@@ -20,11 +20,31 @@ export type CreateInvoiceResult =
   | { ok: true; invoiceId: string; documentNumber: string | null }
   | { ok: false; reason: "wo_not_found" | "no_quote" | "already_invoiced" };
 
+/**
+ * Drop the per-line `notes` field when snapshotting a quote's lines onto an
+ * invoice.
+ *
+ * Those notes are SHOP notes — they belong to the printed work-order build
+ * sheet and nowhere else. Nothing on the invoice renders them today, but an
+ * invoice is a customer document that will grow new views and a PDF, and a
+ * snapshot is permanent: once the text is copied in, any future template that
+ * prints a line's fields would leak it. Stripping at the copy keeps that
+ * impossible rather than merely unlikely.
+ */
+function stripLineNotes(lineItems: unknown): unknown[] {
+  return ((lineItems as Record<string, unknown>[] | null) ?? []).map((l) => {
+    if (!l || typeof l !== "object" || !("notes" in l)) return l;
+    const { notes: _dropped, ...rest } = l;
+    void _dropped;
+    return rest;
+  });
+}
+
 // Create an invoice from a work order. Idempotent per WO: if the WO
 // already has an invoice, returns { ok: false, already_invoiced }.
-// Snapshots the source quote's lineItems + totals into the invoice, and
-// stamps the shared job number (from the quote / WO number) so the invoice
-// reads as the same job.
+// Snapshots the source quote's lineItems + totals into the invoice (minus the
+// per-line shop notes, see stripLineNotes), and stamps the shared job number
+// (from the quote / WO number) so the invoice reads as the same job.
 export async function createInvoiceFromWorkOrder(
   workOrderId: string,
 ): Promise<CreateInvoiceResult> {
@@ -76,7 +96,7 @@ export async function createInvoiceFromWorkOrder(
         amountPaid: "0",
         balanceDue: String(grandTotal.toFixed(2)),
         dueDate,
-        lineItems: (q.lineItems ?? []) as never,
+        lineItems: stripLineNotes(q.lineItems) as never,
         notes: null,
       })
       .returning({ id: invoices.id, documentNumber: invoices.documentNumber });

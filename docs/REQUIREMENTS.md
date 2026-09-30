@@ -2065,10 +2065,20 @@ manufacturer part number, and quantity** per line.
   the customer. Notes on part lines print indented under their part;
   labor and fee lines carry no part and so can't ride the parts table —
   their notes print in an "Additional notes" block (label + note only,
-  never hours, rate or amount) rather than being silently dropped. The
-  work-order detail page shows the same notes on screen so paper and
-  screen agree. Stored in the existing `quotes.line_items` jsonb, so
-  **no migration is required**.
+  never hours, rate or amount) rather than being silently dropped.
+  Stored in the existing `quotes.line_items` jsonb, so **no migration is
+  required**.
+
+  **The work-order PDF is the only place a line note is ever shown.**
+  Exactly two surfaces touch it: the input fields in the quote editor
+  where sales types it, and that PDF. It is deliberately NOT rendered on
+  the work-order detail page (an earlier version did show it there), not
+  on the customer quote, the invoice, or the print view. Invoicing
+  additionally **strips** the field when it snapshots the quote's lines
+  (`stripLineNotes` in `src/lib/invoices.ts`): an invoice is a customer
+  document that will grow new views and a PDF, and a snapshot is
+  permanent, so removing the text at the copy keeps a future leak
+  impossible rather than merely unlikely.
 
 #### Schema addition (Phase 3a) — run in Neon's SQL Editor
 
