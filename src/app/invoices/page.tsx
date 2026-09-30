@@ -43,7 +43,7 @@ export default async function InvoicesPage() {
   const totalPaid = rows.reduce((s, r) => s + (Number(r.amountPaid ?? 0) || 0), 0);
 
   return (
-    <AppShell title="Invoices" subtitle="Customer + accounting docs. Share the same 6-digit document number as their originating work order.">
+    <AppShell title="Invoices" subtitle="Customer + accounting docs. Share the same 4-digit job number as the quote and work order they came from.">
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div className="bg-[#161624] border border-white/5 rounded-lg p-4">
           <div className="text-[10px] text-zinc-500 font-body uppercase tracking-wider">Outstanding balance</div>

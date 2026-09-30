@@ -1,12 +1,13 @@
 // Invoice + payment helpers. An invoice is the customer + accounting
-// document that closes out a work order. It shares the WO's
-// `document_number` (6-digit) so the shop's build sheet and the
-// customer's bill carry one shared identifier — ShopMonkey convention.
+// document that closes out a work order. It shares the job's 4-digit
+// `document_number` (originating on the quote, carried by the WO) so the
+// estimate, the shop's build sheet, and the customer's bill all carry one
+// shared identifier — ShopMonkey convention.
 
 import { and, eq, sum } from "drizzle-orm";
 import { db } from "@/db";
 import { invoices, invoicePayments, workOrders, quotes } from "@/db/schema";
-import { nextDocumentNumber } from "@/lib/documentNumber";
+import { documentNumberForQuote } from "@/lib/documentNumber";
 
 export type CreateInvoiceResult =
   | { ok: true; invoiceId: string; documentNumber: number }
@@ -35,12 +36,13 @@ export async function createInvoiceFromWorkOrder(
     const [q] = await tx.select().from(quotes).where(eq(quotes.id, wo.quoteId));
     if (!q) return { ok: false, reason: "no_quote" };
 
-    // Reuse the WO's document number, or assign one now if the WO
-    // predates the column (legacy rows). Either way, both the WO and
-    // the new invoice carry the same identifier from here forward.
+    // Reuse the WO's document number. For legacy WOs created before the
+    // column existed, pull the number from the originating quote (which
+    // backfills the quote too) so the estimate, WO, and invoice all end
+    // up carrying the same identifier.
     let documentNumber = wo.documentNumber;
     if (documentNumber == null) {
-      documentNumber = await nextDocumentNumber();
+      documentNumber = await documentNumberForQuote(q.id, tx);
       await tx.update(workOrders).set({ documentNumber, updatedAt: new Date() }).where(eq(workOrders.id, wo.id));
     }
 

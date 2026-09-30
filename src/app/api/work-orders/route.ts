@@ -3,7 +3,7 @@ import { desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
 import { workOrders } from "@/db/schema";
-import { nextDocumentNumber } from "@/lib/documentNumber";
+import { nextDocumentNumber, documentNumberForQuote } from "@/lib/documentNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,12 @@ export async function POST(req: Request) {
   if (!session?.user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
 
-  const documentNumber = await nextDocumentNumber();
+  // A WO created from a quote inherits that quote's shared job number; a
+  // standalone WO (no quote) gets its own number off the sequence.
+  const quoteId = body.quoteId ?? null;
+  const documentNumber = quoteId
+    ? await documentNumberForQuote(quoteId)
+    : await nextDocumentNumber();
   const woNumber = `WO-${documentNumber}`;
   const [row] = await db
     .insert(workOrders)
@@ -27,7 +32,7 @@ export async function POST(req: Request) {
       woNumber,
       documentNumber,
       customerId: body.customerId ?? null,
-      quoteId: body.quoteId ?? null,
+      quoteId,
       vehicleId: body.vehicleId ?? null,
       assignedTo: body.assignedTo ?? null,
       priority: body.priority ?? null,

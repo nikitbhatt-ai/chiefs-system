@@ -1996,19 +1996,27 @@ No schema change.
 
 ## Invoices as a separate entity (ShopMonkey-style)
 
-Requirement: the work order (internal build sheet for techs) and the
-invoice (customer + accounting document) must be **separate records** but
-share a single **6-digit document number** so the shop floor and the
-customer see the same identifier — the ShopMonkey convention.
+Requirement: the quote (estimate), work order (internal build sheet for
+techs), and invoice (customer + accounting document) must be **separate
+records** but share a single **4-digit job number** so the estimate, the
+shop floor, and the customer all see the same identifier — the ShopMonkey
+convention (one number for the life of the job).
 
-- [x] **`document_number_seq`** — Postgres sequence starting at 100000,
+- [x] **`document_number_seq`** — Postgres sequence starting at 1000,
   monotonically increasing. `nextDocumentNumber()` (`src/lib/documentNumber.ts`)
   reserves the next value; `fmtDocumentNumber(n)` renders it zero-padded
-  to 6 digits.
+  to 4 digits.
+- [x] **The quote owns the number.** `quotes.document_number` is assigned
+  when the estimate is created (both the `/api/quotes` POST and the
+  `/quotes` page create action); the quote number is `Q-<n>`.
+  `documentNumberForQuote(quoteId)` returns it, backfilling any quote made
+  before the column existed.
 - [x] **Work orders** carry `document_number` (unique, nullable for
-  legacy rows). Every code path that inserts a WO (quote workflow-stage
-  transition, direct WO POST, deal triggers on won-deal promotion +
-  workflow sync) assigns one at creation time.
+  legacy rows) and **inherit it from the originating quote**. Every code
+  path that inserts a WO (quote workflow-stage transition, direct WO POST,
+  deal triggers on won-deal promotion + workflow sync) pulls the quote's
+  number via `documentNumberForQuote`; a standalone WO with no quote gets
+  its own number off the sequence. WO number is `WO-<n>`.
 - [x] **`invoices` table** — separate entity that snapshots the source
   quote's `lineItems` and totals at generation time. Fields: status
   (draft | sent | partial | paid | overdue | void), subtotal /
@@ -2021,8 +2029,9 @@ customer see the same identifier — the ShopMonkey convention.
   `partial` or `paid` inside a single transaction.
 - [x] **`createInvoiceFromWorkOrder(workOrderId)`** — idempotent per WO
   (returns `already_invoiced` if one exists); reuses the WO's document
-  number (or backfills one for legacy rows so both records share it);
-  snapshots quote lineItems; sets a default 30-day due date.
+  number (or, for legacy WOs, pulls it from the originating quote so all
+  three records share one number); snapshots quote lineItems; sets a
+  default 30-day due date.
 - [x] **UI**
   - `/invoices` — list with KPI cards (outstanding balance, total
     received, total invoices) and status-colored table.
@@ -2037,8 +2046,18 @@ customer see the same identifier — the ShopMonkey convention.
 SQL (idempotent — user runs in Neon SQL Editor):
 
 ```sql
+-- 4-digit shared job number.
 CREATE SEQUENCE IF NOT EXISTS document_number_seq
-  START WITH 100000 MINVALUE 100000 INCREMENT BY 1 NO CYCLE;
+  START WITH 1000 MINVALUE 1000 INCREMENT BY 1 NO CYCLE;
+
+-- If you already created the sequence at the old 6-digit setting, bring it
+-- down to 4 digits (safe to run either way):
+ALTER SEQUENCE document_number_seq MINVALUE 1000;
+ALTER SEQUENCE document_number_seq RESTART WITH 1000;
+
+-- The quote owns the number; the WO + invoice inherit it.
+ALTER TABLE quotes
+  ADD COLUMN IF NOT EXISTS document_number integer UNIQUE;
 
 ALTER TABLE work_orders
   ADD COLUMN IF NOT EXISTS document_number integer UNIQUE;

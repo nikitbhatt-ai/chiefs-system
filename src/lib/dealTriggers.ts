@@ -9,7 +9,7 @@
 import { and, desc, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deals, quotes, workOrders, dealTasks, customerDocuments, dealActivity, users } from "@/db/schema";
-import { nextDocumentNumber } from "@/lib/documentNumber";
+import { nextDocumentNumber, documentNumberForQuote } from "@/lib/documentNumber";
 import { bucketForStage } from "@/lib/pipelineBuckets";
 import { docForPipeline } from "@/lib/documentTemplates";
 import { getPipeline, stageLabel, type DealStage } from "@/lib/pipelines";
@@ -96,7 +96,8 @@ export async function maybePromoteWonDeal(
     let workOrderId: string | null = null;
     const [existingWo] = await tx.select().from(workOrders).where(eq(workOrders.quoteId, quoteId)).limit(1).for("update");
     if (!existingWo) {
-      const documentNumber = await nextDocumentNumber();
+      // Reuse this quote's shared job number (backfills legacy quotes).
+      const documentNumber = await documentNumberForQuote(quoteId, tx);
       const woNumber = `WO-${documentNumber}`;
       const [wo] = await tx
         .insert(workOrders)
@@ -260,14 +261,18 @@ export async function syncDealToWorkflow(
       });
       return { ok: false, reason: "no_target" };
     }
-    const documentNumber = await nextDocumentNumber();
-    const woNumber = `WO-${documentNumber}`;
     const [q] = await db
       .select()
       .from(quotes)
       .where(eq(quotes.dealId, dealId))
       .orderBy(desc(quotes.updatedAt))
       .limit(1);
+    // Inherit the deal's quote number when there is one; otherwise this
+    // work order has no originating estimate, so it gets its own number.
+    const documentNumber = q?.id
+      ? await documentNumberForQuote(q.id)
+      : await nextDocumentNumber();
+    const woNumber = `WO-${documentNumber}`;
     const [inserted] = await db
       .insert(workOrders)
       .values({

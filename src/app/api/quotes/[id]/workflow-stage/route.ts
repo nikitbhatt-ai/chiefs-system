@@ -6,7 +6,7 @@ import { quotes, workOrders } from "@/db/schema";
 import { syncWorkflowToDeal } from "@/lib/dealTriggers";
 import { consumeWorkOrderParts, restoreWorkOrderParts } from "@/lib/inventory";
 import { qcComplete } from "@/lib/qc";
-import { nextDocumentNumber } from "@/lib/documentNumber";
+import { documentNumberForQuote } from "@/lib/documentNumber";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +101,8 @@ export async function POST(
     }
 
     if (!wo && stage !== "estimate") {
-      const documentNumber = await nextDocumentNumber();
+      // Reuse the quote's shared job number (backfills legacy quotes).
+      const documentNumber = await documentNumberForQuote(id);
       const woNumber = `WO-${documentNumber}`;
       const inserted = await db
         .insert(workOrders)

@@ -216,6 +216,10 @@ export const quotes = pgTable("quotes", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   quoteNumber: text("quote_number").unique(),
+  // Shared 4-digit job number. Assigned when the quote (estimate) is
+  // created and reused unchanged by the work order and invoice that
+  // follow — one number per job, ShopMonkey style.
+  documentNumber: integer("document_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   dealId: uuid("deal_id").references(() => deals.id),
   status: quoteStatus("status").notNull().default("draft"),
@@ -330,12 +334,12 @@ export const workOrders = pgTable("work_orders", {
   archived: boolean("archived").notNull().default(false),
   tags: text("tags").array(),
   woNumber: text("wo_number").unique(),
-  // 6-digit numeric ID shared between the work order (internal tech doc)
-  // and the invoice (customer + accounting doc) that eventually closes it
-  // out. Populated on WO creation from `document_number_seq`. When an
-  // invoice is generated from this WO, the invoice reuses this same
-  // number — matches the ShopMonkey convention where the shop's RO # and
-  // the customer's invoice # are one and the same.
+  // 4-digit numeric ID shared across the job: the quote (estimate), this
+  // work order (internal tech doc), and the invoice (customer + accounting
+  // doc). Inherited from the originating quote's document_number on WO
+  // creation. When an invoice is generated from this WO it reuses the same
+  // number — matches the ShopMonkey convention where the estimate #, shop
+  // RO #, and customer invoice # are one and the same.
   documentNumber: integer("document_number").unique(),
   customerId: uuid("customer_id").references(() => customers.id),
   vehicleId: uuid("vehicle_id").references(() => vehicles.id),
