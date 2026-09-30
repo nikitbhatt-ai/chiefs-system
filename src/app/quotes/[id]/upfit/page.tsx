@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, upfitConfigs, type UpfitPin } from "@/db/schema";
+import { quotes, upfitConfigs, upfitSnapPoints, upfitStarters, type UpfitPin, type UpfitSnapPoint } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
 import { UpfitBuilder } from "@/components/UpfitBuilder";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
@@ -76,6 +76,74 @@ async function resetUpfit(formData: FormData) {
   if (quoteRow?.customerId) revalidatePath(`/crm/${quoteRow.customerId}`);
 }
 
+// ── Snap points + starter layouts (shared per vehicle template) ────────────
+// Both live in their own tables (docs/sql/upfit_snap_starters.sql). Reads
+// are best-effort so the configurator still works before that SQL is run.
+
+const clampFrac = (n: unknown) => Math.max(0, Math.min(1, Number(n) || 0));
+
+async function saveSnapPoints(formData: FormData) {
+  "use server";
+  const bodyStyle = String(formData.get("bodyStyle") ?? "").trim();
+  if (!bodyStyle) return;
+  let raw: unknown = [];
+  try {
+    raw = JSON.parse(String(formData.get("points") ?? "[]"));
+  } catch {
+    raw = [];
+  }
+  const points: UpfitSnapPoint[] = (Array.isArray(raw) ? raw : [])
+    .slice(0, 200)
+    .map((p) => ({ x: clampFrac((p as UpfitSnapPoint).x), y: clampFrac((p as UpfitSnapPoint).y) }));
+  await db
+    .insert(upfitSnapPoints)
+    .values({ bodyStyle, points, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: upfitSnapPoints.bodyStyle, set: { points, updatedAt: new Date() } });
+}
+
+async function saveStarter(formData: FormData): Promise<{ id: string } | null> {
+  "use server";
+  const bodyStyle = String(formData.get("bodyStyle") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim().slice(0, 120);
+  if (!bodyStyle || !name) return null;
+  let pins: UpfitPin[] = [];
+  try {
+    pins = JSON.parse(String(formData.get("pins") ?? "[]")) as UpfitPin[];
+  } catch {
+    pins = [];
+  }
+  if (!Array.isArray(pins) || pins.length === 0) return null;
+  const [row] = await db
+    .insert(upfitStarters)
+    .values({ bodyStyle, name, pins: pins.slice(0, 200) })
+    .returning({ id: upfitStarters.id });
+  return row ?? null;
+}
+
+async function deleteStarter(formData: FormData) {
+  "use server";
+  const id = String(formData.get("id") ?? "");
+  if (!/^[0-9a-f-]{36}$/i.test(id)) return;
+  await db.delete(upfitStarters).where(eq(upfitStarters.id, id));
+}
+
+async function loadSnapAndStarters() {
+  try {
+    const [snapRows, starterRows] = await Promise.all([
+      db.select().from(upfitSnapPoints),
+      db.select().from(upfitStarters).orderBy(asc(upfitStarters.name)),
+    ]);
+    return {
+      snapPoints: Object.fromEntries(snapRows.map((r) => [r.bodyStyle, r.points ?? []])) as Record<string, UpfitSnapPoint[]>,
+      starters: starterRows.map((r) => ({ id: r.id, bodyStyle: r.bodyStyle, name: r.name, pins: r.pins ?? [] })),
+      ready: true,
+    };
+  } catch (err) {
+    console.error("upfit snap points / starters unavailable (run docs/sql/upfit_snap_starters.sql?)", err);
+    return { snapPoints: {} as Record<string, UpfitSnapPoint[]>, starters: [], ready: false };
+  }
+}
+
 export default async function UpfitPage({
   params,
 }: {
@@ -89,6 +157,8 @@ export default async function UpfitPage({
     .select()
     .from(upfitConfigs)
     .where(eq(upfitConfigs.quoteId, id));
+
+  const extras = await loadSnapAndStarters();
 
   // Stored override wins; otherwise prefill from the linked deal/vehicle.
   const defaultVehicleLabel =
@@ -105,6 +175,12 @@ export default async function UpfitPage({
         initialNotes={config?.notes ?? ""}
         action={saveUpfit}
         resetAction={resetUpfit}
+        snapPoints={extras.snapPoints}
+        starters={extras.starters}
+        extrasReady={extras.ready}
+        saveSnapPointsAction={saveSnapPoints}
+        saveStarterAction={saveStarter}
+        deleteStarterAction={deleteStarter}
       />
     </AppShell>
   );

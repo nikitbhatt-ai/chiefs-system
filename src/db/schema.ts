@@ -1136,6 +1136,26 @@ export const upfitConfigs = pgTable("upfit_configs", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [index("upfit_configs_quote_idx").on(t.quoteId)]);
 
+// Configurator snap points: preset spots on a vehicle template's diagram
+// ("roof center", "grille") that a dragged light snaps to. One row per
+// template slug; points are fractions of the diagram like pin x/y.
+export type UpfitSnapPoint = { x: number; y: number };
+export const upfitSnapPoints = pgTable("upfit_snap_points", {
+  bodyStyle: text("body_style").primaryKey(),
+  points: jsonb("points").$type<UpfitSnapPoint[]>().notNull().default([]),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+// Configurator starter layouts: a saved set of lights for one vehicle
+// template ("Standard Tahoe patrol"), applied to a new diagram in one click.
+export const upfitStarters = pgTable("upfit_starters", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  bodyStyle: text("body_style").notNull(),
+  name: text("name").notNull(),
+  pins: jsonb("pins").$type<UpfitPin[]>().notNull().default([]),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, (t) => [index("upfit_starters_body_style_idx").on(t.bodyStyle)]);
+
 // ───────────────────────────────────────────────────────────────────────────
 // ACCOUNTING MODULE — Phase 1: core double-entry ledger
 //

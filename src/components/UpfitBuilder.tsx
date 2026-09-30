@@ -27,7 +27,7 @@ import {
   type LightTypeGroup,
   type PinSizeKey,
 } from "@/lib/upfit/templates";
-import type { UpfitPin } from "@/db/schema";
+import type { UpfitPin, UpfitSnapPoint } from "@/db/schema";
 import { useAutosave, autosaveLabel, type AutosaveState } from "@/lib/useAutosave";
 import { LightSwatch, PinOnDiagram } from "@/components/upfit/PinGraphics";
 
@@ -42,7 +42,21 @@ export type UpfitBuilderProps = {
   action: (formData: FormData) => Promise<void>;
   // Deletes this estimate's configuration (not the estimate) — "Reset builder".
   resetAction: (formData: FormData) => Promise<void>;
+  // Snap points + starter layouts, shared per vehicle template.
+  snapPoints?: Record<string, UpfitSnapPoint[]>;
+  starters?: Starter[];
+  /** False until docs/sql/upfit_snap_starters.sql has been run. */
+  extrasReady?: boolean;
+  saveSnapPointsAction?: (formData: FormData) => Promise<void>;
+  saveStarterAction?: (formData: FormData) => Promise<{ id: string } | null>;
+  deleteStarterAction?: (formData: FormData) => Promise<void>;
 };
+
+type Starter = { id: string; bodyStyle: string; name: string; pins: UpfitPin[] };
+
+// How close (screen px) a dragged light must get to a snap point to jump onto it.
+const SNAP_RADIUS_PX = 18;
+const SNAP_PREF_KEY = "upfit.snap";
 
 type Shape = NonNullable<UpfitPin["shape"]>;
 type Orientation = NonNullable<UpfitPin["orientation"]>;
@@ -92,6 +106,12 @@ export function UpfitBuilder({
   initialNotes,
   action,
   resetAction,
+  snapPoints = {},
+  starters = [],
+  extrasReady = true,
+  saveSnapPointsAction,
+  saveStarterAction,
+  deleteStarterAction,
 }: UpfitBuilderProps) {
   const router = useRouter();
   const backHref = `/quotes/${quoteId}`;
@@ -101,6 +121,32 @@ export function UpfitBuilder({
   const [pins, setPins] = useState<UpfitPin[]>(initialPins);
   const [notes, setNotes] = useState(initialNotes);
   const [activePinId, setActivePinId] = useState<string | null>(null);
+
+  // Snap points (per vehicle) + starter layouts.
+  const [snapMap, setSnapMap] = useState<Record<string, UpfitSnapPoint[]>>(snapPoints);
+  const [snapOn, setSnapOn] = useState(false);
+  const [editingSnap, setEditingSnap] = useState(false);
+  const [snapMsg, setSnapMsg] = useState<string | null>(null);
+  const [starterList, setStarterList] = useState<Starter[]>(starters);
+  const [starterName, setStarterName] = useState("");
+  const [starterMsg, setStarterMsg] = useState<string | null>(null);
+  const [starterBusy, setStarterBusy] = useState(false);
+  // Remember the Snap checkbox per browser.
+  useEffect(() => {
+    try {
+      setSnapOn(window.localStorage.getItem(SNAP_PREF_KEY) === "1");
+    } catch {
+      /* storage blocked — default off */
+    }
+  }, []);
+  const toggleSnap = (on: boolean) => {
+    setSnapOn(on);
+    try {
+      window.localStorage.setItem(SNAP_PREF_KEY, on ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
 
   // "Add to the diagram" card.
   const [lightTypeKey, setLightTypeKey] = useState("");
@@ -319,6 +365,108 @@ export function UpfitBuilder({
     };
   };
 
+  // Snap a diagram position onto the nearest snap point within reach.
+  const currentSnaps: UpfitSnapPoint[] = bodyStyle ? snapMap[bodyStyle] ?? [] : [];
+  const snapFrac = (f: { x: number; y: number }) => {
+    if (!snapOn || editingSnap || currentSnaps.length === 0) return f;
+    const rect = boxRef.current?.getBoundingClientRect();
+    if (!rect) return f;
+    let best: UpfitSnapPoint | null = null;
+    let bestD = SNAP_RADIUS_PX;
+    for (const p of currentSnaps) {
+      const d = Math.hypot((f.x - p.x) * rect.width, (f.y - p.y) * rect.height);
+      if (d <= bestD) {
+        best = p;
+        bestD = d;
+      }
+    }
+    return best ? { x: best.x, y: best.y } : f;
+  };
+
+  const saveSnaps = async (points: UpfitSnapPoint[]) => {
+    if (!bodyStyle || !saveSnapPointsAction) return;
+    const fd = new FormData();
+    fd.set("bodyStyle", bodyStyle);
+    fd.set("points", JSON.stringify(points));
+    try {
+      await saveSnapPointsAction(fd);
+      setSnapMsg(`Saved ${points.length} snap point${points.length === 1 ? "" : "s"} for this vehicle.`);
+    } catch {
+      setSnapMsg("Couldn't save snap points. Check your connection and try again.");
+    }
+  };
+
+  const onCanvasClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!editingSnap || !bodyStyle) {
+      setActivePinId(null);
+      return;
+    }
+    const f = toFractional(e.clientX, e.clientY);
+    if (!f) return;
+    setSnapMap((m) => ({ ...m, [bodyStyle]: [...(m[bodyStyle] ?? []), { x: f.x, y: f.y }] }));
+  };
+
+  const removeSnap = (idx: number) => {
+    if (!bodyStyle) return;
+    setSnapMap((m) => ({ ...m, [bodyStyle]: (m[bodyStyle] ?? []).filter((_, i) => i !== idx) }));
+  };
+
+  const finishEditingSnaps = async () => {
+    setEditingSnap(false);
+    await saveSnaps(currentSnaps);
+  };
+
+  // --- Starter layouts ----------------------------------------------------
+  const vehicleStarters = starterList.filter((s) => s.bodyStyle === bodyStyle);
+
+  const applyStarter = (st: Starter) => {
+    if (st.pins.length === 0) return;
+    if (
+      pins.length > 0 &&
+      !window.confirm(`Add the ${st.pins.length} lights from "${st.name}" to the ${pins.length} already on the diagram?`)
+    ) {
+      return;
+    }
+    const added = st.pins.map((p) => ({ ...p, id: randomId(), view: undefined }));
+    setPins((cur) => renumber([...cur, ...added]));
+    setActivePinId(null);
+    setStarterMsg(`Applied "${st.name}" — ${added.length} light${added.length === 1 ? "" : "s"} added.`);
+  };
+
+  const saveAsStarter = async () => {
+    const name = starterName.trim();
+    if (!bodyStyle || !name || pins.length === 0 || !saveStarterAction) return;
+    setStarterBusy(true);
+    setStarterMsg(null);
+    const fd = new FormData();
+    fd.set("bodyStyle", bodyStyle);
+    fd.set("name", name);
+    fd.set("pins", JSON.stringify(pins));
+    try {
+      const row = await saveStarterAction(fd);
+      if (!row) throw new Error();
+      setStarterList((l) => [...l, { id: row.id, bodyStyle, name, pins }].sort((a, b) => a.name.localeCompare(b.name)));
+      setStarterName("");
+      setStarterMsg(`Saved "${name}" as a starter layout for this vehicle.`);
+    } catch {
+      setStarterMsg("Couldn't save the starter layout. Try again.");
+    } finally {
+      setStarterBusy(false);
+    }
+  };
+
+  const removeStarter = async (st: Starter) => {
+    if (!deleteStarterAction || !window.confirm(`Delete the starter layout "${st.name}"? This can't be undone.`)) return;
+    const fd = new FormData();
+    fd.set("id", st.id);
+    try {
+      await deleteStarterAction(fd);
+      setStarterList((l) => l.filter((x) => x.id !== st.id));
+    } catch {
+      setStarterMsg("Couldn't delete it. Try again.");
+    }
+  };
+
   const onPinPointerDown = (e: React.PointerEvent<HTMLDivElement>, pin: UpfitPin) => {
     e.stopPropagation();
     const f = toFractional(e.clientX, e.clientY);
@@ -335,7 +483,7 @@ export function UpfitBuilder({
       if (Math.hypot(f.x - drag.startX, f.y - drag.startY) < DRAG_THRESHOLD) return;
       drag.moved = true;
     }
-    updatePin(drag.pinId, { x: f.x, y: f.y });
+    updatePin(drag.pinId, snapFrac(f));
   };
   const onPinPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
@@ -487,9 +635,29 @@ export function UpfitBuilder({
               )}
             </div>
             {template ? (
-              <button type="button" onClick={clearAll} disabled={pins.length === 0} className="btn-outline btn-sm">
-                Clear all
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 label-caps cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={snapOn}
+                    onChange={(e) => toggleSnap(e.target.checked)}
+                    className="w-4 h-4 accent-[var(--color-cta)]"
+                  />
+                  Snap points
+                </label>
+                <button
+                  type="button"
+                  onClick={() => (editingSnap ? void finishEditingSnaps() : (setEditingSnap(true), setSnapMsg(null)))}
+                  disabled={!extrasReady}
+                  title={extrasReady ? undefined : "Needs the one-time database update (docs/sql/upfit_snap_starters.sql)"}
+                  className={editingSnap ? "btn-cta btn-sm" : "btn-outline btn-sm"}
+                >
+                  {editingSnap ? "Done editing" : "Edit snap points"}
+                </button>
+                <button type="button" onClick={clearAll} disabled={pins.length === 0} className="btn-outline btn-sm">
+                  Clear all
+                </button>
+              </div>
             ) : null}
           </div>
 
@@ -517,8 +685,10 @@ export function UpfitBuilder({
 
               <div
                 ref={boxRef}
-                onClick={() => setActivePinId(null)}
-                className="upfit-canvas relative w-full rounded-xl border border-white/10 overflow-hidden select-none bg-white"
+                onClick={onCanvasClick}
+                className={`upfit-canvas relative w-full rounded-xl border overflow-hidden select-none bg-white ${
+                  editingSnap ? "border-[var(--color-cta)] cursor-crosshair" : "border-white/10"
+                }`}
                 style={{ touchAction: "none" }}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -529,6 +699,29 @@ export function UpfitBuilder({
                   className="w-full h-auto block pointer-events-none"
                   draggable={false}
                 />
+                {/* Snap points: shown while snapping or editing; click one to
+                    remove it while editing. */}
+                {snapOn || editingSnap
+                  ? currentSnaps.map((p, i) => (
+                      <button
+                        key={`snap-${i}`}
+                        type="button"
+                        tabIndex={editingSnap ? 0 : -1}
+                        aria-label={editingSnap ? `Remove snap point ${i + 1}` : undefined}
+                        title={editingSnap ? "Click to remove this snap point" : undefined}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (editingSnap) removeSnap(i);
+                        }}
+                        className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full border-2 ${
+                          editingSnap
+                            ? "w-4 h-4 bg-[var(--color-cta)] border-black cursor-pointer z-10"
+                            : "w-3 h-3 bg-[var(--color-cta)] border-white shadow-[0_0_0_1px_rgba(0,0,0,0.6)] pointer-events-none"
+                        }`}
+                        style={{ left: `${p.x * 100}%`, top: `${p.y * 100}%` }}
+                      />
+                    ))
+                  : null}
                 {visiblePins.map((pin) => (
                   <PinOnDiagram
                     key={pin.id}
@@ -581,10 +774,22 @@ export function UpfitBuilder({
                   </PinOnDiagram>
                 ))}
               </div>
-              <p className="text-xs text-zinc-500">
-                Drag a light to move it. Click a light to select it, then drag the orange corner to resize.
-                Press Delete to remove the selected light.
-              </p>
+              {editingSnap ? (
+                <p className="text-xs text-[var(--color-cta)]">
+                  Editing snap points for this vehicle: click the picture to add a point, click an orange point to
+                  remove it, then press Done editing to save. Points are shared by every estimate for this vehicle.
+                </p>
+              ) : (
+                <p className="text-xs text-zinc-500">
+                  Drag a light to move it{snapOn && currentSnaps.length ? " (it jumps onto the nearest snap point)" : ""}.
+                  Click a light to select it, then drag the orange corner to resize. Press Delete to remove the selected
+                  light.
+                </p>
+              )}
+              {snapMsg ? <p className="text-xs text-zinc-300">{snapMsg}</p> : null}
+              {snapOn && !editingSnap && currentSnaps.length === 0 ? (
+                <p className="text-xs text-zinc-400">No snap points for this vehicle yet — press Edit snap points to add some.</p>
+              ) : null}
             </div>
           ) : (
             <div className="bg-white/[0.03] min-h-[360px] flex flex-col items-center justify-center text-center px-6">
@@ -709,9 +914,67 @@ export function UpfitBuilder({
                 ) : null}
               </div>
 
+              {/* Starter layouts for this vehicle */}
+              <div className="rounded-xl border border-white/10 p-4 space-y-3">
+                <div className="label-caps">Starter layouts</div>
+                {!extrasReady ? (
+                  <p className="text-xs text-zinc-400">
+                    Needs a one-time database update (docs/sql/upfit_snap_starters.sql) before layouts can be saved.
+                  </p>
+                ) : (
+                  <>
+                    {vehicleStarters.length === 0 ? (
+                      <p className="text-xs text-zinc-400">None saved for this vehicle yet.</p>
+                    ) : (
+                      <ul className="space-y-1.5">
+                        {vehicleStarters.map((st) => (
+                          <li key={st.id} className="flex items-center gap-2">
+                            <span className="flex-1 min-w-0 text-sm text-white truncate">
+                              {st.name}
+                              <span className="text-xs text-zinc-500"> · {st.pins.length} lights</span>
+                            </span>
+                            <button type="button" onClick={() => applyStarter(st)} className="btn-outline btn-sm !py-1">
+                              Apply
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void removeStarter(st)}
+                              className="text-zinc-500 hover:text-red-400 text-lg leading-none px-1"
+                              aria-label={`Delete starter ${st.name}`}
+                              title="Delete"
+                            >
+                              ×
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    <div className="flex gap-2">
+                      <input
+                        value={starterName}
+                        onChange={(e) => setStarterName(e.target.value)}
+                        placeholder="Name, e.g. Standard patrol"
+                        aria-label="Starter layout name"
+                        className="flex-1 min-w-0 bg-black/40 border border-white/10 rounded-lg px-3 py-1.5 text-sm text-white placeholder:text-zinc-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void saveAsStarter()}
+                        disabled={starterBusy || !starterName.trim() || pins.length === 0}
+                        title={pins.length === 0 ? "Add some lights first" : "Save the lights on the diagram as a starter"}
+                        className="btn-outline btn-sm"
+                      >
+                        {starterBusy ? "Saving…" : "Save current"}
+                      </button>
+                    </div>
+                  </>
+                )}
+                {starterMsg ? <p className="text-xs text-zinc-300">{starterMsg}</p> : null}
+              </div>
+
               {/* Placed lights */}
               {pins.length === 0 ? (
-                <p className="text-sm text-zinc-400">No lights yet. Use the picker above to add one.</p>
+                <p className="text-sm text-zinc-400">No lights yet. Use the picker above to add one, or apply a starter layout.</p>
               ) : (
                 <ul className="space-y-2">
                   {pins.map((pin) => {
@@ -847,7 +1110,7 @@ function LensPicker({
       <div className="divide-y divide-white/10">
         {lenses.map((lens, i) => (
           <div key={i} className="flex items-center gap-2 py-2">
-            <span className="label-caps w-14 shrink-0 whitespace-nowrap">Lens {i + 1}</span>
+            <span className="label-caps w-16 shrink-0 whitespace-nowrap">Lens {i + 1}</span>
             <div className="flex gap-1.5">
               {LENS_COLORS.map((c) => (
                 // Named on hover / keyboard focus, for color-blind reps.

@@ -1741,8 +1741,35 @@ user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
       (`normalizePins()` in `src/lib/upfit/composites.ts`, keeping their
       size relative to the vehicle) in the configurator, the estimate
       preview and the spec-sheet PDF — no SQL.
-- [ ] Snap points (preset positions markers snap to) + "Edit snap points".
-- [ ] Starter packages for the diagram (apply a common layout in one click).
+- [x] **Snap points** (2026-09-30) — "Snap points" checkbox (remembered per
+      browser) + **Edit snap points** on the diagram header. Edit mode: click
+      the picture to add a point, click an orange point to remove it, **Done
+      editing** saves. Points are stored per vehicle template
+      (`upfit_snap_points`), shared by every estimate for that vehicle. With
+      Snap on, a dragged light jumps onto the nearest point within ~18px.
+- [x] **Starter layouts** (2026-09-30) — "Starter layouts" card in the lights
+      panel: **Save current** stores the diagram's lights under a name for this
+      vehicle template (`upfit_starters`); **Apply** adds a layout's lights to
+      the diagram (asks first if lights are already there); × deletes one.
+      Both features are best-effort reads: before the SQL below is run the
+      configurator still works and the card explains what's missing.
+
+  Schema (run `docs/sql/upfit_snap_starters.sql` in Neon):
+  ```sql
+  CREATE TABLE IF NOT EXISTS upfit_snap_points (
+    body_style text PRIMARY KEY,
+    points jsonb NOT NULL DEFAULT '[]'::jsonb,
+    updated_at timestamp NOT NULL DEFAULT now()
+  );
+  CREATE TABLE IF NOT EXISTS upfit_starters (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    body_style text NOT NULL,
+    name text NOT NULL,
+    pins jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_at timestamp NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS upfit_starters_body_style_idx ON upfit_starters (body_style);
+  ```
 - [ ] Editable light-type list in Settings (today it's the code list above).
 
 ### Auto-save everywhere on the estimate (2026-09-30)
