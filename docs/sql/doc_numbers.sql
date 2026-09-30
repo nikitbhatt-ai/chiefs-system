@@ -4,8 +4,8 @@
 -- Run this in Neon's SQL Editor. Safe to run more than once.
 --
 -- WHAT CHANGES
---   Quotes & invoices   Q-6639059  ->  Q-02042     (5 digits)
---   Work orders         WO-1234567 ->  WO-02042    (5 digits, SAME as its quote)
+--   Quotes & invoices   Q-6639059  ->  Q-0204      (4 digits)
+--   Work orders         WO-1234567 ->  WO-0204     (4 digits, SAME as its quote)
 --   Purchase orders     PO-1234567 ->  PO-000001   (6 digits, own series)
 --
 -- A quote, the invoice it becomes and the work order that builds it are one
@@ -85,7 +85,7 @@ BEGIN
     n := nextval('job_number_seq');
     UPDATE quotes
        SET legacy_number = COALESCE(quote_number, '(none)'),
-           quote_number  = 'Q-' || lpad(n::text, 5, '0')
+           quote_number  = 'Q-' || lpad(n::text, 4, '0')
      WHERE id = r.id;
   END LOOP;
 END $$;
@@ -114,7 +114,7 @@ BEGIN
     n := nextval('job_number_seq');
     UPDATE work_orders
        SET legacy_number = COALESCE(wo_number, '(none)'),
-           wo_number     = 'WO-' || lpad(n::text, 5, '0')
+           wo_number     = 'WO-' || lpad(n::text, 4, '0')
      WHERE id = r.id;
   END LOOP;
 END $$;
@@ -168,7 +168,7 @@ SELECT setval('po_number_seq', GREATEST(m, 1), m > 0) FROM (
 --   a) RECOMMENDED. Pad into this system's format: 1938 -> 'Q-01938'. The
 --      digits still match the customer's paperwork, and the series simply
 --      continues: if 2041 is the highest imported number, the next new job here
---      is Q-02042.
+--      is Q-0204.
 --
 --   b) Keep the original string verbatim ('1938', 'INV-1938'). Not renumbered
 --      either, but your lists then show two formats side by side.

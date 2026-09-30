@@ -35,9 +35,9 @@ import { db } from "@/db";
 type Db = Pick<typeof db, "execute">;
 
 export const DOC_NUMBER_WIDTH = {
-  quote: 5,
+  quote: 4,
   /** Matches `quote` so a job's documents read as the same number. */
-  workOrder: 5,
+  workOrder: 4,
   purchaseOrder: 6,
 } as const;
 
