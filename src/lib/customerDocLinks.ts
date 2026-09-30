@@ -196,3 +196,10 @@ export async function unlinkWorkOrder(workOrderId: string) {
     .delete(customerDocuments)
     .where(eq(customerDocuments.kind, workOrderKind(workOrderId)));
 }
+
+// Drop the upfit spec link from the customer folder — used when the
+// vehicle configuration is reset, so the folder doesn't link to an empty
+// spec sheet.
+export async function removeUpfitLink(quoteId: string) {
+  await db.delete(customerDocuments).where(eq(customerDocuments.kind, upfitKind(quoteId)));
+}

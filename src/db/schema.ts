@@ -1088,6 +1088,14 @@ export type UpfitPin = {
   // Color scheme slug — solid color, 50/50 split, or multi-segment.
   // See COLOR_SCHEMES in src/lib/upfit/templates.ts.
   colorScheme?: string;
+  // Configurator lens colors (Solo = 1, Duo = 2, Trio = 3), repeated
+  // `lensRepeat` times across the light. When set, these win over
+  // `colorScheme`. See pinSegments() in src/lib/upfit/templates.ts.
+  lenses?: string[];
+  lensRepeat?: number;
+  // Light type key from LIGHT_TYPES (e.g. "tion", "lightbar"). The pin's
+  // `label` carries the display name so old readers still show it.
+  lightType?: string;
   orientation?: "horizontal" | "vertical";
   // Free rotation in degrees (clockwise), applied on top of orientation
   // for placements that aren't strictly vertical/horizontal.

@@ -21,6 +21,10 @@ export type TemplateView = {
 export type VehicleTemplate = {
   slug: string;
   label: string;
+  // Short card text for the configurator's vehicle picker, e.g.
+  // model "Tahoe" over "Chevrolet 2021–2025".
+  model: string;
+  make: string;
   // Primary image — the first view's URL. Kept for any single-image
   // consumer and as the fallback when `views` is absent.
   imageUrl: string;
@@ -62,6 +66,8 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   tahoe: {
     slug: "tahoe",
     label: "Chevrolet Tahoe (2021–25)",
+    model: "Tahoe",
+    make: "Chevrolet 2021–2025",
     imageUrl: "/upfit-templates/tahoe/driver.jpg",
     // Passenger-side and rear source photos were saved under swapped
     // filenames; map each view to the file that actually shows that side.
@@ -70,6 +76,8 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   tahoe_2026: {
     slug: "tahoe_2026",
     label: "Chevrolet Tahoe (2026+)",
+    model: "Tahoe",
+    make: "Chevrolet 2026+",
     imageUrl: "/upfit-templates/tahoe_2026/driver.jpg",
     // Passenger-side and rear source photos were saved under swapped
     // filenames; map each view to the file that actually shows that side.
@@ -78,6 +86,8 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   tahoe_1520: {
     slug: "tahoe_1520",
     label: "Chevrolet Tahoe (2015–20)",
+    model: "Tahoe",
+    make: "Chevrolet 2015–2020",
     imageUrl: "/upfit-templates/tahoe_1520/driver.jpg",
     // Passenger-side and rear source photos were saved under swapped
     // filenames; map each view to the file that actually shows that side.
@@ -86,16 +96,22 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   suburban: {
     slug: "suburban",
     label: "Chevrolet Suburban",
+    model: "Suburban",
+    make: "Chevrolet",
     imageUrl: "/upfit-templates/suburban.jpg",
   },
   blazer: {
     slug: "blazer",
     label: "Chevrolet Blazer",
+    model: "Blazer",
+    make: "Chevrolet",
     imageUrl: "/upfit-templates/blazer.jpg",
   },
   silverado: {
     slug: "silverado",
     label: "Chevrolet Silverado (2020–26)",
+    model: "Silverado",
+    make: "Chevrolet 2020–2026",
     imageUrl: "/upfit-templates/silverado/driver.jpg",
     // The Silverado's passenger-side and rear source photos were saved under
     // swapped filenames (passenger.jpg holds the rear shot and vice versa), so
@@ -105,31 +121,43 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
   durango: {
     slug: "durango",
     label: "Dodge Durango",
+    model: "Durango",
+    make: "Dodge",
     imageUrl: "/upfit-templates/durango.jpg",
   },
   piu: {
     slug: "piu",
     label: "Ford Police Interceptor Utility (Explorer)",
+    model: "Police Interceptor Utility",
+    make: "Ford (Explorer)",
     imageUrl: "/upfit-templates/piu.jpg",
   },
   f150: {
     slug: "f150",
     label: "Ford F-150",
+    model: "F-150",
+    make: "Ford",
     imageUrl: "/upfit-templates/f150.jpg",
   },
   f350: {
     slug: "f350",
     label: "Ford F-350",
+    model: "F-350",
+    make: "Ford",
     imageUrl: "/upfit-templates/f350.jpg",
   },
   transit_custom: {
     slug: "transit_custom",
     label: "Ford Transit Custom L2H1",
+    model: "Transit Custom L2H1",
+    make: "Ford",
     imageUrl: "/upfit-templates/transit_custom.jpg",
   },
   explorer: {
     slug: "explorer",
     label: "Ford Explorer (2025+)",
+    model: "Explorer",
+    make: "Ford 2025+",
     imageUrl: "/upfit-templates/explorer/driver.jpg",
     views: sideViews("explorer"),
   },
@@ -138,6 +166,8 @@ export const VEHICLE_TEMPLATES: Record<string, VehicleTemplate> = {
 export const BODY_STYLES = Object.values(VEHICLE_TEMPLATES).map((t) => ({
   slug: t.slug,
   label: t.label,
+  model: t.model,
+  make: t.make,
 }));
 
 export function getTemplate(bodyStyle: string): VehicleTemplate {
@@ -422,4 +452,115 @@ export function getColorScheme(key: string | undefined | null): ColorScheme {
 export function getPinSize(key: string | undefined | null): PinSize {
   if (key && (key in PIN_SIZES)) return PIN_SIZES[key as PinSizeKey];
   return PIN_SIZES.medium;
+}
+
+// --- Light types (configurator picker) -----------------------------------
+//
+// The configurator's "Choose a light type" list. Each entry is a product
+// family name (no part numbers — the diagram is visual only) with its
+// real-world size for the label, plus the shape and preset size the pin
+// starts with. Sales can still change the shape and drag-resize any pin
+// after it's placed.
+
+export type LightTypeGroup = "lights" | "accessories";
+
+export type LightType = {
+  key: string;
+  label: string;
+  // Real-world face size, shown in the picker ("54 × 3.5 in").
+  dims?: string;
+  group: LightTypeGroup;
+  shape: NonNullable<UpfitPinShape>;
+  size: PinSizeKey;
+};
+
+type UpfitPinShape = "rect" | "circle" | "pushbar" | "pushbar_wrap";
+
+export const LIGHT_TYPES: LightType[] = [
+  { key: "lightbar", label: "Lightbar", dims: "54 × 3.5 in", group: "lights", shape: "rect", size: "strip_large" },
+  { key: "interior_lightbar", label: "Interior Lightbar", dims: "44 × 2 in", group: "lights", shape: "rect", size: "strip_medium" },
+  { key: "mega_tion", label: "Mega T-Ion", dims: "11 × 1.4 in", group: "lights", shape: "rect", size: "large" },
+  { key: "tion", label: "T-Ion", dims: "5.14 × 1.49 in", group: "lights", shape: "rect", size: "medium" },
+  { key: "mini_tion", label: "Mini T-Ion", dims: "4.16 × 0.91 in", group: "lights", shape: "rect", size: "small" },
+  { key: "ion", label: "Ion", dims: "4 × 1 in", group: "lights", shape: "rect", size: "small" },
+  { key: "hideaway", label: "Hideaway", dims: "1.3 × 1.3 in", group: "lights", shape: "circle", size: "small" },
+  { key: "grille", label: "Grille Light", dims: "4 × 1.5 in", group: "lights", shape: "rect", size: "medium" },
+  { key: "dash", label: "Dash Light", dims: "6 × 1.5 in", group: "lights", shape: "rect", size: "medium" },
+  { key: "other", label: "Other", dims: "3 × 3 in", group: "lights", shape: "rect", size: "medium" },
+  { key: "fst", label: "FST", group: "lights", shape: "rect", size: "strip_small" },
+  { key: "push_bumper", label: "Push Bumper", dims: "46 × 26 in", group: "accessories", shape: "pushbar", size: "large" },
+  { key: "push_bumper_wrap", label: "Push Bumper (full wrap)", dims: "46 × 26 in", group: "accessories", shape: "pushbar_wrap", size: "large" },
+];
+
+export const LIGHT_TYPE_GROUP_LABELS: Record<LightTypeGroup, string> = {
+  lights: "Lights",
+  accessories: "Vehicle accessories",
+};
+
+export function getLightType(key: string | undefined | null): LightType | null {
+  return LIGHT_TYPES.find((t) => t.key === key) ?? null;
+}
+
+// Default diagram size of a push-bumper pin, as fractions of the diagram.
+// The preset rectangle sizes are far too small for a bumper.
+export const PUSHBAR_DEFAULT_FRAC = { width: 0.1, height: 0.07 };
+
+// --- Lens colors (Solo / Duo / Trio) --------------------------------------
+//
+// A light's color is its lens list: 1 (solo), 2 (duo) or 3 (trio) lens
+// colors, optionally repeated N times across the light (a lightbar that
+// alternates blue / red six times). This replaces picking one of the
+// fixed COLOR_SCHEMES; older pins that only carry `colorScheme` still
+// render through pinSegments().
+
+export type LensColorKey = "red" | "blue" | "amber" | "white" | "green";
+
+export const LENS_COLORS: { key: LensColorKey; label: string; hex: string }[] = [
+  { key: "red", label: "Red", hex: RED },
+  { key: "blue", label: "Blue", hex: BLUE },
+  { key: "amber", label: "Amber", hex: AMBER },
+  { key: "white", label: "White", hex: WHITE },
+  { key: "green", label: "Green", hex: GREEN },
+];
+
+export function lensHex(key: string): string {
+  return LENS_COLORS.find((c) => c.key === key)?.hex ?? key;
+}
+
+// Segment colors (hex) a pin renders with, left → right. Lens-based pins
+// expand their pattern by `lensRepeat`; legacy pins fall back to their
+// color scheme.
+export function pinSegments(pin: {
+  lenses?: string[];
+  lensRepeat?: number;
+  colorScheme?: string;
+}): string[] {
+  if (pin.lenses && pin.lenses.length > 0) {
+    const repeat = Math.max(1, Math.min(12, Math.round(pin.lensRepeat ?? 1)));
+    return cycle(pin.lenses.map(lensHex), pin.lenses.length * repeat);
+  }
+  return getColorScheme(pin.colorScheme).segments;
+}
+
+// Best-effort lens view of any pin, for the editor's Solo/Duo/Trio
+// controls. Lens pins pass through; a legacy scheme is reduced to its
+// repeating 1-, 2- or 3-color pattern (R/W × 6 → [red, white] × 3).
+export function pinLensState(pin: {
+  lenses?: string[];
+  lensRepeat?: number;
+  colorScheme?: string;
+}): { lenses: LensColorKey[]; repeat: number } {
+  if (pin.lenses && pin.lenses.length > 0) {
+    return { lenses: pin.lenses as LensColorKey[], repeat: Math.max(1, pin.lensRepeat ?? 1) };
+  }
+  const segs = getColorScheme(pin.colorScheme).segments;
+  const keyOf = (hex: string): LensColorKey =>
+    LENS_COLORS.find((c) => c.hex === hex)?.key ?? "white";
+  for (const period of [1, 2, 3]) {
+    if (segs.length % period !== 0) continue;
+    if (segs.every((c, i) => c === segs[i % period])) {
+      return { lenses: segs.slice(0, period).map(keyOf), repeat: segs.length / period };
+    }
+  }
+  return { lenses: segs.slice(0, 3).map(keyOf), repeat: 1 };
 }

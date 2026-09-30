@@ -6,7 +6,7 @@ import path from "path";
 import { sharedStyles } from "../styles";
 import { BRANDING } from "../branding";
 import {
-  getColorScheme,
+  pinSegments,
   getPinSize,
   getTemplate,
   getViews,
@@ -142,7 +142,7 @@ function CaptionPill({ caption, height }: { caption: string; height: number }) {
 }
 
 function PinShape({ pin }: { pin: UpfitPin }) {
-  const scheme = getColorScheme(pin.colorScheme);
+  const segments = pinSegments(pin);
   const { width, height, horizontal, isCircle } = pinDims(pin);
 
   // Outer positioning box (never rotated — keeps the caption upright).
@@ -215,7 +215,7 @@ function PinShape({ pin }: { pin: UpfitPin }) {
           ...rot,
         }}
       >
-        {scheme.segments.map((c, i) => (
+        {segments.map((c, i) => (
           <View key={i} style={{ flex: 1, backgroundColor: c }} />
         ))}
       </View>

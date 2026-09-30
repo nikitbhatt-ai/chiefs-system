@@ -87,3 +87,23 @@ export function quoteTotals(lines: TotalsLine[], taxRatePct: number): QuoteTotal
   const grand = round2(taxBase + tax);
   return { subtotal, discountTotal, feeTotal, laborTotal, tax, grand };
 }
+
+/**
+ * The tax rate (percent) a saved quote was priced at. Quotes store the tax
+ * amount, not the rate, so the editor recovers the rate from the stored tax
+ * and the lines — choosing the shortest rate that reproduces the stored tax
+ * to the cent. Without this the editor opened every quote at 0% and the next
+ * save wiped the tax.
+ */
+export function impliedTaxRatePct(lines: TotalsLine[], storedTax: number): number {
+  const tax = round2(storedTax || 0);
+  if (tax <= 0) return 0;
+  const base = quoteTotals(lines, 0).grand;
+  if (base <= 0) return 0;
+  const raw = (tax / base) * 100;
+  for (const dp of [2, 3, 4]) {
+    const r = Number(raw.toFixed(dp));
+    if (quoteTotals(lines, r).tax === tax) return r;
+  }
+  return Number(raw.toFixed(4));
+}

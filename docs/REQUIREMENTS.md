@@ -1659,6 +1659,115 @@ customer sees and the techs build to. One upfit per quote.
 - [ ] **Per-vehicle photos** as an alternative to the templates
       (deferred — pin coords are template-relative today).
 
+### Vehicle Configurator overhaul (2026-09-30, modeled on upfithq.app)
+
+The upfit builder was simplified into a **Vehicle Configurator** after the
+user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
+
+- [x] **Visual only.** The diagram never prices, orders or reserves stock.
+      The "Generate quote from equipment" action and the inventory part
+      picker were removed; sales quotes parts as line items on the
+      estimate. (Older pins that carry `partId`/`partSku` still render and
+      still print their SKU in the spec-sheet table.)
+- [x] **Three-column screen** at `/quotes/[id]/upfit`: vehicle cards on the
+      left (model over make + years, from `model`/`make` on
+      `VEHICLE_TEMPLATES`), diagram in the middle (per-side view tabs kept),
+      lights panel on the right, **Done →** and **← Back to estimate** return
+      to the estimate. With no saved config it opens on "Pick a vehicle to
+      begin".
+- [x] **Light type list** (`LIGHT_TYPES` in `src/lib/upfit/templates.ts`):
+      Lightbar 54×3.5, Interior Lightbar 44×2, Mega T-Ion, T-Ion, Mini T-Ion,
+      Ion, Hideaway, Grille Light, Dash Light, Other, FST, plus accessories
+      Push Bumper / Push Bumper (full wrap). Product names, no part numbers.
+      Each type sets the starting shape + preset size.
+- [x] **Existing shapes and custom sizing kept** — bar / round / push bumper /
+      full wrap, the six preset sizes, horizontal/vertical, free rotation,
+      and drag-the-corner resize, under a "Shape & size" section and in the
+      selected light's editor.
+- [x] **Solo / Duo / Trio lens layout** replaces the long color-scheme
+      dropdown: 1–3 lenses, each picked from red / blue / amber / white /
+      green dots, plus an optional **Repeat** count (a lightbar alternating
+      blue/red × 6). Stored on the pin as `lenses` + `lensRepeat` (inside
+      the existing `pins` jsonb — no SQL). `pinSegments()` renders both new
+      and legacy `colorScheme` pins; the PDF uses it too.
+- [x] **How many** — "Add to Diagram" drops N lights in a row mid-diagram,
+      ready to drag. Optional on-diagram label per add.
+- [x] **Auto-save** ~1s after each change (status: Saving… / All changes
+      saved / Couldn't save — retrying). Done and Back flush the save first;
+      closing the tab with an unsaved change warns.
+- [x] **Estimate page "Vehicle & Lights" card** — read-only diagram preview
+      (every side that has lights) with **Edit Configuration** and **Spec
+      sheet PDF**; when empty, "No vehicle configured" + **+ Configure
+      Vehicle**. Replaces the old Quote / Upfit builder tabs.
+- [x] **Email to Customer** button at the top of the estimate
+      (`EmailCustomerButton` → `POST /api/quotes/[id]/email`). Pre-fills the
+      customer's email, subject and message; attaches the estimate PDF
+      (invoice PDF once converted) plus the vehicle-configuration spec sheet
+      when one exists. Uses the existing SMTP env vars
+      (`EMAIL_SERVER_*`, `EMAIL_FROM`); if they're missing it says so
+      instead of failing silently. Logged in `pdf_audit_log` with
+      `purpose = email` + recipient. Sending a **draft** moves it to **sent**.
+- [x] **Look & feel** — Rajdhani (squared-off) for headings, labels and
+      buttons, DM Sans for text; tall orange call-to-action buttons
+      (`.btn-cta`) and outlined secondary buttons (`.btn-outline`),
+      segmented choices (`.seg-btn`), lens dots — all in `globals.css`.
+      Applied to the configurator and new estimate pieces first; roll out
+      app-wide once approved.
+- [x] **Reset builder** (2026-09-30) — button in the configurator header.
+      Confirms, then deletes ONLY this estimate's `upfit_configs` row
+      (vehicle, lights, build notes) and its customer-folder spec link, and
+      returns to "Pick a vehicle to begin". The estimate's line items,
+      prices and status are never touched. "Clear all" still removes just
+      the lights.
+- [ ] Snap points (preset positions markers snap to) + "Edit snap points".
+- [ ] Starter packages for the diagram (apply a common layout in one click).
+- [ ] Editable light-type list in Settings (today it's the code list above).
+
+### Auto-save everywhere on the estimate (2026-09-30)
+
+User requirement: working in the estimate and the builder side by side must
+never lose work — everything auto-saves.
+
+- [x] **Estimate editor auto-saves** ~1s after any change (lines, customer,
+      status, tax rate, vehicle/VIN, notes) via the shared
+      `src/lib/useAutosave.ts` hook the configurator also uses. Status reads
+      Saving… / All changes saved / Couldn't save — retrying. "Save quote"
+      became **Save now** (saves immediately). Closing the tab with an
+      unsaved change warns.
+- [x] **Save before acting** — Email to Customer, Download PDF, invoice PDF,
+      print view, internal copy, Spec sheet PDF, Configure Vehicle / Edit
+      Configuration, Back, and workflow-stage moves all flush the editor's
+      pending save first (`src/lib/quoteFlush.ts`, `FlushLink`), so what
+      they read or send matches the screen.
+- [x] **Stale-tab protection** — the editor only sends `customerId` and
+      `status` when the rep changed them in that editor; `saveQuote` keeps the
+      stored value otherwise. So an old tab can't undo "sent" (from Email to
+      Customer) or "converted".
+- [x] **Tax rate fix** — the editor used to open every quote at 0% and the
+      next save wiped the tax. It now opens at the rate the quote was saved
+      at (`impliedTaxRatePct` recovers it from the stored tax; no schema
+      change).
+- The estimate (quote row) and the configuration (`upfit_configs` row) are
+  separate records, so the editor and the configurator open at the same
+  time never overwrite each other. The same estimate open in two tabs is
+  still last-save-wins.
+
+### Estimate page redesign (next, from the same upfithq screenshots)
+
+- [ ] "New Estimate" pop-up: customer search (name / town / email),
+      customer PO # (optional), which shop is doing the work, title
+      (optional) → Create Estimate.
+- [ ] Header: title + DRAFT / TAX EXEMPT badges, View PDF, Packing slip.
+- [ ] 4-step strip: Estimate → Sales Order → Work Order → Invoice, plus a
+      "what's next" banner (Email to Customer / Mark Accepted).
+- [ ] Bill-to block with estimate #, date, PO #, valid-until date.
+- [ ] "Hide individual prices from the customer" toggle (one total on PDF).
+- [ ] Line items grouped by manufacturer (Whelen, Havis, Setina, SoundOff,
+      Troy, Pro-Gard…) each with its own + Add.
+- [ ] Right sidebar: Customer card (View Full Profile) + Tax-exempt toggle.
+- ~~"Today" home dashboard~~ — **skipped** (2026-09-30): the Sales and Ops
+  home pages already cover it; the user doesn't want a second home page.
+
 ### Schema additions (Upfit Builder)
 
 Run in Neon's SQL Editor before deploying:
