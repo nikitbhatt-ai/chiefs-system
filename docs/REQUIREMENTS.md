@@ -1719,6 +1719,28 @@ user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
       returns to "Pick a vehicle to begin". The estimate's line items,
       prices and status are never touched. "Clear all" still removes just
       the lights.
+- [x] **Label follows the light type** (2026-09-30) — picking a light type
+      fills "Label" with its name ("Lightbar"), still editable. After
+      **Add to Diagram** the label, light type and How-many reset, so the
+      next light never inherits the previous label.
+- [x] **Color names for color-blind reps** (2026-09-30) — every lens dot
+      shows its name (Red / Blue / Amber / White / Green) on hover and
+      keyboard focus; each lens row shows the chosen color in words; the
+      lights list and the diagram hover text spell out a light's colors
+      ("Blue / Red × 3").
+- [x] **One combined diagram per vehicle** (2026-09-30) — the five
+      one-photo-per-side templates (Tahoe 2021–25, Tahoe 2026+, Tahoe
+      2015–20, Silverado, Explorer) are now ONE picture like the other
+      vehicles: roof view down the left (nose down), driver and passenger
+      sides in the middle, front and rear on the right, with the Chiefs
+      title strip across the top. Built by
+      `scripts/build-upfit-composites.py` into
+      `public/upfit-templates/<slug>.jpg` (the per-side photos stay as the
+      source). The side tabs are gone. Lights saved on the old per-side
+      photos are moved onto the combined picture automatically
+      (`normalizePins()` in `src/lib/upfit/composites.ts`, keeping their
+      size relative to the vehicle) in the configurator, the estimate
+      preview and the spec-sheet PDF — no SQL.
 - [ ] Snap points (preset positions markers snap to) + "Edit snap points".
 - [ ] Starter packages for the diagram (apply a common layout in one click).
 - [ ] Editable light-type list in Settings (today it's the code list above).

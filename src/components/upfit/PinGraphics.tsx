@@ -9,6 +9,7 @@ import {
   getPinSize,
   getPushbarStyle,
   isPushbarShape,
+  pinColorWords,
   pinSegments,
 } from "@/lib/upfit/templates";
 
@@ -69,7 +70,8 @@ export function PinOnDiagram({
         width: `${widthPct}%`,
         height: `${heightPct}%`,
       }}
-      title={pin.caption || pin.label}
+      // Name + colors in words on hover (color-blind friendly).
+      title={isPushbar ? pin.caption || pin.label : `${pin.caption || pin.label} — ${pinColorWords(pin)}`}
     >
       <div
         {...handlers}

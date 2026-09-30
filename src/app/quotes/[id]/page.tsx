@@ -9,6 +9,7 @@ import { EstimateSteps, type EstimateStep } from "@/components/EstimateSteps";
 import { FlushLink } from "@/components/FlushLink";
 import { UpfitDiagramPreview } from "@/components/upfit/UpfitDiagramPreview";
 import { getTemplate } from "@/lib/upfit/templates";
+import { normalizePins } from "@/lib/upfit/composites";
 import { BRANDING } from "@/lib/pdf/branding";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
@@ -239,7 +240,7 @@ export default async function QuotePage({
               · {lightCount} {lightCount === 1 ? "light" : "lights"}
             </span>
           </div>
-          <UpfitDiagramPreview bodyStyle={config.bodyStyle} pins={config.pins ?? []} />
+          <UpfitDiagramPreview bodyStyle={config.bodyStyle} pins={normalizePins(config.bodyStyle, config.pins ?? [])} />
         </div>
       ) : (
         <div className="text-center py-8">
