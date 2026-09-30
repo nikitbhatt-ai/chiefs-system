@@ -23,6 +23,7 @@ export async function POST(req: Request) {
       vendorId: body.vendorId ?? null,
       status: body.status ?? "pending",
       lineItems: body.lineItems ?? [],
+      fees: body.fees ?? [],
       notes: body.notes ?? null,
     })
     .returning();

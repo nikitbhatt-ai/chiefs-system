@@ -626,10 +626,34 @@ export const purchaseOrders = pgTable("purchase_orders", {
   expectedAt: timestamp("expected_at"),
   receivedAt: timestamp("received_at"),
   lineItems: jsonb("line_items").$type<POLineItem[]>().default([]),
+  // Vendor charges that aren't parts (shipping, handling, customs…). `total`
+  // above is lines + fees. See src/lib/poFees.ts for how each kind is treated.
+  fees: jsonb("fees").$type<POFee[]>().notNull().default([]),
+  // Non-freight fees already accrued to the ledger, in integer cents. Doubles as
+  // the post-once latch (a second receipt on the same PO won't re-expense them)
+  // and as the extra GRNI accrual that a vendor bill has to relieve — see
+  // accruedRemainingForPo in src/lib/ap.ts. Freight is NOT counted here: it is
+  // capitalized into the receipt layers, so part_receipts already carries it.
+  feesAccruedCents: integer("fees_accrued_cents").notNull().default(0),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+// A non-part charge on a purchase order. `kind` drives the accounting:
+//   freight → capitalized into the received parts' landed cost (FIFO layer).
+//   other   → expensed to 5230 Purchase Fees & Surcharges on first receipt.
+// `fixed` marks the standing Freight/shipping row the PO editor always shows
+// (mirrors the fixed-vs-custom fee split on quotes). There is at most one, it
+// is always kind 'freight', and it can't be removed — only zeroed. Custom rows
+// are the ones the team adds themselves and may be either kind.
+export type POFee = {
+  id?: string;
+  description: string;
+  amount: number;
+  kind: "freight" | "other";
+  fixed?: boolean;
+};
 
 // Purchase-order line. Stored in purchase_orders.line_items (jsonb). Phase 4
 // adds: a stable `id` (so receiving keys on identity, not array position, and

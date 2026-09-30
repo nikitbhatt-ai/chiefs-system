@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { POLineItem } from "@/db/schema";
+import type { POLineItem, POFee } from "@/db/schema";
 import { PartSearchCombobox } from "@/components/PartSearchCombobox";
+import { FIXED_FREIGHT_LABEL, feeTotals, withFixedFreight } from "@/lib/poFees";
 import { PO_MANUAL_STATUSES, poStatusLabel } from "@/lib/poStatus";
 import { SubmitButton } from "@/components/SubmitButton";
 
@@ -18,6 +19,7 @@ export function POEditor({
   notes,
   expectedAt,
   initialLines,
+  initialFees,
   vendors,
   promos,
   status,
@@ -29,6 +31,7 @@ export function POEditor({
   notes: string;
   expectedAt: string;
   initialLines: POLineItem[];
+  initialFees: POFee[];
   vendors: { id: string; name: string }[];
   promos: PromoRef[];
   status: string;
@@ -36,14 +39,31 @@ export function POEditor({
   receivePO: (formData: FormData) => Promise<void>;
 }) {
   const [lines, setLines] = useState<POLineItem[]>(initialLines);
+  // Always carries the standing Freight/shipping row at index 0, synthesized
+  // when the PO hasn't got one yet, so the section is never empty and the team
+  // types the shipping cost straight in.
+  const [fees, setFees] = useState<POFee[]>(() => withFixedFreight(initialFees));
   const [vendorId, setVendorId] = useState(initialVendorId);
   const [promoId, setPromoId] = useState("");
   const [promoMsg, setPromoMsg] = useState<string | null>(null);
 
-  const total = useMemo(
+  const subtotal = useMemo(
     () => lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0), 0),
     [lines],
   );
+  const { freightCents, otherCents, totalCents: feeCents } = useMemo(() => feeTotals(fees), [fees]);
+  const total = subtotal + feeCents / 100;
+
+  function updateFee(i: number, patch: Partial<POFee>) {
+    setFees((prev) => prev.map((f, idx) => (idx === i ? { ...f, ...patch } : f)));
+  }
+  function removeFee(i: number) {
+    // The fixed Freight/shipping row is never removable — zero it instead.
+    setFees((prev) => prev.filter((f, idx) => idx !== i || f.fixed));
+  }
+  function addCustomFee() {
+    setFees((prev) => [...prev, { description: "", amount: 0, kind: "other" }]);
+  }
 
   function update(i: number, patch: Partial<POLineItem>) {
     setLines((prev) => prev.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
@@ -118,6 +138,7 @@ export function POEditor({
       <form action={saveDraft} className="space-y-3">
         <input type="hidden" name="id" value={id} />
         <input type="hidden" name="lines" value={JSON.stringify(lines)} />
+        <input type="hidden" name="fees" value={JSON.stringify(fees)} />
         <div className="bg-surface border border-white/5 rounded-lg p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
           <select
             name="vendorId"
@@ -317,6 +338,142 @@ export function POEditor({
           </div>
         </div>
 
+        {/* Fees — shipping and any other vendor charge that isn't a part */}
+        <div className="bg-surface border border-white/5 rounded-lg overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-white/5 flex items-center justify-between">
+            <h3 className="text-xs font-body font-semibold text-white uppercase tracking-wider">Freight/shipping</h3>
+            {!fullyReceived ? (
+              <button
+                type="button"
+                onClick={addCustomFee}
+                className="text-[11px] font-body text-amber-400 hover:text-amber-300"
+              >
+                + Add custom line
+              </button>
+            ) : null}
+          </div>
+
+          {/* Same treatment as the line grid above: too narrow to crush onto a
+              phone, so it scrolls sideways inside this box. Fewer columns than
+              the line table, so it needs less room. */}
+          <div className="scroll-x">
+          <div className="min-w-[480px]">
+          <div className="px-4 py-2 grid grid-cols-12 gap-2 text-[10px] uppercase tracking-wider text-zinc-500 font-body bg-black/20 border-b border-white/5">
+            <span className="col-span-3">Type</span>
+            <span className="col-span-6">Description</span>
+            <span className="col-span-2 text-right">Amount</span>
+            <span className="col-span-1" />
+          </div>
+
+          <div className="divide-y divide-white/5">
+            {fees.map((f, i) =>
+              f.fixed ? (
+                // The standing Freight/shipping line: always here, always
+                // freight, never removable. The team only types the amount.
+                <div key={f.id ?? i} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body">
+                  <span className="col-span-3 text-[9px] uppercase tracking-wider">
+                    <span className="bg-amber-500/15 text-amber-300 rounded px-1.5 py-0.5">Fixed</span>
+                  </span>
+                  <span
+                    className="col-span-6 text-white"
+                    title="Spread across the parts on this PO so their cost reflects what it took to land them"
+                  >
+                    {FIXED_FREIGHT_LABEL}
+                  </span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={f.amount ?? 0}
+                    onChange={(e) => updateFee(i, { amount: Number(e.target.value) })}
+                    disabled={fullyReceived}
+                    placeholder="0.00"
+                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right disabled:opacity-60"
+                  />
+                  <span className="col-span-1" />
+                </div>
+              ) : (
+                <div key={f.id ?? i} className="px-4 py-3 grid grid-cols-12 gap-2 items-center text-xs font-body">
+                  <select
+                    value={f.kind}
+                    onChange={(e) => updateFee(i, { kind: e.target.value as POFee["kind"] })}
+                    disabled={fullyReceived}
+                    title={
+                      f.kind === "freight"
+                        ? "Capitalized: spread across the parts on this PO so their cost reflects what it took to land them"
+                        : "Expensed to Purchase Fees & Surcharges when the order is first received"
+                    }
+                    className="col-span-3 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
+                  >
+                    <option value="freight">Shipping / freight</option>
+                    <option value="other">Other fee</option>
+                  </select>
+                  <input
+                    value={f.description ?? ""}
+                    onChange={(e) => updateFee(i, { description: e.target.value })}
+                    disabled={fullyReceived}
+                    placeholder={f.kind === "freight" ? "Additional freight…" : "Handling, customs, surcharge…"}
+                    className="col-span-6 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white disabled:opacity-60"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={f.amount ?? 0}
+                    onChange={(e) => updateFee(i, { amount: Number(e.target.value) })}
+                    disabled={fullyReceived}
+                    placeholder="0.00"
+                    className="col-span-2 bg-black/40 border border-white/10 rounded px-2 py-1.5 text-white text-right disabled:opacity-60"
+                  />
+                  {!fullyReceived ? (
+                    <button
+                      type="button"
+                      onClick={() => removeFee(i)}
+                      className="col-span-1 text-[11px] text-zinc-500 hover:text-red-400"
+                    >
+                      Remove
+                    </button>
+                  ) : (
+                    <span className="col-span-1" />
+                  )}
+                </div>
+              ),
+            )}
+          </div>
+          </div>
+          </div>
+
+          {/* Totals roll-up */}
+          <div className="px-4 py-3 border-t border-white/5 bg-black/20 space-y-1 text-xs font-body">
+            <div className="flex justify-between text-zinc-400">
+              <span>Parts subtotal</span>
+              <span>{fmt(subtotal)}</span>
+            </div>
+            {freightCents > 0 ? (
+              <div className="flex justify-between text-zinc-400">
+                <span>Shipping &amp; freight</span>
+                <span>{fmt(freightCents / 100)}</span>
+              </div>
+            ) : null}
+            {otherCents > 0 ? (
+              <div className="flex justify-between text-zinc-400">
+                <span>Other fees</span>
+                <span>{fmt(otherCents / 100)}</span>
+              </div>
+            ) : null}
+            <div className="flex justify-between text-white font-semibold pt-1 border-t border-white/5">
+              <span>Total</span>
+              <span>{fmt(total)}</span>
+            </div>
+          </div>
+
+          <p className="px-4 pb-3 text-[11px] text-zinc-500 font-body">
+            Shipping &amp; freight is spread across the parts on this PO by value, so each part&apos;s cost reflects
+            what it took to land it. Other fees are expensed when the order is first received. Add custom lines for
+            anything else the vendor charges.
+          </p>
+        </div>
+
         <div className="bg-surface border border-white/5 rounded-lg p-4">
           <label className="text-[10px] uppercase tracking-wider text-zinc-500 font-body block mb-1">Notes</label>
           <textarea
@@ -353,6 +510,9 @@ export function POEditor({
           <p className="text-[11px] text-zinc-400 font-body">
             For each line, enter the qty arriving in this shipment. Each line creates a costing layer at its unit cost —
             package lines land at their allocated cost, individual lines at the price paid.
+            {freightCents > 0
+              ? " Shipping is added on top as landed cost, so the layer carries each part's share of the freight."
+              : ""}
           </p>
           <div className="space-y-2">
             {lines.length === 0 ? (
