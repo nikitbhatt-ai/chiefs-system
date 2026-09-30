@@ -2,9 +2,12 @@ import { notFound } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { quotes, customers } from "@/db/schema";
+import { quotes, customers, upfitConfigs } from "@/db/schema";
 import { AppShell } from "@/components/AppShell";
-import { QuoteTabs } from "@/components/QuoteTabs";
+import { EmailCustomerButton } from "@/components/EmailCustomerButton";
+import { UpfitDiagramPreview } from "@/components/upfit/UpfitDiagramPreview";
+import { getTemplate } from "@/lib/upfit/templates";
+import { BRANDING } from "@/lib/pdf/branding";
 import { QuoteEditor, type QuoteLine } from "./QuoteEditor";
 import { QuoteWorkflowStrip } from "./QuoteWorkflowStrip";
 import { upsertQuoteLink } from "@/lib/customerDocLinks";
@@ -119,6 +122,15 @@ export default async function QuotePage({
     .orderBy(customers.name);
 
   const initial = (q.lineItems as unknown as QuoteLine[]) ?? [];
+  const [config] = await db.select().from(upfitConfigs).where(eq(upfitConfigs.quoteId, q.id));
+  const [customer] = q.customerId
+    ? await db
+        .select({ name: customers.name, email: customers.email })
+        .from(customers)
+        .where(eq(customers.id, q.customerId))
+    : [];
+  const configTemplate = config ? getTemplate(config.bodyStyle) : null;
+  const lightCount = config?.pins?.length ?? 0;
   // Internal average cost per part, so the editor can show cost and margin per
   // line. Same resolver the documents use, so the numbers agree.
   const { partCosts } = await quoteDocumentFacts(q);
@@ -128,9 +140,15 @@ export default async function QuotePage({
       title={q.quoteNumber ?? "Quote"}
       subtitle={`Status: ${q.status} · Stage: ${q.workflowStage.replace(/_/g, " ")}`}
     >
-      <QuoteTabs quoteId={q.id} active="quote" />
-
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <EmailCustomerButton
+          quoteId={q.id}
+          quoteNumber={q.quoteNumber ?? "estimate"}
+          customerName={customer?.name ?? null}
+          defaultTo={customer?.email ?? ""}
+          hasConfiguration={!!config}
+          companyName={BRANDING.companyName}
+        />
         <a
           href={`/api/pdf/quotes/${q.id}`}
           target="_blank"
@@ -176,6 +194,47 @@ export default async function QuotePage({
         stages={WORKFLOW_STAGES}
         currentStage={q.workflowStage}
       />
+
+      {/* Vehicle & Lights — the lighting layout for this estimate. Visual
+          only: the parts are quoted as line items below. */}
+      <section className="bg-surface border border-white/10 rounded-2xl p-5 sm:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-ui font-bold text-lg text-white">Vehicle &amp; Lights</h2>
+          {config ? (
+            <div className="flex flex-wrap gap-2">
+              <a href={`/api/pdf/upfit/${q.id}`} className="btn-outline btn-sm">
+                Spec sheet PDF
+              </a>
+              <a href={`/quotes/${q.id}/upfit`} className="btn-outline btn-sm">
+                Edit Configuration
+              </a>
+            </div>
+          ) : null}
+        </div>
+        {config && configTemplate ? (
+          <div className="mt-4 space-y-3">
+            <div className="font-ui font-bold text-base text-white">
+              {config.vehicleLabel?.trim() || configTemplate.label}
+              <span className="text-sm text-zinc-400 font-body font-normal">
+                {" "}
+                · {lightCount} {lightCount === 1 ? "light" : "lights"}
+              </span>
+            </div>
+            <UpfitDiagramPreview bodyStyle={config.bodyStyle} pins={config.pins ?? []} />
+          </div>
+        ) : (
+          <div className="text-center py-8">
+            <div className="font-ui font-bold text-xl text-white">No vehicle configured</div>
+            <p className="text-sm text-zinc-400 mt-2 max-w-xl mx-auto">
+              Add a vehicle to draw the lighting layout. The diagram is visual only — parts are quoted as
+              line items separately.
+            </p>
+            <a href={`/quotes/${q.id}/upfit`} className="btn-cta mt-5">
+              + Configure Vehicle
+            </a>
+          </div>
+        )}
+      </section>
 
       <QuoteEditor
         id={q.id}

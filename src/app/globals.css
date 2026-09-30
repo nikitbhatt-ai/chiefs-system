@@ -30,6 +30,15 @@
 @theme {
   --font-display: "Syne", ui-sans-serif, system-ui, sans-serif;
   --font-body: "DM Sans", ui-sans-serif, system-ui, sans-serif;
+  /* Squared-off face for headings, labels and buttons on the estimate +
+     vehicle configurator screens (the upfithq-style look). */
+  --font-ui: "Rajdhani", ui-sans-serif, system-ui, sans-serif;
+
+  /* Call-to-action orange. Fixed across themes: it reads on navy, black
+     and cream alike, and its dark label keeps contrast in all three. */
+  --color-cta: #e36b36;
+  --color-cta-hover: #ef7c48;
+  --color-cta-ink: #1c120c;
 
   /* Declared here so Tailwind generates bg-surface / border-surface / etc.
      The per-theme blocks below only change the values. */
@@ -462,4 +471,101 @@ button[data-pending]::after {
     background: #ffffff;
     color: #000000;
   }
+}
+
+/* ── Estimate / configurator UI kit ─────────────────────────────────────────
+   The simplified estimate + vehicle configurator screens use one squared-off
+   face (Rajdhani) for headings, labels and buttons, DM Sans for reading text,
+   and two button shapes: a tall orange call-to-action and an outlined
+   secondary. Everything except the orange derives from the theme palette, so
+   day mode still flips correctly. */
+.font-ui {
+  font-family: var(--font-ui);
+  --font-weight-normal: 500;
+  --font-weight-medium: 600;
+  --font-weight-semibold: 700;
+  --font-weight-bold: 700;
+}
+
+.label-caps {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: calc(11px + var(--type-bump));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--color-zinc-400);
+}
+
+.btn-cta,
+.btn-outline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: calc(14px + var(--type-bump));
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  border-radius: 0.75rem;
+  padding: 0.7rem 1.25rem;
+  white-space: nowrap;
+}
+.btn-cta {
+  background-color: var(--color-cta);
+  color: var(--color-cta-ink);
+  border: 1px solid transparent;
+}
+.btn-cta:hover:not(:disabled) {
+  background-color: var(--color-cta-hover);
+}
+.btn-outline {
+  background-color: color-mix(in srgb, var(--color-white) 2%, transparent);
+  color: var(--color-zinc-200);
+  border: 1px solid color-mix(in srgb, var(--color-white) 16%, transparent);
+}
+.btn-outline:hover:not(:disabled) {
+  background-color: color-mix(in srgb, var(--color-white) 7%, transparent);
+  color: var(--color-white);
+}
+.btn-cta:disabled,
+.btn-outline:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.btn-sm {
+  font-size: calc(12px + var(--type-bump));
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.6rem;
+}
+
+/* Segmented choice (Solo / Duo / Trio, shapes, sizes). */
+.seg-btn {
+  font-family: var(--font-ui);
+  font-weight: 700;
+  font-size: calc(12px + var(--type-bump));
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 0.55rem 0.5rem;
+  border-radius: 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--color-white) 14%, transparent);
+  color: var(--color-zinc-300);
+  background: transparent;
+}
+.seg-btn[aria-pressed="true"] {
+  border-color: var(--color-cta);
+  color: var(--color-cta);
+  background-color: color-mix(in srgb, var(--color-cta) 10%, transparent);
+}
+
+/* Lens color dot. */
+.lens-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 9999px;
+  border: 2px solid rgb(0 0 0 / 0.45);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-white) 12%, transparent);
+}
+.lens-dot[aria-pressed="true"] {
+  box-shadow: 0 0 0 3px var(--color-cta);
 }
