@@ -1238,7 +1238,38 @@ export function QuoteEditor({
           <Row label="Discount" value={`− ${fmt(totals.discountTotal)}`} />
           <Row label="Labor" value={fmt(totals.laborTotal)} />
           <Row label="Fees" value={fmt(totals.feeTotal)} />
-          <Row label={taxExempt ? "Tax (exempt)" : `Tax (${Number(taxRate) || 0}%)`} value={fmt(totals.tax)} />
+          {/* Tax: per-estimate exempt toggle + the rate sales types in. Same
+              state as the sidebar's Tax card. */}
+          <div className="rounded-lg border border-white/10 px-3 py-2.5 space-y-2 mt-1">
+            <label className="flex items-center justify-between gap-3 cursor-pointer">
+              <span className={taxExempt ? "text-[var(--color-cta)] font-semibold" : "text-zinc-300"}>
+                Tax exempt
+              </span>
+              <Toggle checked={taxExempt} onChange={setTaxExempt} label="Tax exempt (totals)" />
+            </label>
+            <div className="flex items-center justify-between gap-3">
+              <label className="flex items-center gap-2 text-zinc-400">
+                Tax
+                <span className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.001"
+                    inputMode="decimal"
+                    value={taxExempt ? "" : taxRate}
+                    onChange={(e) => setTaxRate(e.target.value)}
+                    disabled={taxExempt}
+                    placeholder={taxExempt ? "exempt" : "0"}
+                    aria-label="Tax percentage"
+                    className="w-24 bg-black/40 border border-white/10 rounded-md pl-2 pr-6 py-1 text-right text-white disabled:opacity-50 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-500 pointer-events-none">%</span>
+                </span>
+              </label>
+              <span className="text-white">{fmt(totals.tax)}</span>
+            </div>
+          </div>
           <div className="border-t border-white/10 pt-2 mt-2">
             <Row
               label="Grand total"
@@ -1367,19 +1398,10 @@ export function QuoteEditor({
             <Toggle checked={taxExempt} onChange={setTaxExempt} label="Tax exempt" />
           </label>
           {!taxExempt ? (
-            <label className="block">
-              <span className="label-caps">Tax rate %</span>
-              <input
-                name="taxRate"
-                type="number"
-                min="0"
-                step="0.01"
-                value={taxRate}
-                onChange={(e) => setTaxRate(e.target.value)}
-                placeholder="e.g. 8.25"
-                className="mt-1.5 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
-              />
-            </label>
+            <p className="text-xs text-zinc-400">
+              Rate: <span className="text-white">{Number(taxRate) || 0}%</span> — set it in the totals under the
+              line items.
+            </p>
           ) : null}
         </section>
 

@@ -1809,6 +1809,12 @@ inside Parts** (Part 2, below).
 - [x] **Sidebar**: Customer card (email, phone, location, View Full Profile),
       **Tax** card (Tax Exempt switch; tax-rate box when not exempt), Status.
       Picking a tax-exempt customer turns the switch on.
+- [x] **Tax in the totals** (2026-09-30, user request): the totals under the
+      line items carry the **Tax exempt** toggle and a **custom Tax %** box
+      sales types into (0–100, up to 3 decimals, e.g. 8.25). Exempt disables
+      the box and charges $0; the typed rate is kept, so switching exemption
+      off restores it. The sidebar Tax card's switch is the same setting and
+      shows the current rate.
 - [x] **Tax rate is stored** on the estimate now (`tax_rate`); older
       estimates still recover it from the stored tax.
 - [x] PDF + print view print the title, customer PO #, valid-until date and

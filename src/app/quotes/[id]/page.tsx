@@ -52,7 +52,8 @@ async function saveQuote(formData: FormData) {
   // longer enforced anywhere — they were blocking saves silently and
   // surfacing as a "status revert to draft" on the quote editor.
 
-  const taxRate = Math.max(0, Number(formData.get("taxRate") ?? "0") || 0);
+  // 0–100%. The tax_rate column is numeric(6,3), so round to 3 places.
+  const taxRate = Math.round(Math.min(100, Math.max(0, Number(formData.get("taxRate") ?? "0") || 0)) * 1000) / 1000;
   // Estimate-level fields. Absent (older client) → keep what's stored.
   const has = (k: string) => formData.has(k);
   const str = (k: string, max: number) => String(formData.get(k) ?? "").trim().slice(0, max) || null;
