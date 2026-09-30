@@ -256,6 +256,11 @@ export type QuoteLineItem = {
   unitPrice: number;
   total: number;
   partId?: string;
+  // Sales' free-text note for this line. A SHOP note: it prints on the de-priced
+  // work-order build sheet and nowhere else — never on the customer-facing
+  // quote, invoice, or print view. Stored in the lineItems jsonb, so adding it
+  // needed no migration.
+  notes?: string;
   // Weighted-average cost snapshotted at invoice conversion (Phase 2), so the
   // internal margin view reflects cost at the time of sale rather than today's
   // moving average. Absent on quotes not yet invoiced.

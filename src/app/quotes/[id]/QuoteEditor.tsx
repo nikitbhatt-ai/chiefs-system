@@ -15,7 +15,13 @@ import { registerQuoteFlusher } from "@/lib/quoteFlush";
 // groupId + the package's title; they render together under that title
 // on the editor, the quote PDF, and the print view (Shopmonkey-style
 // sections) so a bundle's parts stay together and nothing is missed.
-type LineGroup = { groupId?: string; groupTitle?: string };
+//
+// `notes` is the sales team's free-text note for the line. It is a SHOP note:
+// it prints on the de-priced work-order build sheet and nowhere else — never on
+// the customer-facing quote, invoice, or print view — so a rep can write
+// plainly ("mount driver side", "customer supplies bracket") without it
+// reaching the customer.
+type LineGroup = { groupId?: string; groupTitle?: string; notes?: string };
 
 export type QuoteLine =
   | ({
@@ -466,6 +472,22 @@ export function QuoteEditor({
       dragOverIndex === i && draggingIndex !== i ? "ring-1 ring-amber-500/40" : ""
     }`;
 
+  // Per-line shop note, on its own full-width line under the row it belongs to
+  // (col-span-12 wraps inside the same 12-col grid). Prints on the work-order
+  // build sheet only — never on a customer document.
+  const renderNoteRow = (i: number, note: string | undefined) => (
+    <div className="col-span-12 flex items-center gap-2">
+      <span className="text-[9px] uppercase tracking-wider text-zinc-600 shrink-0">Note</span>
+      <input
+        value={note ?? ""}
+        onChange={(e) => updateLine(i, { notes: e.target.value })}
+        placeholder="Shop note — prints on the work order only (mounting, wiring, customer-supplied…)"
+        aria-label="Shop note for this line"
+        className="flex-1 min-w-0 bg-black/20 border border-white/5 rounded px-2 py-1 text-[11px] text-zinc-300 placeholder:text-zinc-600 focus:border-white/20"
+      />
+    </div>
+  );
+
   const renderItemRow = (i: number, reorder: { upTo: number | null; downTo: number | null } | null) => {
     const l = lines[i];
     if (l.kind !== "item") return null;
@@ -580,6 +602,7 @@ export function QuoteEditor({
           ) : null}
           <span className="text-zinc-400">{`Line total: ${fmt(lineNet(l))}`}</span>
         </div>
+        {renderNoteRow(i, l.notes)}
       </div>
     );
   };
@@ -629,6 +652,7 @@ export function QuoteEditor({
         >
           Remove
         </button>
+        {renderNoteRow(i, l.notes)}
       </div>
     );
   };
@@ -669,6 +693,7 @@ export function QuoteEditor({
         >
           Remove
         </button>
+        {renderNoteRow(i, l.notes)}
       </div>
     );
   };

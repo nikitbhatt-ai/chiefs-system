@@ -258,6 +258,9 @@ export default async function WorkOrderDetailPage({ params }: { params: Promise<
               ) : (
                 partLines.map((l, i) => (
                   <tr key={i} className="border-t border-white/5">
+                    {/* Sales' per-line notes deliberately do NOT render here.
+                        They belong to the printed work-order build sheet and
+                        nowhere else, so this table shows the part only. */}
                     <td className="px-3 py-2 text-xs text-white">{l.name}</td>
                     <td className="px-3 py-2 text-xs">{l.brand ?? "—"}</td>
                     <td className="px-3 py-2 text-xs font-mono">{l.partNumber ?? "—"}</td>
