@@ -149,6 +149,18 @@ export default async function QuotePage({
             Download invoice PDF
           </a>
         )}
+        {/* The shop's build sheet: same line items with every price stripped
+            out. Keyed on the estimate so it's here rather than only on the
+            work-order page, and so it works before a work order exists. */}
+        <a
+          href={`/api/pdf/work-orders/by-quote/${q.id}`}
+          target="_blank"
+          rel="noopener"
+          title="Build sheet for the shop: part, brand, part # and qty, plus any line notes. No pricing."
+          className="text-[11px] font-body bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 border border-blue-500/30 rounded-md px-3 py-1.5"
+        >
+          Download work order
+        </a>
         <a
           href={`/quotes/${q.id}/print`}
           target="_blank"

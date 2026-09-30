@@ -20,11 +20,19 @@ import {
 } from "./templates/purchaseOrder";
 import { UpfitDocument, type UpfitPdfData } from "./templates/upfit";
 import { WorkOrderDocument, type WorkOrderData } from "./templates/workOrder";
-import { resolvePartsFromLineItems } from "@/lib/workOrderParts";
+import { resolvePartsFromLineItems, otherLineNotes } from "@/lib/workOrderParts";
 import { resolveVehicleLabel } from "@/lib/upfit/vehicleLabel";
 import { quoteDocumentFacts } from "@/lib/quoteDocumentFacts";
 
-export type RecordType = "quote" | "invoice" | "purchase_order" | "upfit" | "work_order";
+export type RecordType =
+  | "quote"
+  | "invoice"
+  | "purchase_order"
+  | "upfit"
+  | "work_order"
+  // Same build sheet as "work_order", keyed on the ESTIMATE, so sales can pull
+  // it from the quote before a work order exists.
+  | "work_order_from_quote";
 
 export type ResolvedPdf = {
   buffer: Buffer;
@@ -126,12 +134,14 @@ async function resolveWorkOrder(workOrderId: string): Promise<WorkOrderData | nu
     : null;
 
   let lineItems: WorkOrderData["lineItems"] = [];
+  let lineNotes: WorkOrderData["lineNotes"] = [];
   let quoteNumber: string | null = null;
   let quoteForVehicle: typeof quotes.$inferSelect | null = null;
   if (wo.quoteId) {
     const [q] = await db.select().from(quotes).where(eq(quotes.id, wo.quoteId));
     if (q) {
       lineItems = await resolvePartsFromLineItems(q.lineItems);
+      lineNotes = otherLineNotes(q.lineItems);
       quoteNumber = q.quoteNumber;
       quoteForVehicle = q;
     }
@@ -149,7 +159,43 @@ async function resolveWorkOrder(workOrderId: string): Promise<WorkOrderData | nu
     customerAddress: customer?.address ?? null,
     vehicleSummary: vehicleSummary || null,
     lineItems,
+    lineNotes,
     notes: wo.notes ?? null,
+  };
+}
+
+/**
+ * The same build sheet, resolved straight from an ESTIMATE rather than a work
+ * order, so sales can pull it from the quote before a work order exists (one is
+ * only created when the deal reaches Won / confirmed). When the quote already
+ * has a work order we borrow its number and status so the two documents match;
+ * otherwise the sheet stands on the estimate alone.
+ */
+async function resolveWorkOrderFromQuote(quoteId: string): Promise<WorkOrderData | null> {
+  const [q] = await db.select().from(quotes).where(eq(quotes.id, quoteId));
+  if (!q) return null;
+
+  const [wo] = await db.select().from(workOrders).where(eq(workOrders.quoteId, q.id));
+
+  const customerId = wo?.customerId ?? q.customerId ?? null;
+  const customer = customerId
+    ? (await db.select().from(customers).where(eq(customers.id, customerId)))[0] ?? null
+    : null;
+
+  return {
+    workOrderId: wo?.id ?? q.id,
+    woNumber: wo?.woNumber ?? null,
+    quoteNumber: q.quoteNumber,
+    createdAt: wo?.createdAt ?? q.createdAt,
+    // No work order yet: report the estimate's own workflow stage so the sheet
+    // never claims a shop status the job hasn't reached.
+    status: wo?.status ?? q.workflowStage,
+    customerName: customer?.name ?? null,
+    customerAddress: customer?.address ?? null,
+    vehicleSummary: (await resolveVehicleLabel(q)) || null,
+    lineItems: await resolvePartsFromLineItems(q.lineItems),
+    lineNotes: otherLineNotes(q.lineItems),
+    notes: wo?.notes ?? null,
   };
 }
 
@@ -198,10 +244,15 @@ export async function renderRecordPdf(
     const buffer = await renderToBuffer(<PurchaseOrderDocument data={data} />);
     return { buffer, fileName, template: "purchase_order_default" };
   }
-  if (recordType === "work_order") {
-    const data = await resolveWorkOrder(recordId);
+  if (recordType === "work_order" || recordType === "work_order_from_quote") {
+    const data =
+      recordType === "work_order"
+        ? await resolveWorkOrder(recordId)
+        : await resolveWorkOrderFromQuote(recordId);
     if (!data) return null;
-    const docNumber = data.woNumber ?? `WO-${data.workOrderId.slice(0, 8)}`;
+    // Falls back to the estimate number when the job has no work order yet, so
+    // the filename still names the job rather than a bare uuid fragment.
+    const docNumber = data.woNumber ?? data.quoteNumber ?? `WO-${data.workOrderId.slice(0, 8)}`;
     const dateStr = new Date(data.createdAt).toISOString().slice(0, 10).replace(/-/g, "");
     const fileName = `WorkOrder_${docNumber}_${dateStr}.pdf`;
     const buffer = await renderToBuffer(<WorkOrderDocument data={data} />);
