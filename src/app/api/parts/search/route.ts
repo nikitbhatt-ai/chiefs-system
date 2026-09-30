@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, asc, eq, ilike, or } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull, or } from "drizzle-orm";
 import { auth } from "@/auth";
 import { db } from "@/db";
-import { parts } from "@/db/schema";
+import { parts, vendors } from "@/db/schema";
+import { committedByPart } from "@/lib/partAvailability";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +18,14 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const q = (url.searchParams.get("q") ?? "").trim();
   const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit")) || 25));
+  // Add Line Item picker: ?manufacturerId=<vendor id> | none, and ?stock=1 to
+  // include on-hand / committed / available counts.
+  const manufacturerId = (url.searchParams.get("manufacturerId") ?? "").trim();
+  const withStock = url.searchParams.get("stock") === "1";
 
   const filters = [eq(parts.archived, false)];
+  if (manufacturerId === "none") filters.push(isNull(parts.manufacturerId));
+  else if (/^[0-9a-f-]{36}$/i.test(manufacturerId)) filters.push(eq(parts.manufacturerId, manufacturerId));
   if (q) {
     // Match every whitespace-separated token (AND), each against any field
     // (sku, name, description, manufacturer part #, category). So "push bumper"
@@ -32,6 +39,8 @@ export async function GET(req: Request) {
         ilike(parts.description, like),
         ilike(parts.mfgPartNumber, like),
         ilike(parts.category, like),
+        // A scanned barcode arrives as one token.
+        ilike(parts.barcode, like),
       );
       if (orCond) filters.push(orCond);
     }
@@ -53,11 +62,23 @@ export async function GET(req: Request) {
       avgCost: parts.avgCost,
       restricted: parts.restricted,
       restrictionCategory: parts.restrictionCategory,
+      description: parts.description,
+      manufacturerId: parts.manufacturerId,
+      manufacturerName: vendors.name,
+      quantityOnHand: parts.quantityOnHand,
     })
     .from(parts)
+    .leftJoin(vendors, eq(vendors.id, parts.manufacturerId))
     .where(and(...filters))
     .orderBy(asc(parts.sku))
     .limit(limit);
 
-  return NextResponse.json(rows);
+  if (!withStock) return NextResponse.json(rows);
+  const committed = await committedByPart(rows.map((r) => r.id));
+  return NextResponse.json(
+    rows.map((r) => {
+      const c = committed.get(r.id) ?? 0;
+      return { ...r, committed: c, available: (r.quantityOnHand ?? 0) - c };
+    }),
+  );
 }
