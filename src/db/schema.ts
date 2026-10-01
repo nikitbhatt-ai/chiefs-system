@@ -1146,6 +1146,25 @@ export const upfitSnapPoints = pgTable("upfit_snap_points", {
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
+// Configurator light types: the "Choose a light type" list, editable in
+// Settings → Light types. `key` is what pins store in `lightType`; the
+// built-in keys (lightbar, tion, …) are seeded by docs/sql/upfit_light_types.sql.
+export const upfitLightTypes = pgTable("upfit_light_types", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  key: text("key").notNull().unique(),
+  label: text("label").notNull(),
+  dims: text("dims"),
+  // "lights" | "accessories"
+  group: text("group").notNull().default("lights"),
+  // rect | circle | pushbar | pushbar_wrap
+  shape: text("shape").notNull().default("rect"),
+  // PinSizeKey (small, medium, large, strip_small, strip_medium, strip_large)
+  size: text("size").notNull().default("medium"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  archived: boolean("archived").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 // Configurator starter layouts: a saved set of lights for one vehicle
 // template ("Standard Tahoe patrol"), applied to a new diagram in one click.
 export const upfitStarters = pgTable("upfit_starters", {

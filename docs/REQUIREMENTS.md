@@ -1770,7 +1770,18 @@ user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
   );
   CREATE INDEX IF NOT EXISTS upfit_starters_body_style_idx ON upfit_starters (body_style);
   ```
-- [ ] Editable light-type list in Settings (today it's the code list above).
+- [x] **Editable light-type list** (2026-09-30) — **Settings → Light types**
+      (`/settings/light-types`, Admin menu): add a type (name, size text shown
+      in the picker, group Lights / Vehicle accessories, shape, starting size,
+      order), edit any field, **Hide / Show** (hidden types leave the picker;
+      placed lights keep their name), and **×** delete (managers). Stored in
+      `upfit_light_types`; the configurator reads it via `loadLightTypes()`
+      and falls back to the built-in `LIGHT_TYPES` if the table is missing or
+      empty. `docs/sql/upfit_light_types.sql` creates the table and copies in
+      the built-in types (keys unchanged, so existing pins still match).
+      **Legacy Lightbar** added to the built-in list (2026-10-01, user
+      request; key `legacy_lightbar`, strip-large bar, order 15 — right after
+      Lightbar).
 
 ### Auto-save everywhere on the estimate (2026-09-30)
 
