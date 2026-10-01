@@ -459,6 +459,7 @@ type UpfitPinShape = "rect" | "circle" | "pushbar" | "pushbar_wrap";
 
 export const LIGHT_TYPES: LightType[] = [
   { key: "lightbar", label: "Lightbar", dims: "54 × 3.5 in", group: "lights", shape: "rect", size: "strip_large" },
+  { key: "legacy_lightbar", label: "Legacy Lightbar", group: "lights", shape: "rect", size: "strip_large" },
   { key: "interior_lightbar", label: "Interior Lightbar", dims: "44 × 2 in", group: "lights", shape: "rect", size: "strip_medium" },
   { key: "mega_tion", label: "Mega T-Ion", dims: "11 × 1.4 in", group: "lights", shape: "rect", size: "large" },
   { key: "tion", label: "T-Ion", dims: "5.14 × 1.49 in", group: "lights", shape: "rect", size: "medium" },

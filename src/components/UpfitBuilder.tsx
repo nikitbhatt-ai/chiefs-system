@@ -885,7 +885,7 @@ export function UpfitBuilder({
                   <input
                     value={caption}
                     onChange={(e) => setCaption(e.target.value)}
-                    placeholder="e.g. WHELEN LIBERTY II"
+                    placeholder="e.g. LEGACY LIGHTBAR"
                     className="mt-1.5 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white"
                   />
                 </label>

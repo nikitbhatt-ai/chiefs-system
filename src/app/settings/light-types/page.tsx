@@ -99,7 +99,7 @@ function Fields({
 }) {
   return (
     <>
-      <input name="label" defaultValue={row?.label ?? ""} required placeholder="Name, e.g. Liberty II" aria-label="Name" className={inputCls} />
+      <input name="label" defaultValue={row?.label ?? ""} required placeholder="Name, e.g. Legacy Lightbar" aria-label="Name" className={inputCls} />
       <input name="dims" defaultValue={row?.dims ?? ""} placeholder="e.g. 54 × 3.5 in" aria-label="Size shown in the picker" className={inputCls} />
       <select name="group" defaultValue={row?.group ?? "lights"} aria-label="Group" className={inputCls}>
         {LIGHT_GROUPS.map((g) => (

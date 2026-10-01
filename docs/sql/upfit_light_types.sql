@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS upfit_light_types (
 -- Start from the list the configurator already ships with.
 INSERT INTO upfit_light_types (key, label, dims, "group", shape, size, sort_order) VALUES
   ('lightbar', 'Lightbar', '54 × 3.5 in', 'lights', 'rect', 'strip_large', 10),
+  ('legacy_lightbar', 'Legacy Lightbar', NULL, 'lights', 'rect', 'strip_large', 15),
   ('interior_lightbar', 'Interior Lightbar', '44 × 2 in', 'lights', 'rect', 'strip_medium', 20),
   ('mega_tion', 'Mega T-Ion', '11 × 1.4 in', 'lights', 'rect', 'large', 30),
   ('tion', 'T-Ion', '5.14 × 1.49 in', 'lights', 'rect', 'medium', 40),

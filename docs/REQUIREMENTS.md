@@ -1778,7 +1778,10 @@ user asked to mimic upfithq.app's estimate/configurator flow. Decisions:
       `upfit_light_types`; the configurator reads it via `loadLightTypes()`
       and falls back to the built-in `LIGHT_TYPES` if the table is missing or
       empty. `docs/sql/upfit_light_types.sql` creates the table and copies in
-      the 13 built-in types (keys unchanged, so existing pins still match).
+      the built-in types (keys unchanged, so existing pins still match).
+      **Legacy Lightbar** added to the built-in list (2026-10-01, user
+      request; key `legacy_lightbar`, strip-large bar, order 15 — right after
+      Lightbar).
 
 ### Auto-save everywhere on the estimate (2026-09-30)
 
